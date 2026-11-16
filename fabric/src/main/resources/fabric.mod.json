@@ -23,8 +23,9 @@
     "e4mc.mixins.json"
   ],
   "depends": {
-    "fabric": "*",
-    "minecraft": ">=1.18"
+    "fabric-api": "*",
+    "minecraft": "~${minecraft_version}",
+    "java": ">=${java_version}"
   },
   "provides": [
     "e4mc_minecraft"

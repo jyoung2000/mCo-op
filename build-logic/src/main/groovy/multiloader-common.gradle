@@ -1,0 +1,91 @@
+plugins {
+    id 'java-library'
+}
+
+repositories {
+    mavenCentral()
+    maven { name = 'Fabric'; url = uri('https://maven.fabricmc.net') }
+    // Upstream e4mc's libraries (netty-quic build, iroh-java, kaleido-config)
+    maven { url = uri('https://repo.sleeping.town/') }
+    maven { url = uri('https://maven.is-quite.gay/') }
+}
+
+// Libraries that end up inside the mod jar. Not transitive: Minecraft already ships netty, gson, slf4j and JNA.
+configurations {
+    bundled {
+        canBeResolved = true
+        canBeConsumed = false
+        transitive = false
+    }
+    compileOnly.extendsFrom bundled
+}
+
+dependencies {
+    bundled "io.netty.incubator:netty-incubator-codec-classes-quic:${quic_version}"
+    bundled "folk.sisby:kaleido-config:${kaleido_version}"
+    bundled "link.e4mc:iroh-java:${iroh_java_version}"
+    bundled "dev.dirs:directories:${dirs_version}"
+}
+
+base {
+    archivesName = "${mod_id}-${project.name}-${minecraft_version}"
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(java_version)
+}
+
+tasks.withType(Jar).configureEach {
+    from(rootProject.file('LICENSE')) {
+        rename { "${it}_${mod_name}" }
+    }
+}
+
+jar {
+
+    manifest {
+        attributes([
+                'Specification-Title'   : mod_name,
+                'Specification-Vendor'  : mod_author,
+                'Specification-Version' : project.jar.archiveVersion,
+                'Implementation-Title'  : project.name,
+                'Implementation-Version': project.jar.archiveVersion,
+                'Implementation-Vendor' : mod_author,
+                'Built-On-Minecraft'    : minecraft_version
+        ])
+    }
+}
+
+processResources {
+    var expandProps = [
+            'version'                      : version,
+            'group'                        : project.group, //Else we target the task's group.
+            'minecraft_version'            : minecraft_version,
+            'minecraft_version_range'      : minecraft_version_range,
+            'fabric_version'               : fabric_version,
+            'fabric_loader_version'        : fabric_loader_version,
+            'mod_name'                     : mod_name,
+            'mod_author'                   : mod_author,
+            'mod_id'                       : mod_id,
+            'license'                      : license,
+            'description'                  : project.description,
+            'neoforge_version'             : neoforge_version,
+            'neoforge_loader_version_range': neoforge_loader_version_range,
+            'credits'                      : credits,
+            'java_version'                 : java_version
+    ]
+
+    var jsonExpandProps = expandProps.collectEntries {
+        key, value -> [(key): value instanceof String ? value.replace('\n', '\\\\n') : value]
+    }
+
+    filesMatching(['META-INF/mods.toml', 'META-INF/neoforge.mods.toml']) {
+        expand expandProps
+    }
+
+    filesMatching(['pack.mcmeta', 'fabric.mod.json', '*.mixins.json']) {
+        expand jsonExpandProps
+    }
+
+    inputs.properties(expandProps)
+}

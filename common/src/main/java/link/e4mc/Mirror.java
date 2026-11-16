@@ -1,7 +1,6 @@
 package link.e4mc;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.components.ChatComponent;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
@@ -108,7 +107,7 @@ public class Mirror {
                          InvocationTargetException | ClassCastException ignored) {}
             }
         } else {
-            return new ClickEvent(ClickEvent.Action.RUN_COMMAND, command);
+            return new ClickEvent.RunCommand(command);
         }
         throw new RuntimeException("Could not locate any way to make a ClickEvent!");
     }
@@ -124,7 +123,7 @@ public class Mirror {
                          InvocationTargetException | ClassCastException ignored) {}
             }
         } else {
-            return new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, text);
+            return new ClickEvent.CopyToClipboard(text);
         }
         throw new RuntimeException("Could not locate any way to make a ClickEvent!");
     }
@@ -140,7 +139,7 @@ public class Mirror {
                          InvocationTargetException | ClassCastException ignored) {}
             }
         } else {
-            return new HoverEvent(HoverEvent.Action.SHOW_TEXT, text);
+            return new HoverEvent.ShowText(text);
         }
         throw new RuntimeException("Could not locate any way to make a ClickEvent!");
     }
@@ -279,29 +278,6 @@ public class Mirror {
     }
 
     public static void addMessage(Component message) {
-        Minecraft.getInstance().execute(() -> {
-            try {
-                Minecraft.getInstance().gui.getChat().addMessage(message);
-            } catch (NoSuchMethodError e) {
-                ChatComponent chat;
-                try {
-                    chat = Minecraft.getInstance().gui.getChat();
-                } catch (NoSuchMethodError ex) {
-                    try {
-                        var gui = Minecraft.getInstance().gui;
-                        var hud = gui.getClass().getField("hud").get(gui);
-                        chat = (ChatComponent) hud.getClass().getMethod("getChat").invoke(hud);
-                    } catch (Throwable exc) {
-                        E4mcClient.LOGGER.error("Failed to get client chat!");
-                        return;
-                    }
-                }
-                try {
-                    chat.getClass().getMethod("addClientSystemMessage", Component.class).invoke(chat, message);
-                } catch (Exception ex) {
-                    E4mcClient.LOGGER.error("Failed to add message to client chat!");
-                }
-            }
-        });
+        Minecraft.getInstance().execute(() -> Minecraft.getInstance().gui.hud.getChat().addClientSystemMessage(message));
     }
 }

@@ -1,5 +1,5 @@
 modLoader = "javafml"
-loaderVersion = "*"
+loaderVersion = "${neoforge_loader_version_range}"
 license = "MIT"
 
 [[mods]]
@@ -18,14 +18,14 @@ config = "e4mc.mixins.json"
 
 [[dependencies.e4mc]]
 modId = "neoforge"
-mandatory = true
+type = "required"
 versionRange = "*"
 ordering = "NONE"
 side = "BOTH"
 
 [[dependencies.e4mc]]
 modId = "minecraft"
-mandatory = true
-versionRange = "[1.18,)"
+type = "required"
+versionRange = "${minecraft_version_range}"
 ordering = "NONE"
 side = "BOTH"
