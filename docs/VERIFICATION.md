@@ -1,0 +1,56 @@
+# Verification
+
+Proof of each gate run. One entry per run, newest last.
+
+## M0 — 2026-11-16 — commit `b5c639a` — GATE NOT PASSED (1 jar-check item open)
+
+Machine: Windows 11, JDK 25.0.5 (Microsoft), Gradle 9.7.1. Full logs: `build-logs/m0-gate-*.log`, `build/selftest-logs/`.
+
+Commands, run once on this commit:
+
+| Command | Result | Time |
+| --- | --- | --- |
+| `./gradlew clean build` | BUILD SUCCESSFUL | 20s |
+| `./gradlew :core:test --rerun-tasks` | BUILD SUCCESSFUL, 10 tests, 0 failures | 9s |
+| `powershell -File scripts/selftest.ps1 -Suite all` | exit 0 | 132s |
+| `powershell -File scripts/jarcheck.ps1` | **exit 1** | <1s |
+| `powershell -File scripts/selftest.ps1 -Suite m0 -Online` | exit 0 | 30s |
+
+Scenarios (`m0`):
+
+- PASS `lan-join.fabric-fabric` 29.9s
+- PASS `lan-join.fabric-neoforge` 28.1s (Fabric host, NeoForge joiner)
+- PASS `lan-join.neoforge-fabric` 29.7s (NeoForge host, Fabric joiner)
+- PASS `status-ping` 27.8s (response `motd='DevA - dropin-selftest' players=1/8`)
+- PASS `prod-guard` 8.1s (`dropin.core.dev.DevSwitchesTest`, 10 tests)
+- PASS `tunnel-join` 30.0s (online smoke: host got a domain from the real e4mc relay, joiner connected by that domain)
+
+Jar check (`build/libs/dropin-0.1.0+mc26.3.jar`):
+
+- PASS exactly one jar
+- PASS `fabric.mod.json`
+- PASS `META-INF/neoforge.mods.toml`
+- PASS one mixin config (`dropin.mixins.json`)
+- PASS no class under `dropin/mc/selftest/`
+- PASS `dev.dirs` relocated (`dropin/shadow/dirs/`)
+- PASS `folk.sisby.kaleido` relocated (`dropin/shadow/kaleido/`)
+- **FAIL** `io.netty.incubator.codec.quic` not relocated (155 classes at the original name)
+- **FAIL** `link.e4mc.iroh` not relocated (10 classes at the original name)
+
+Why the two failures are left open instead of fixed: both libraries bind prebuilt native libraries, downloaded at runtime from
+`natives.e4mc.link`, by Java class name. The cached DLLs contain those names (`iroh_java_windows_x86_64_*.dll` matches
+`link[/_]e4mc[/_]iroh`; `netty_quiche_windows_x86_64_74.dll` matches `io[/_]netty[/_]incubator[/_]codec[/_]quic`), so relocating
+the Java side would break the binding, and rebuilding the natives is forbidden (CLAUDE.md, DESIGN §3 row 5). DESIGN §5 and the
+gate say all bundled libraries are relocated. This needs the owner's ruling; M0 is not marked DONE until then.
+
+Still unverified:
+
+- The production jar in a real Fabric 26.3 or NeoForge 26.3 instance (all runs above are dev clients from Gradle; the merged jar
+  itself was only inspected, never loaded by a launcher). This is the manual checklist.
+- That the dev-only mixins and switches stay inert in a production instance, beyond the unit tests and the jar-content check.
+- Real (authenticated) accounts: dev runs use offline `DevA`/`DevB` with `dropin.dev.offlineLan`.
+- Two machines, NAT, or any network other than loopback plus the public relay.
+- `tunnel-join` with a NeoForge client on either side (it ran Fabric host, Fabric joiner).
+- The Dialtone direct path: the joiner's ticket lookup returned 404 and the join went through the relay.
+- Dedicated server, macOS, Linux.
+- The baseline "build as is" on upstream's commit only succeeded with placeholder `-PcurseforgeApiToken=none -PmodrinthApiToken=none`.

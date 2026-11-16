@@ -7,7 +7,24 @@
 - `CLAUDE.md` starts with `# DropIn Co-op`, no `AGENTS.md`: PASS.
 - `docs/DESIGN.md`, `docs/MILESTONES.md` exist: PASS.
 
-## M0 — IN PROGRESS
+## M0 — NOT DONE: work list finished, gate blocked on one jar-check item (owner's ruling needed)
+
+State at `b5c639a` (2026-11-16), details in `docs/VERIFICATION.md`:
+
+- Work list steps 1–8 done and committed locally (`115d599`, `e9948e1`, `66989d9`, `ebb37d2`, `b5c639a`). Nothing pushed.
+- Gate: build PASS, core tests PASS (10), suite `m0` PASS (5/5), online smoke `tunnel-join` PASS, jar check **FAIL** on
+  "bundled libraries are relocated" for `io.netty.incubator.codec.quic` and `link.e4mc.iroh` (see the design conflict in the log below;
+  now confirmed against the cached native DLLs, which contain those class names).
+- **Next step (start of next session): get the owner's ruling.** Options: (a) amend DESIGN §5 and the gate to exempt the two JNI-bound
+  libraries, then change `scripts/jarcheck.ps1` to expect them at their original names and re-run only the jar check; (b) anything else
+  the owner decides. Do not mark M0 DONE and do not start M1 before that.
+- Open guesses for the owner to confirm: copyright name `jyoung2000`, version `0.1.0`, `/e4mc` command and upstream class names kept,
+  icon and README still upstream's, native cache folder is still upstream's (`%LOCALAPPDATA%\e4mc\e4mc\cache`, set inside `tunnel/`).
+- Deviations to know about: preflight `java -version` is 17 on the bare PATH (JDK 25 used through `JAVA_HOME`); the "build as is"
+  step needed placeholder publishing tokens.
+- Files touched: everything under `build-logic/`, `core/`, `tunnel/` (moved from `common/`), `mc/`, `fabric/`, `neoforge/`, `scripts/`;
+  root `build.gradle`, `settings.gradle`, `gradle.properties`, `gradle/wrapper`, `.gitignore`, `LICENSE`, `CLAUDE.md`,
+  `docs/VERIFICATION.md`; `forge/` and `PoisonPill.java` deleted.
 
 ### DESIGN §8 items confirmed in the 26.3 sources (NeoForm `vanilla-26.3-1-sources.jar`)
 
