@@ -1,30 +1,10 @@
 plugins {
     id 'java-library'
+    id 'dropin-bundled'
 }
 
-repositories {
-    mavenCentral()
-    maven { name = 'Fabric'; url = uri('https://maven.fabricmc.net') }
-    // Upstream e4mc's libraries (netty-quic build, iroh-java, kaleido-config)
-    maven { url = uri('https://repo.sleeping.town/') }
-    maven { url = uri('https://maven.is-quite.gay/') }
-}
-
-// Libraries that end up inside the mod jar. Not transitive: Minecraft already ships netty, gson, slf4j and JNA.
 configurations {
-    bundled {
-        canBeResolved = true
-        canBeConsumed = false
-        transitive = false
-    }
     compileOnly.extendsFrom bundled
-}
-
-dependencies {
-    bundled "io.netty.incubator:netty-incubator-codec-classes-quic:${quic_version}"
-    bundled "folk.sisby:kaleido-config:${kaleido_version}"
-    bundled "link.e4mc:iroh-java:${iroh_java_version}"
-    bundled "dev.dirs:directories:${dirs_version}"
 }
 
 base {

@@ -1,6 +1,62 @@
+import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
+
 plugins {
+    id 'base'
+    id 'dropin-bundled'
     // see https://maven.fabricmc.net/fabric-loom/fabric-loom.gradle.plugin/maven-metadata.xml for new versions
     id 'net.fabricmc.fabric-loom' version '1.18.1' apply false
     // see https://projects.neoforged.net/neoforged/moddevgradle for new versions
     id 'net.neoforged.moddev' version '2.0.147' apply false
+    id 'com.gradleup.shadow' version '9.6.1' apply false
 }
+
+configurations {
+    fabricContents { canBeResolved = true; canBeConsumed = false }
+    neoforgeContents { canBeResolved = true; canBeConsumed = false }
+}
+
+dependencies {
+    fabricContents project(path: ':fabric', configuration: 'modContents')
+    neoforgeContents project(path: ':neoforge', configuration: 'modContents')
+}
+
+// One jar for both loaders (DESIGN section 5): fabric.mod.json + META-INF/neoforge.mods.toml, both entry points,
+// one mixin config, bundled libraries shaded in. Shared classes are compiled by both loader modules from the
+// same sources; the Fabric copy wins and the NeoForge module only contributes what Fabric does not have.
+def modJar = tasks.register('modJar', ShadowJar) {
+    group = 'build'
+    description = 'Builds the single mod jar that loads on Fabric and NeoForge.'
+    archiveBaseName = mod_id
+    archiveVersion = "${project.version}+mc${minecraft_version}"
+    archiveClassifier = ''
+    destinationDirectory = layout.buildDirectory.dir('libs')
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    from(project.configurations.fabricContents)
+    from(project.configurations.neoforgeContents)
+    from(rootProject.file('LICENSE')) { rename { "LICENSE_${mod_id}" } }
+
+    configurations = [project.configurations.bundled]
+    // Relocated. netty-quic and iroh-java are NOT relocated: their prebuilt JNI natives bind to the
+    // original class names (see session-notes.md).
+    relocate 'dev.dirs', "${shadow_package}.dirs"
+    relocate 'folk.sisby.kaleido', "${shadow_package}.kaleido"
+    mergeServiceFiles()
+
+    // Metadata of the bundled libraries that must not leak into our jar
+    exclude 'META-INF/MANIFEST.MF', 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
+    exclude 'META-INF/maven/**', 'META-INF/versions/**', 'module-info.class'
+    exclude 'quilt.mod.json', 'META-INF/mods.toml', 'META-INF/jars/**', 'META-INF/INDEX.LIST', 'META-INF/native-image/**'
+
+    manifest {
+        attributes([
+                'Specification-Title'   : mod_name,
+                'Specification-Version' : project.version,
+                'Implementation-Title'  : mod_id,
+                'Implementation-Version': project.version,
+                'Built-On-Minecraft'    : minecraft_version
+        ])
+    }
+}
+
+tasks.named('assemble') { dependsOn modJar }

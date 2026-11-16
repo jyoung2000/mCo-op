@@ -31,3 +31,22 @@ processResources {
     dependsOn(configurations.commonResources)
     from(configurations.commonResources)
 }
+
+// Compiled classes and processed resources, consumed by the root project's merged mod jar.
+configurations {
+    modContents {
+        canBeResolved = false
+        canBeConsumed = true
+    }
+}
+
+artifacts {
+    modContents(sourceSets.main.java.classesDirectory) { builtBy tasks.named('compileJava') }
+    modContents(tasks.named('processResources').map { it.destinationDir }) { builtBy tasks.named('processResources') }
+}
+
+// The only distributable is the merged jar in the root build/libs; keep loader jars out of the way.
+tasks.named('jar', Jar) {
+    archiveClassifier = 'loader-only'
+    destinationDirectory = layout.buildDirectory.dir('loader-libs')
+}
