@@ -6,7 +6,7 @@ plugins {
 neoForge {
     version = neoforge_version
     // Automatically enable neoforge AccessTransformers if the file exists
-    def at = project(':common').file('src/main/resources/META-INF/accesstransformer.cfg')
+    def at = project(':mc').file('src/main/resources/META-INF/accesstransformer.cfg')
     if (at.exists()) {
         accessTransformers.from(at.absolutePath)
     }
@@ -23,6 +23,14 @@ neoForge {
             server()
             this.file('runs/server').createParentDirectories()
             gameDirectory = this.mkdir(this.file('runs/server'))
+        }
+        selftestSlots.each { slot ->
+            create("client${slot.toUpperCase()}") {
+                client()
+                gameDirectory = this.mkdir(rootProject.file("run/${slot}"))
+                programArguments.addAll(selftestProgramArgs(slot))
+                selftestSystemProps().each { k, v -> systemProperty(k, v) }
+            }
         }
     }
     mods {

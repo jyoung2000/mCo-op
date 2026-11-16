@@ -1,0 +1,6 @@
+{
+    "text.dropin.domainAssigned": "Τοπικό παιχνίδι εξυπηρετήται στη διεύθηνση [%s]",
+    "text.dropin.closeServer": "Το τοπικό παιχνίδι δεν εξυπηρετήται δημόσια πλέον",
+    "text.dropin.serverAlreadyClosed": "Το τοπικό παιχνίδι δεν εξυπηρετήται δημόσια",
+    "text.dropin.clickToStop": " (Πατήστε εδώ για απενεργοποίηση)"
+}

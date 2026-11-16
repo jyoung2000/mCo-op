@@ -12,14 +12,19 @@ configurations {
 }
 
 dependencies {
-    compileOnly(project(':common')) {
-        def loaderAttribute = Attribute.of('io.github.mcgradleconventions.loader', String)
-        attributes {
-            attribute(loaderAttribute, 'common')
+    // tunnel and mc are compiled against vanilla (NeoForm); their sources are compiled again here against this loader.
+    [':tunnel', ':mc'].each { path ->
+        compileOnly(project(path)) {
+            def loaderAttribute = Attribute.of('io.github.mcgradleconventions.loader', String)
+            attributes {
+                attribute(loaderAttribute, 'common')
+            }
         }
     }
-    commonJava(project(path: ':common', configuration: 'commonJava'))
-    commonResources(project(path: ':common', configuration: 'commonResources'))
+    [':core', ':tunnel', ':mc'].each { path ->
+        commonJava(project(path: path, configuration: 'commonJava'))
+        commonResources(project(path: path, configuration: 'commonResources'))
+    }
 }
 
 tasks.named('compileJava', JavaCompile) {
@@ -49,4 +54,20 @@ artifacts {
 tasks.named('jar', Jar) {
     archiveClassifier = 'loader-only'
     destinationDirectory = layout.buildDirectory.dir('loader-libs')
+}
+
+// Self-test run tasks (DESIGN 4.12): runClientA / runClientB / runClientC, one game folder each under <root>/run.
+// scripts/selftest.ps1 passes the scenario with -Pdropin.selftest=<scenario>:<role> and friends; they become
+// -Ddropin.selftest / -Ddropin.dev.* on the game JVM, which only a development environment honours.
+ext.selftestSlots = ['a', 'b', 'c']
+ext.selftestProgramArgs = { String slot ->
+    ['--username', "Dev${slot.toUpperCase()}".toString(), '--width', '480', '--height', '320']
+}
+ext.selftestSystemProps = { ->
+    def props = ['dropin.dev.offlineLan': 'true']
+    if (project.hasProperty('dropin.selftest')) props['dropin.selftest'] = project.property('dropin.selftest').toString()
+    if (project.hasProperty('dropin.lanPort')) props['dropin.dev.lanPort'] = project.property('dropin.lanPort').toString()
+    if (project.hasProperty('dropin.sharedDir')) props['dropin.dev.sharedDir'] = project.property('dropin.sharedDir').toString().replace('\\', '/')
+    if (project.hasProperty('dropin.online')) props['dropin.dev.online'] = project.property('dropin.online').toString()
+    return props
 }

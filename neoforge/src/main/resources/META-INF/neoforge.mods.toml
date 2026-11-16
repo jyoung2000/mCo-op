@@ -1,31 +1,39 @@
 modLoader = "javafml"
 loaderVersion = "${neoforge_loader_version_range}"
-license = "MIT"
+license = "${license}"
 
 [[mods]]
-modId = "e4mc"
+modId = "${mod_id}"
 version = "${version}"
-displayName = "e4mc"
-logoFile = "e4mc_icon.png"
-credits = "skyevg"
-authors = "skyevg"
+displayName = "${mod_name}"
+logoFile = "dropin_icon.png"
+credits = "${credits}"
+authors = "${mod_author}"
 description = '''
-Open a LAN server to anyone, anywhere, anytime.
+${description}
 '''
 
 [[mixins]]
-config = "e4mc.mixins.json"
+config = "dropin.mixins.json"
 
-[[dependencies.e4mc]]
+[[dependencies.${mod_id}]]
 modId = "neoforge"
 type = "required"
-versionRange = "*"
+versionRange = "[${neoforge_version},)"
 ordering = "NONE"
 side = "BOTH"
 
-[[dependencies.e4mc]]
+[[dependencies.${mod_id}]]
 modId = "minecraft"
 type = "required"
 versionRange = "${minecraft_version_range}"
+ordering = "NONE"
+side = "BOTH"
+
+# DropIn contains the e4mc tunnel: both mods would mixin the same targets and open two relay sessions.
+[[dependencies.${mod_id}]]
+modId = "e4mc"
+type = "incompatible"
+versionRange = "*"
 ordering = "NONE"
 side = "BOTH"

@@ -1,0 +1,6 @@
+{
+    "text.dropin.domainAssigned": "Kohalik mäng on üles seatud domeenil [%s]",
+    "text.dropin.closeServer": "Kohalik mäng ei ole enam avalikult hostitud",
+    "text.dropin.serverAlreadyClosed": "Kohalik mäng ei ole avalikult hostitud",
+    "text.dropin.clickToStop": " (Klõpsa lõpetamiseks)"
+}

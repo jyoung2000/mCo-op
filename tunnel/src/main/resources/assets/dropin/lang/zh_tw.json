@@ -1,0 +1,7 @@
+{
+    "text.dropin.domainAssigned": "本地遊戲已託管在網域 [%s]",
+    "text.dropin.closeServer": "本地遊戲不再公開託管",
+    "text.dropin.serverAlreadyClosed": "本地遊戲未公開託管",
+    "text.dropin.clickToStop": "（點擊此處停止）",
+    "text.dropin.error": "在 e4mc 中發生了個錯誤"
+}

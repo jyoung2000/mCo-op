@@ -1,33 +1,34 @@
 {
   "schemaVersion": 1,
-  "id": "e4mc",
+  "id": "${mod_id}",
   "version": "${version}",
-  "name": "e4mc",
-  "description": "Open a LAN server to anyone, anywhere, anytime.",
+  "name": "${mod_name}",
+  "description": "${description}",
   "authors": [
-    "skyevg"
+    "jyoung2000",
+    "skyevg (e4mc, the tunnel this mod is built on)"
   ],
   "contact": {
-    "homepage": "https://e4mc.link/",
-    "sources": "https://github.com/vgskye/e4mc-minecraft-architectury"
+    "sources": "https://github.com/jyoung2000/dropin-coop"
   },
-  "license": "MIT",
-  "icon": "e4mc_icon.png",
+  "license": "${license}",
+  "icon": "dropin_icon.png",
   "environment": "*",
   "entrypoints": {
     "main": [
-      "link.e4mc.fabric.E4mcClientFabric"
+      "dropin.fabric.DropInFabric"
     ]
   },
   "mixins": [
-    "e4mc.mixins.json"
+    "dropin.mixins.json"
   ],
   "depends": {
+    "fabricloader": ">=${fabric_loader_version}",
     "fabric-api": "*",
     "minecraft": "~${minecraft_version}",
     "java": ">=${java_version}"
   },
-  "provides": [
-    "e4mc_minecraft"
-  ]
+  "breaks": {
+    "e4mc": "*"
+  }
 }

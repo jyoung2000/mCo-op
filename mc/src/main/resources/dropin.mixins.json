@@ -1,0 +1,30 @@
+{
+  "required": true,
+  "package": "dropin.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "minVersion": "0.8",
+  "mixins": [
+    "tunnel.BanListCommandsMixin",
+    "tunnel.BanPlayerCommandsMixin",
+    "tunnel.ConnectionMixin",
+    "tunnel.DirsUtilMixin",
+    "tunnel.PardonCommandMixin",
+    "tunnel.ServerboundKeyPacketMixin",
+    "tunnel.ServerCommonPacketListenerImplAccessor",
+    "tunnel.ServerConnectionListenerMixin",
+    "tunnel.ServerLoginPacketListenerImplMixin",
+    "tunnel.WhitelistCommandMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "client": [
+    "mc.dev.IntegratedServerOfflineLanMixin",
+    "mc.dev.MinecraftTickMixin",
+    "tunnel.ClientHandshakePacketListenerImplMixin",
+    "tunnel.PlayerListMixin",
+    "tunnel.ServerAddressMixin",
+    "tunnel.ServerNameResolverMixin"
+  ],
+  "plugin": "dropin.mc.DropInMixinPlugin"
+}

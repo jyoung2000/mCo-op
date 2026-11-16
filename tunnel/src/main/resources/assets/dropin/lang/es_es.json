@@ -1,0 +1,7 @@
+{
+    "text.dropin.domainAssigned": "Partida ahora disponible públicamente en [%s]",
+    "text.dropin.closeServer": "Se ha dejado de compartir públicamente tu partida",
+    "text.dropin.serverAlreadyClosed": "Tu partida no está siendo compartida",
+    "text.dropin.clickToStop": " (Click para detener)",
+    "text.dropin.error": "Ha ocurrido un error con e4mc"
+}

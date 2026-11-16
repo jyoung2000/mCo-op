@@ -1,0 +1,7 @@
+{
+    "text.dropin.domainAssigned": "Jeu local hébergé sur le domaine [%s]",
+    "text.dropin.closeServer": "Le jeu local n'est plus hébergé publiquement",
+    "text.dropin.serverAlreadyClosed": "Le jeu local n'est pas hébergé publiquement",
+    "text.dropin.clickToStop": " (Cliquez ici pour arrêter)",
+    "text.dropin.error": "Une erreur s'est produite dans e4mc"
+}

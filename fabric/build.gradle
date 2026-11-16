@@ -10,7 +10,7 @@ dependencies {
 }
 
 loom {
-    def aw = project(':common').file("src/main/resources/${mod_id}.accesswidener")
+    def aw = project(':mc').file("src/main/resources/${mod_id}.accesswidener")
     if (aw.exists()) {
         accessWidenerPath.set(aw)
     }
@@ -26,6 +26,16 @@ loom {
             setConfigName('Fabric Server')
             ideConfigGenerated(true)
             runDir('runs/server')
+        }
+        selftestSlots.each { slot ->
+            create("client${slot.toUpperCase()}") {
+                client()
+                setConfigName("Fabric Self-test ${slot.toUpperCase()}")
+                ideConfigGenerated(false)
+                runDir("../run/${slot}")
+                programArgs(selftestProgramArgs(slot))
+                selftestSystemProps().each { k, v -> vmArg("-D${k}=${v}") }
+            }
         }
     }
 }

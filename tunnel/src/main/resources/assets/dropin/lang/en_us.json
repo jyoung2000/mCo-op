@@ -1,0 +1,9 @@
+{
+    "text.dropin.domainAssigned": "Local game hosted on domain [%s]",
+    "text.dropin.closeServer": "Local game no longer publicly hosted",
+    "text.dropin.serverAlreadyClosed": "Local game not publicly hosted",
+    "text.dropin.clickToStop": " (Click here to stop)",
+    "text.dropin.error": "An error occurred in e4mc",
+    "text.dropin.doctor.start": "Generating troubleshooting information. Please stand by.",
+    "text.dropin.hiddenDomain": "hidden, click to copy"
+}

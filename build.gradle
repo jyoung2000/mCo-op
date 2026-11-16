@@ -46,6 +46,8 @@ def modJar = tasks.register('modJar', ShadowJar) {
     // Metadata of the bundled libraries that must not leak into our jar
     exclude 'META-INF/MANIFEST.MF', 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
     exclude 'META-INF/maven/**', 'META-INF/versions/**', 'module-info.class'
+    // Development-only self-test driver (DESIGN 4.12) never ships
+    exclude 'dropin/mc/selftest/**'
     exclude 'quilt.mod.json', 'META-INF/mods.toml', 'META-INF/jars/**', 'META-INF/INDEX.LIST', 'META-INF/native-image/**'
 
     manifest {

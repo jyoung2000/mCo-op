@@ -1,0 +1,7 @@
+{
+    "text.dropin.domainAssigned": "Локальна гра розміщена на домені [%s]",
+    "text.dropin.closeServer": "Локальна гра більше не є загальнодоступною",
+    "text.dropin.serverAlreadyClosed": "Локальна гра не є загальнодоступною",
+    "text.dropin.clickToStop": " (Натисніть тут, щоб зупинити)",
+    "text.dropin.error": "Виникла помилка в e4mc"
+}
