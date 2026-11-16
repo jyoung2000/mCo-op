@@ -30,12 +30,20 @@ The design is in `docs/DESIGN.md`. It is the source of truth. If the code and th
 ## Commands
 
 ```
-./gradlew build                 # full build, one jar in build/libs
-./gradlew test --tests "dropin.core.*"   # core unit tests, no game needed
-./gradlew :fabric:runClient     # dev client (Fabric)
-./gradlew :neoforge:runClient   # dev client (NeoForge)
-scripts/selftest.ps1 -Suite m1  # automated multi-client self-test for one milestone
-scripts/selftest.ps1 -Suite all # every suite up to the current milestone
+./gradlew build                 # full build + unit tests, one jar: build/libs/dropin-<version>+mc26.3.jar
+./gradlew :core:test            # core unit tests, no game needed (add --tests "dropin.core.<pkg>.*" for one package)
+./gradlew :mc:test              # unit tests of the self-test step runner
+./gradlew :fabric:runClient     # dev client (Fabric), game folder fabric/runs/client
+./gradlew :neoforge:runClient   # dev client (NeoForge), game folder neoforge/runs/client
+powershell -ExecutionPolicy Bypass -File scripts/selftest.ps1 -Suite m0          # multi-client self-test for one milestone
+powershell -ExecutionPolicy Bypass -File scripts/selftest.ps1 -Suite all         # every suite up to the current milestone
+powershell -ExecutionPolicy Bypass -File scripts/selftest.ps1 -Suite m0 -Online  # opt-in online smoke (real e4mc relay)
+powershell -ExecutionPolicy Bypass -File scripts/jarcheck.ps1                    # gate jar check on build/libs (after a build)
 ```
 
-Adjust these to the real task names after M0 and keep this section current.
+Gradle must run on JDK 25 (`JAVA_HOME`); `scripts/selftest.ps1` finds one by itself. Self-test logs: `build/selftest-logs/`.
+Modules: `core` (pure Java), `tunnel` (upstream e4mc), `mc` (Minecraft-facing, plus the dev-only `selftest` source set),
+`fabric` and `neoforge` (entry points and run tasks). The loader modules compile the sources of the other three;
+the root `modJar` task merges them into the one jar.
+
+Keep this section current.

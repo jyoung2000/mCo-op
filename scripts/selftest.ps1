@@ -1,0 +1,263 @@
+<#
+.SYNOPSIS
+  DropIn Co-op self-test orchestrator (DESIGN 4.12). Development only.
+
+.DESCRIPTION
+  Launches two or three dev clients through the loaders' Gradle run tasks, waits for each
+  client's run/<slot>/dropin-selftest/result.json, prints one line per scenario and exits
+  non-zero on any failure. Full logs go to build/selftest-logs/, never to the console.
+
+.EXAMPLE
+  scripts/selftest.ps1 -Suite m0
+  scripts/selftest.ps1 -Suite all
+  scripts/selftest.ps1 -Suite m0 -Online     # only the opt-in online smoke scenarios of m0
+#>
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)][string]$Suite,
+    [switch]$Online,
+    [string]$Only = '',
+    [int]$TimeoutSec = 600
+)
+
+$ErrorActionPreference = 'Stop'
+$root = Split-Path -Parent $PSScriptRoot
+$gradlew = Join-Path $root 'gradlew.bat'
+$logDir = Join-Path $root 'build\selftest-logs'
+$sharedDir = Join-Path $root 'run\shared'
+
+function New-Role([string]$role, [string]$loader, [string]$slot) {
+    return @{ Role = $role; Loader = $loader; Slot = $slot }
+}
+
+# Suites in milestone order. "all" runs every suite listed here.
+$suites = [ordered]@{
+    m0 = @(
+        @{ Id = 'lan-join.fabric-fabric'; Scenario = 'lan-join'
+           Roles = @((New-Role 'host' 'fabric' 'a'), (New-Role 'joiner' 'fabric' 'b')) },
+        @{ Id = 'lan-join.fabric-neoforge'; Scenario = 'lan-join'
+           Roles = @((New-Role 'host' 'fabric' 'a'), (New-Role 'joiner' 'neoforge' 'b')) },
+        @{ Id = 'lan-join.neoforge-fabric'; Scenario = 'lan-join'
+           Roles = @((New-Role 'host' 'neoforge' 'a'), (New-Role 'joiner' 'fabric' 'b')) },
+        @{ Id = 'status-ping'; Scenario = 'status-ping'
+           Roles = @((New-Role 'host' 'fabric' 'a'), (New-Role 'pinger' 'fabric' 'b')) },
+        @{ Id = 'prod-guard'; Unit = @(':core:test', '--tests', 'dropin.core.dev.DevSwitchesTest') }
+    )
+}
+
+# Opt-in scenarios that touch public infrastructure (the real e4mc relay). Only run with -Online.
+$onlineSuites = @{
+    m0 = @(
+        @{ Id = 'tunnel-join'; Scenario = 'tunnel-join'; Online = $true
+           Roles = @((New-Role 'host' 'fabric' 'a'), (New-Role 'joiner' 'fabric' 'b')) }
+    )
+}
+
+function Resolve-Jdk25 {
+    $candidates = @()
+    if ($env:JAVA_HOME) { $candidates += $env:JAVA_HOME }
+    foreach ($base in @("$env:ProgramFiles\Microsoft", "$env:ProgramFiles\Eclipse Adoptium", "$env:ProgramFiles\Java")) {
+        if (Test-Path $base) {
+            $candidates += Get-ChildItem $base -Directory -Filter 'jdk-25*' | ForEach-Object { $_.FullName }
+        }
+    }
+    foreach ($dir in $candidates) {
+        $release = Join-Path $dir 'release'
+        if ((Test-Path $release) -and (Select-String -Path $release -Pattern 'JAVA_VERSION="25' -Quiet)) {
+            return $dir
+        }
+    }
+    throw 'JDK 25 not found. Set JAVA_HOME to a JDK 25 installation.'
+}
+
+function Get-FreePort {
+    $listener = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    $port = $listener.LocalEndpoint.Port
+    $listener.Stop()
+    return $port
+}
+
+function Get-GameDir([string]$slot) {
+    return Join-Path $root "run\$slot"
+}
+
+function Initialize-GameDir([string]$slot) {
+    $dir = Get-GameDir $slot
+    New-Item -ItemType Directory -Force $dir | Out-Null
+    foreach ($sub in @('dropin-selftest', 'saves')) {
+        $path = Join-Path $dir $sub
+        if (Test-Path $path) { Remove-Item -Recurse -Force $path }
+    }
+    $options = @(
+        'pauseOnLostFocus:false',
+        'renderDistance:2',
+        'simulationDistance:5',
+        'soundCategory_master:0.0',
+        'onboardAccessibility:false',
+        'skipMultiplayerWarning:true',
+        'tutorialStep:none',
+        'narrator:0',
+        'fullscreen:false',
+        'maxFps:30'
+    )
+    # ASCII without BOM: the game cannot parse a BOM in options.txt
+    [System.IO.File]::WriteAllLines((Join-Path $dir 'options.txt'), $options, (New-Object System.Text.ASCIIEncoding))
+}
+
+function Invoke-GradleLogged([string[]]$gradleArgs, [string]$logFile) {
+    $cmdLine = '/c ""{0}" {1} > "{2}" 2>&1"' -f $gradlew, ($gradleArgs -join ' '), $logFile
+    $proc = Start-Process -FilePath 'cmd.exe' -ArgumentList $cmdLine -WorkingDirectory $root -WindowStyle Hidden -PassThru -Wait
+    return $proc.ExitCode
+}
+
+function Start-Client($scenario, $role, [int]$port) {
+    $task = ':{0}:runClient{1}' -f $role.Loader, $role.Slot.ToUpper()
+    $log = Join-Path $logDir ('{0}-{1}.log' -f $scenario.Id, $role.Role)
+    $gradleArgs = @(
+        $task, '--console=plain',
+        ('"-Pdropin.selftest={0}:{1}"' -f $scenario.Scenario, $role.Role),
+        ('"-Pdropin.lanPort={0}"' -f $port),
+        ('"-Pdropin.sharedDir={0}"' -f $sharedDir)
+    )
+    if ($scenario.Online) { $gradleArgs += '"-Pdropin.online=true"' }
+    $cmdLine = '/c ""{0}" {1} > "{2}" 2>&1"' -f $gradlew, ($gradleArgs -join ' '), $log
+    return Start-Process -FilePath 'cmd.exe' -ArgumentList $cmdLine -WorkingDirectory $root -WindowStyle Hidden -PassThru
+}
+
+function Read-Result($role) {
+    $file = Join-Path (Get-GameDir $role.Slot) 'dropin-selftest\result.json'
+    if (-not (Test-Path $file)) { return $null }
+    try { return Get-Content -Raw $file | ConvertFrom-Json } catch { return $null }
+}
+
+function Stop-Stragglers($procs, $roles) {
+    foreach ($role in $roles) {
+        $pidFile = Join-Path (Get-GameDir $role.Slot) 'dropin-selftest\pid'
+        if (Test-Path $pidFile) {
+            $gamePid = 0
+            if ([int]::TryParse((Get-Content -Raw $pidFile).Trim(), [ref]$gamePid)) {
+                $game = Get-Process -Id $gamePid -ErrorAction SilentlyContinue
+                if ($game -and $game.ProcessName -like 'java*') {
+                    Stop-Process -Id $gamePid -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
+    }
+    foreach ($proc in $procs) {
+        if (-not $proc.HasExited) {
+            # Through cmd so taskkill's stderr cannot become a terminating PowerShell error
+            & cmd.exe /c "taskkill.exe /T /F /PID $($proc.Id) >nul 2>&1"
+        }
+    }
+}
+
+function Invoke-ClientScenario($scenario) {
+    foreach ($role in $scenario.Roles) { Initialize-GameDir $role.Slot }
+    if (Test-Path $sharedDir) { Remove-Item -Recurse -Force $sharedDir }
+    New-Item -ItemType Directory -Force $sharedDir | Out-Null
+
+    $port = Get-FreePort
+    $procs = @()
+    foreach ($role in $scenario.Roles) {
+        $procs += Start-Client $scenario $role $port
+        Start-Sleep -Seconds 3   # let the first Gradle invocation get past configuration
+    }
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    $settleUntil = $null
+    while ((Get-Date) -lt $deadline) {
+        $results = @($scenario.Roles | ForEach-Object { Read-Result $_ })
+        $missing = @($results | Where-Object { $null -eq $_ }).Count
+        $failed = @($results | Where-Object { $null -ne $_ -and -not $_.passed }).Count
+        $running = @($procs | Where-Object { -not $_.HasExited }).Count
+        if ($running -eq 0) { break }
+        # A client that is gone without leaving a result (build failure, crash) will never report.
+        $dead = 0
+        for ($i = 0; $i -lt $procs.Count; $i++) {
+            if ($procs[$i].HasExited -and $null -eq $results[$i]) { $dead++ }
+        }
+        if ($missing -eq 0 -or $failed -gt 0 -or $dead -gt 0) {
+            # Everything reported (or something failed): give the clients a moment to quit by themselves.
+            if ($null -eq $settleUntil) { $settleUntil = (Get-Date).AddSeconds(30) }
+            if ((Get-Date) -ge $settleUntil) { break }
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    Stop-Stragglers $procs $scenario.Roles
+
+    $problems = @()
+    foreach ($role in $scenario.Roles) {
+        $result = Read-Result $role
+        if ($null -eq $result) {
+            $problems += ('{0}: no result (timeout or crash)' -f $role.Role)
+        } elseif (-not $result.passed) {
+            $problems += ('{0}: {1}' -f $role.Role, $result.failure)
+        }
+    }
+    return $problems
+}
+
+# ---- main ----------------------------------------------------------------------------------
+
+if ($Suite -eq 'all') {
+    $selected = @($suites.Keys)
+} elseif ($suites.Contains($Suite)) {
+    $selected = @($Suite)
+} else {
+    throw "Unknown suite '$Suite'. Known: all, $($suites.Keys -join ', ')"
+}
+
+$scenarios = @()
+foreach ($name in $selected) {
+    if ($Online) {
+        if ($onlineSuites.ContainsKey($name)) { $scenarios += $onlineSuites[$name] }
+    } else {
+        $scenarios += $suites[$name]
+    }
+}
+if ($Only) { $scenarios = @($scenarios | Where-Object { $_.Id -eq $Only }) }
+if ($scenarios.Count -eq 0) { throw 'No scenarios selected.' }
+
+$env:JAVA_HOME = Resolve-Jdk25
+New-Item -ItemType Directory -Force $logDir | Out-Null
+$summaryFile = Join-Path $logDir 'summary.txt'
+Set-Content -Path $summaryFile -Value ("selftest -Suite {0}{1}  {2}" -f $Suite, $(if ($Online) { ' -Online' } else { '' }), (Get-Date -Format 's'))
+
+# Compile and fetch game assets once up front: the run tasks are started concurrently and must find all of
+# that up to date (two Gradle builds downloading the same assets at once fail).
+$loaders = @($scenarios | Where-Object { $_.Roles } | ForEach-Object { $_.Roles } | ForEach-Object { $_.Loader } | Sort-Object -Unique)
+if ($loaders.Count -gt 0) {
+    $compileArgs = @($loaders | ForEach-Object { ":$($_):classes"; ":$($_):downloadAssets" }) + '--console=plain'
+    $code = Invoke-GradleLogged $compileArgs (Join-Path $logDir 'compile.log')
+    if ($code -ne 0) {
+        $line = 'FAIL  compile  (see build/selftest-logs/compile.log)'
+        Write-Output $line
+        Add-Content -Path $summaryFile -Value $line
+        exit 1
+    }
+}
+
+$failures = 0
+foreach ($scenario in $scenarios) {
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
+    if ($scenario.Unit) {
+        $code = Invoke-GradleLogged ($scenario.Unit + '--console=plain') (Join-Path $logDir ('{0}.log' -f $scenario.Id))
+        $problems = @()
+        if ($code -ne 0) { $problems += "gradle exit code $code" }
+    } else {
+        $problems = @(Invoke-ClientScenario $scenario)
+    }
+    $seconds = '{0:N1}s' -f $watch.Elapsed.TotalSeconds
+    if ($problems.Count -eq 0) {
+        $line = 'PASS  {0}  {1}' -f $scenario.Id, $seconds
+    } else {
+        $failures++
+        $line = 'FAIL  {0}  {1}  {2}' -f $scenario.Id, $seconds, ($problems -join '; ')
+    }
+    Write-Output $line
+    Add-Content -Path $summaryFile -Value $line
+}
+
+if ($failures -gt 0) { exit 1 }
+exit 0
