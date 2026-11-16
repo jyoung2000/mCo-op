@@ -7,7 +7,14 @@
 - `CLAUDE.md` starts with `# DropIn Co-op`, no `AGENTS.md`: PASS.
 - `docs/DESIGN.md`, `docs/MILESTONES.md` exist: PASS.
 
-## M0 — NOT DONE: work list finished, gate blocked on one jar-check item (owner's ruling needed)
+## M0 — DONE (2026-11-16)
+
+Gate passed in this session: build, core tests, suite `m0` 5/5, online `tunnel-join`, jar check 9/9 (`docs/VERIFICATION.md`).
+The owner ruled ("Yes, exempt them") that `io.netty.incubator.codec.quic` and `link.e4mc.iroh` are not relocated; DESIGN §5,
+the gate wording in `docs/MILESTONES.md` and `scripts/jarcheck.ps1` now say so. The owner still has the M0 manual checklist to do
+(real Fabric and NeoForge instances). **Next step: M1**, in a new session. The guesses listed below are still unconfirmed.
+
+### History: state before the ruling
 
 State at `b5c639a` (2026-11-16), details in `docs/VERIFICATION.md`:
 

@@ -2,7 +2,7 @@
 
 Proof of each gate run. One entry per run, newest last.
 
-## M0 — 2026-11-16 — commit `b5c639a` — GATE NOT PASSED (1 jar-check item open)
+## M0 — 2026-11-16 — commit `b5c639a` — first run: 1 jar-check item open; passed after the owner's ruling (see follow-up)
 
 Machine: Windows 11, JDK 25.0.5 (Microsoft), Gradle 9.7.1. Full logs: `build-logs/m0-gate-*.log`, `build/selftest-logs/`.
 
@@ -42,6 +42,15 @@ Why the two failures are left open instead of fixed: both libraries bind prebuil
 `link[/_]e4mc[/_]iroh`; `netty_quiche_windows_x86_64_74.dll` matches `io[/_]netty[/_]incubator[/_]codec[/_]quic`), so relocating
 the Java side would break the binding, and rebuilding the natives is forbidden (CLAUDE.md, DESIGN §3 row 5). DESIGN §5 and the
 gate say all bundled libraries are relocated. This needs the owner's ruling; M0 is not marked DONE until then.
+
+### Follow-up, 2026-11-16 — M0 GATE PASSED
+
+The owner ruled that the two JNI-bound libraries are exempt from relocation. DESIGN §5, the gate wording in `docs/MILESTONES.md`
+and `scripts/jarcheck.ps1` were changed to say so (the check now requires them at their original names with no relocated copy).
+No code or build file changed after `b5c639a`, so only the failed check was re-run, on the same jar:
+
+- `powershell -File scripts/jarcheck.ps1` → exit 0, 9/9 items PASS (log: `build-logs/m0-gate-jarcheck2.log`), including
+  PASS `unrelocated io.netty.incubator.codec.quic` (155 classes, 0 relocated copies) and PASS `unrelocated link.e4mc.iroh` (10 classes, 0 relocated copies).
 
 Still unverified:
 

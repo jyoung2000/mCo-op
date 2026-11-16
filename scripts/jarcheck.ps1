@@ -36,18 +36,25 @@ Report ($mixinConfigs.Count -eq 1) 'one-mixin-config' ($mixinConfigs -join ', ')
 $selftest = Count-Under 'dropin/mc/selftest/'
 Report ($selftest -eq 0) 'no-selftest-classes' ("$selftest entries under dropin/mc/selftest/")
 
-# Bundled libraries: original package -> relocated package. All four must be relocated (DESIGN 5).
+# Bundled libraries that must be relocated: original package -> relocated package (DESIGN 5).
 $bundled = [ordered]@{
-    'dev/dirs/'                       = 'dropin/shadow/dirs/'
-    'folk/sisby/kaleido/'             = 'dropin/shadow/kaleido/'
-    'io/netty/incubator/codec/quic/'  = 'dropin/shadow/'
-    'link/e4mc/iroh/'                 = 'dropin/shadow/'
+    'dev/dirs/'           = 'dropin/shadow/dirs/'
+    'folk/sisby/kaleido/' = 'dropin/shadow/kaleido/'
 }
 foreach ($original in $bundled.Keys) {
     $left = Count-Under $original
-    $detail = "$left classes left at $original"
-    if ($left -eq 0) { $detail += (', {0} under {1}' -f (Count-Under $bundled[$original]), $bundled[$original]) }
-    Report ($left -eq 0) ('relocated ' + $original.TrimEnd('/').Replace('/', '.')) $detail
+    $moved = Count-Under $bundled[$original]
+    $detail = '{0} classes left at {1}, {2} under {3}' -f $left, $original, $moved, $bundled[$original]
+    Report ($left -eq 0 -and $moved -gt 0) ('relocated ' + $original.TrimEnd('/').Replace('/', '.')) $detail
+}
+
+# JNI-bound libraries: their native libraries bind to these class names, so they must be shaded
+# at their original packages and must not also appear relocated (DESIGN 5).
+foreach ($original in @('io/netty/incubator/codec/quic/', 'link/e4mc/iroh/')) {
+    $present = Count-Under $original
+    $moved = Count-Under ('dropin/shadow/' + $original)
+    $detail = '{0} classes at {1}, {2} relocated copies' -f $present, $original, $moved
+    Report ($present -gt 0 -and $moved -eq 0) ('unrelocated ' + $original.TrimEnd('/').Replace('/', '.')) $detail
 }
 
 if ($script:failures -gt 0) { exit 1 }

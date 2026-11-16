@@ -7,7 +7,7 @@ Common gate for every milestone:
 1. `./gradlew build` succeeds.
 2. Core unit tests pass.
 3. `scripts/selftest.ps1` passes for this milestone's suite **and every earlier suite**.
-4. Jar check: exactly one mod jar; it contains `fabric.mod.json`, `META-INF/neoforge.mods.toml`, one mixin config; bundled libraries are relocated; no self-test class is reachable outside a development environment.
+4. Jar check: exactly one mod jar; it contains `fabric.mod.json`, `META-INF/neoforge.mods.toml`, one mixin config; bundled libraries are relocated, except the two JNI-bound ones (`io.netty.incubator.codec.quic`, `link.e4mc.iroh`), which must be present at their original names (DESIGN §5); no self-test class is reachable outside a development environment.
 
 Self-test scenarios run on Fabric dev clients unless marked *cross-loader*, which also runs Fabric host + NeoForge joiner and the reverse.
 
@@ -22,7 +22,7 @@ Self-test scenarios run on Fabric dev clients unless marked *cross-loader*, whic
 1. Build as is (`./gradlew build`, output capped). Record the result. If it fails for a reason unrelated to our changes, stop and report.
 2. Retarget to Minecraft 26.3 only, Java 25, non-remapping toolchain. Compare the two routes in DESIGN §5 by reading the current build files and the 26.3 branch of `jaredlll08/MultiLoader-Template`; pick the smaller diff and note why.
 3. Delete the `forge` module.
-4. Produce one jar with both loaders' metadata. Shade and relocate bundled libraries. Replace the `Agnos` build-time stub with runtime loader detection. If a merged jar cannot work, stop and report what blocks it before falling back to two jars.
+4. Produce one jar with both loaders' metadata. Shade bundled libraries and relocate them, except the two JNI-bound ones (DESIGN §5). Replace the `Agnos` build-time stub with runtime loader detection. If a merged jar cannot work, stop and report what blocks it before falling back to two jars.
 5. Rename mod id, packages, config file and lang keys to `dropin`; move upstream code under `tunnel`. Declare incompatibility with `e4mc`.
 6. Remove `PoisonPill` and its chat warning, and the Modrinth, CurseForge and Maven publishing blocks.
 7. Add the owner's copyright line to `LICENSE` under Skye's. Keep Skye's.
