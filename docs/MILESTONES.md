@@ -40,9 +40,9 @@ Self-test scenarios run on Fabric dev clients unless marked *cross-loader*, whic
 
 **Manual checklist:**
 
-- [ ] Jar in a real Fabric 26.3 instance (with Fabric API): game starts, Open to LAN prints a domain.
-- [ ] Jar in a real NeoForge 26.3 instance: same.
-- [ ] One instance joins the other through the domain, in both directions.
+- [x] Jar in a real Fabric 26.3 instance (with Fabric API): game starts, Open to LAN prints a domain. *(2026-11-17, Prism Launcher, by the agent; see VERIFICATION.md)*
+- [x] Jar in a real NeoForge 26.3 instance: same. *(2026-11-17, Prism Launcher, by the agent)*
+- [ ] One instance joins the other through the domain, in both directions. *(Not done: needs two accounts. Only a status ping through each domain was done.)*
 
 ---
 
