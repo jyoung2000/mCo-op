@@ -98,6 +98,9 @@ public final class SyncServerSession {
     private volatile long syncedSeq;
     private volatile long recordFrames;
     private volatile long recordBytes;
+    private volatile long connectedAt;
+    private volatile int peerHave;
+    private volatile int peerTotal;
 
     public SyncServerSession(Host host, Transport transport, SecureRandom random) {
         this.host = host;
@@ -116,6 +119,27 @@ public final class SyncServerSession {
     /** The newest checkpoint the peer reported as fully applied. */
     public long syncedSeq() {
         return syncedSeq;
+    }
+
+    /** When this connection finished its handshake (epoch milliseconds; 0 before that). */
+    public long connectedAt() {
+        return connectedAt;
+    }
+
+    /** How much of the world the peer holds, as it last reported: 0 to 100. */
+    public int peerPercent() {
+        int total = peerTotal;
+        return total <= 0 ? 0 : (int) Math.max(0, Math.min(100, peerHave * 100L / total));
+    }
+
+    /**
+     * Tells the peer that this host is leaving and who takes over (DESIGN 4.9). Call with {@link Host#lock()}
+     * held, after the final checkpoint was pushed.
+     */
+    public void handoff(String successorUuid, LedgerEntry finalEntry) {
+        if (ready()) {
+            sendSealed(new Wire.Out(Wire.HANDOFF).str(successorUuid).str(finalEntry.toJson()));
+        }
     }
 
     /** RECORD frames sent on this connection. */
@@ -211,6 +235,7 @@ public final class SyncServerSession {
             synchronized (this) {
                 transport.send(new Wire.Out(Wire.AUTH_S).bytes(SecureChannel.proof(host.auth(), nonceC, nonceS, "s")).toBytes());
                 channel = new SecureChannel(host.enc(), nonceC, nonceS, false);
+                connectedAt = System.currentTimeMillis();
                 ready = true;
             }
             bulk = host.bulkAllowed(this);
@@ -296,6 +321,10 @@ public final class SyncServerSession {
                 sendMembers();
             }
             case Wire.MOD_GET -> sendMod(in.str());
+            case Wire.PROGRESS -> {
+                peerHave = in.i32();
+                peerTotal = in.i32();
+            }
             case Wire.BYE -> close();
             default -> throw new IOException("Unexpected sync message " + in.type);
         }

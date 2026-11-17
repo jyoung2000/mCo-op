@@ -142,6 +142,9 @@ class SyncTest {
         final List<SyncClientSession.Status> statuses = new ArrayList<>();
         LedgerEntry committed;
         int flushes;
+        String successor;
+        LedgerEntry handoffEntry;
+        Boolean handoffApplied;
 
         FakeLocal(WorldKeys keys) {
             this.keys = keys;
@@ -202,6 +205,13 @@ class SyncTest {
         @Override
         public void status(SyncClientSession.Status status) {
             statuses.add(status);
+        }
+
+        @Override
+        public void handoff(String successorUuid, LedgerEntry finalEntry, boolean applied) {
+            successor = successorUuid;
+            handoffEntry = finalEntry;
+            handoffApplied = applied;
         }
 
         SyncClientSession.Status status() {
@@ -504,6 +514,84 @@ class SyncTest {
         assertEquals(SyncClientSession.Phase.WAITING_DIRECT, link.client.phase());
         assertEquals(frames, link.server.recordFrames());
         assertArrayEquals(bytes("level 2"), local.records.get("f|level.dat"));
+    }
+
+    @Test
+    void handoffReachesAFullySyncedMember() throws IOException {
+        FakeHost host = hostWithWorld();
+        FakeLocal local = new FakeLocal(KEYS);
+        Link link = new Link(host, local).start();
+        assertTrue(link.server.connectedAt() > 0);
+        assertEquals(100, link.server.peerPercent());
+
+        LedgerEntry last = host.checkpoint(Map.of(RecordKey.file("level.dat"), bytes("final")));
+        link.run();
+        synchronized (host.lock()) {
+            link.server.handoff("member-uuid", last);
+        }
+        link.run();
+
+        assertEquals("member-uuid", local.successor);
+        assertEquals(last, local.handoffEntry);
+        assertEquals(Boolean.TRUE, local.handoffApplied);
+        assertEquals(last.seq(), link.server.syncedSeq());
+        assertSameWorld(host, local);
+    }
+
+    @Test
+    void handoffTellsAMemberThatIsBehindThatItIsBehind() throws IOException {
+        FakeHost host = hostWithWorld();
+        host.bulk = false;
+        FakeLocal local = new FakeLocal(KEYS);
+        Link link = new Link(host, local).start();
+        assertEquals(SyncClientSession.Phase.WAITING_DIRECT, link.client.phase());
+        assertEquals(0, link.server.peerPercent());
+
+        synchronized (host.lock()) {
+            link.server.handoff("someone-else", host.ledger.last());
+        }
+        link.run();
+
+        assertEquals("someone-else", local.successor);
+        assertEquals(Boolean.FALSE, local.handoffApplied);
+        assertEquals(0, link.server.syncedSeq());
+    }
+
+    @Test
+    void forgedHandoffEndsTheSession() throws IOException {
+        FakeHost host = hostWithWorld();
+        FakeLocal local = new FakeLocal(KEYS);
+        Link link = new Link(host, local).start();
+        WorldKeys other = WorldKeys.fromSeed(OTHER_SEED);
+        LedgerEntry forged = LedgerEntry.create(other.auth(), 2, host.ledger.head(), "host-uuid", "Host",
+                "0011223344556677", 1_800_000_100L, host.manifest.root(), 0);
+
+        synchronized (host.lock()) {
+            link.server.handoff("member-uuid", forged);
+        }
+        link.run();
+
+        assertNull(local.successor);
+        assertEquals(SyncClientSession.Phase.FAILED, link.client.phase());
+    }
+
+    @Test
+    void memberReportsItsProgressWhileDownloading() throws IOException {
+        FakeHost host = hostWithWorld();
+        FakeLocal local = new FakeLocal(KEYS);
+        Link link = new Link(host, local);
+        List<Integer> seen = new ArrayList<>();
+        link.client.start();
+        while (link.open && !link.tasks.isEmpty()) {
+            link.tasks.poll().run();
+            seen.add(link.server.peerPercent());
+        }
+
+        assertTrue(seen.stream().anyMatch(percent -> percent > 0 && percent < 100), seen.toString());
+        assertEquals(100, link.server.peerPercent());
+        for (int i = 1; i < seen.size(); i++) {
+            assertTrue(seen.get(i) >= seen.get(i - 1), seen.toString());
+        }
     }
 
     @Test

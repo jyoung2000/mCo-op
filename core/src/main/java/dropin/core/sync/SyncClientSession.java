@@ -96,6 +96,16 @@ public final class SyncClientSession {
 
         default void membersReceived(String json) {
         }
+
+        /**
+         * The host is leaving (DESIGN 4.9).
+         *
+         * @param successorUuid the player who hosts next
+         * @param finalEntry    the host's last checkpoint (verified with the world key)
+         * @param applied       true if this copy is complete through that checkpoint
+         */
+        default void handoff(String successorUuid, LedgerEntry finalEntry, boolean applied) {
+        }
     }
 
     private final Local local;
@@ -255,7 +265,15 @@ public final class SyncClientSession {
                 }
             }
             case Wire.MEMBERS -> local.membersReceived(in.str());
-            case Wire.PEERS, Wire.HANDOFF, Wire.BRANCH_PUSH, Wire.MOD_DATA -> {
+            case Wire.HANDOFF -> {
+                String successor = in.str();
+                LedgerEntry finalEntry = LedgerEntry.fromJson(in.str());
+                if (!finalEntry.verify(local.auth())) {
+                    throw new IOException("The host sent a handoff that does not verify");
+                }
+                local.handoff(successor, finalEntry, finalEntry.hash().equals(local.ledger().head()));
+            }
+            case Wire.PEERS, Wire.BRANCH_PUSH, Wire.MOD_DATA -> {
                 // Later milestones.
             }
             case Wire.BYE -> onClosed();
@@ -612,8 +630,17 @@ public final class SyncClientSession {
 
     private void report() {
         int have = local.manifest().size();
-        local.status(new Status(phase, have, have + want.size(), detail));
+        int total = have + want.size();
+        local.status(new Status(phase, have, total, detail));
+        // The host shows this when it quits and nobody has a full copy (DESIGN 4.9). One message per percent at most.
+        int percent = total <= 0 ? 0 : (int) (have * 100L / total);
+        if (channel != null && !closed && headSeen && percent != sentPercent) {
+            sentPercent = percent;
+            send(new Wire.Out(Wire.PROGRESS).i32(have).i32(total));
+        }
     }
+
+    private int sentPercent = -1;
 
     private void send(Wire.Out message) {
         if (!closed && channel != null) {
