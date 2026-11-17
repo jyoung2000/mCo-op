@@ -4,6 +4,7 @@
   "compatibilityLevel": "JAVA_25",
   "minVersion": "0.8",
   "mixins": [
+    "mc.PlayerListOwnDataMixin",
     "tunnel.BanListCommandsMixin",
     "tunnel.BanPlayerCommandsMixin",
     "tunnel.ConnectionMixin",
@@ -19,6 +20,8 @@
     "defaultRequire": 1
   },
   "client": [
+    "mc.IntegratedServerFocusMixin",
+    "mc.WorldOpenFlowsMixin",
     "mc.dev.IntegratedServerOfflineLanMixin",
     "mc.dev.MinecraftTickMixin",
     "tunnel.ClientHandshakePacketListenerImplMixin",

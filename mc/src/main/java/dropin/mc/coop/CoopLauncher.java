@@ -1,0 +1,137 @@
+package dropin.mc.coop;
+
+import dropin.core.pkarr.HostClaim;
+import dropin.core.pkarr.Rendezvous;
+import dropin.core.pkarr.RendezvousRecord;
+import dropin.core.world.CoopWorld;
+import dropin.mc.DropIn;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.ConnectScreen;
+import net.minecraft.client.gui.screens.GenericMessageScreen;
+import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.client.gui.screens.worldselection.WorldOpenFlows;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.client.multiplayer.resolver.ServerAddress;
+import net.minecraft.network.chat.Component;
+
+import java.security.SecureRandom;
+import java.util.HexFormat;
+import java.util.Optional;
+
+/**
+ * The launch flow of DESIGN 4.4: opening a co-op world first asks the rendezvous who is hosting.
+ * A live host is joined; otherwise this player claims the world and opens the local copy.
+ */
+public final class CoopLauncher {
+    private static final long PING_TIMEOUT_MS = 5_000;
+    /** Set on the client thread while this class itself calls {@code openWorld}. */
+    private static boolean passThrough;
+
+    private CoopLauncher() {
+    }
+
+    /**
+     * Called at the head of {@code WorldOpenFlows.openWorld}.
+     *
+     * @return true if the open was taken over (the vanilla call must be cancelled)
+     */
+    public static boolean intercept(WorldOpenFlows flows, String levelId, Runnable onCancel) {
+        if (passThrough) {
+            return false;
+        }
+        Minecraft mc = Minecraft.getInstance();
+        Optional<CoopWorld> world = CoopWorlds.forFolder(mc.getLevelSource().getLevelPath(levelId));
+        if (world.isEmpty()) {
+            return false;
+        }
+        mc.gui.setScreen(new GenericMessageScreen(Component.translatable("text.dropin_coop.looking")));
+        Thread thread = new Thread(() -> launch(mc, flows, world.get(), levelId, onCancel), "dropin-coop-launch");
+        thread.setDaemon(true);
+        thread.start();
+        return true;
+    }
+
+    private static void launch(Minecraft mc, WorldOpenFlows flows, CoopWorld world, String levelId, Runnable onCancel) {
+        String uuid = mc.getUser().getProfileId().toString();
+        String name = mc.getUser().getName();
+        Rendezvous rendezvous = CoopWorlds.rendezvous(world);
+        Env env = new Env();
+        HostClaim.Result result;
+        try {
+            result = HostClaim.claim(rendezvous, env, uuid, name);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return;
+        } catch (RuntimeException e) {
+            DropIn.LOGGER.error("Looking for a host failed; opening the local copy", e);
+            result = new HostClaim.Host(env.newSession(), false);
+        }
+
+        if (result instanceof HostClaim.Join join) {
+            String address = env.liveAddress != null ? env.liveAddress : join.host().addr();
+            DropIn.LOGGER.info("Co-op world '{}': {} is hosting, joining {}", world.name(), join.host().name(), address);
+            remember(world, join.host().host(), join.host().name());
+            remember(world, uuid, name);
+            mc.execute(() -> ConnectScreen.startConnecting(new TitleScreen(), mc, ServerAddress.parseString(address),
+                    new ServerData(world.name(), address, ServerData.Type.OTHER), false, null));
+        } else if (result instanceof HostClaim.Host host) {
+            DropIn.LOGGER.info("Co-op world '{}': nobody is hosting, opening the local copy (announced={})",
+                    world.name(), host.announced());
+            remember(world, uuid, name);
+            mc.execute(() -> {
+                HostSession.start(mc, world, rendezvous, host.sess(), uuid, name);
+                passThrough = true;
+                try {
+                    flows.openWorld(levelId, onCancel);
+                } finally {
+                    passThrough = false;
+                }
+            });
+        }
+    }
+
+    static void remember(CoopWorld world, String uuid, String name) {
+        if (uuid == null || uuid.isEmpty()) {
+            return;
+        }
+        try {
+            CoopWorlds.store().recordMember(world.worldId(), uuid, name, System.currentTimeMillis() / 1000);
+        } catch (Exception e) {
+            DropIn.LOGGER.warn("Could not update the member list of '{}'", world.name(), e);
+        }
+    }
+
+    private static final class Env implements HostClaim.Env {
+        private final SecureRandom random = new SecureRandom();
+        /** The address that answered the last successful ping: the LAN hint if it works, else the domain. */
+        volatile String liveAddress;
+
+        @Override
+        public long nowMillis() {
+            return System.currentTimeMillis();
+        }
+
+        @Override
+        public void sleep(long millis) throws InterruptedException {
+            Thread.sleep(millis);
+        }
+
+        @Override
+        public boolean ping(RendezvousRecord record) {
+            for (String address : new String[]{record.lan(), record.addr()}) {
+                if (address != null && !address.isEmpty() && StatusPing.answers(address, PING_TIMEOUT_MS)) {
+                    liveAddress = address;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        @Override
+        public String newSession() {
+            byte[] bytes = new byte[8];
+            random.nextBytes(bytes);
+            return HexFormat.of().formatHex(bytes);
+        }
+    }
+}

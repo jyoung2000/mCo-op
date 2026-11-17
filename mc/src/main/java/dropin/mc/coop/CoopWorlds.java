@@ -1,0 +1,94 @@
+package dropin.mc.coop;
+
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import dropin.core.pkarr.FileRendezvous;
+import dropin.core.pkarr.HttpPkarrClient;
+import dropin.core.pkarr.PkarrRendezvous;
+import dropin.core.pkarr.Rendezvous;
+import dropin.core.world.CoopWorld;
+import dropin.core.world.CoopWorldStore;
+import dropin.mc.DropIn;
+import dropin.tunnel.Agnos;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.level.storage.LevelResource;
+
+import java.io.IOException;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.WeakHashMap;
+
+/** Co-op world lookups shared by client and server code. No client-only classes in here. */
+public final class CoopWorlds {
+    private static final Path CONFIG_DIR = Agnos.configDir().resolve("dropin");
+    private static final CoopWorldStore STORE = new CoopWorldStore(CONFIG_DIR);
+    private static final Map<MinecraftServer, Boolean> COOP_SERVERS = Collections.synchronizedMap(new WeakHashMap<>());
+
+    private CoopWorlds() {
+    }
+
+    public static CoopWorldStore store() {
+        return STORE;
+    }
+
+    /** The co-op world a save folder belongs to, if it is marked and this PC has its key. Never throws. */
+    public static Optional<CoopWorld> forFolder(Path worldFolder) {
+        try {
+            return STORE.forFolder(worldFolder);
+        } catch (IOException | RuntimeException e) {
+            DropIn.LOGGER.warn("Could not read the co-op entry of {}", worldFolder.getFileName(), e);
+            return Optional.empty();
+        }
+    }
+
+    /** True if the world this server runs is a co-op world on this PC. Cached per server. */
+    public static boolean isCoopServer(MinecraftServer server) {
+        return COOP_SERVERS.computeIfAbsent(server,
+                s -> forFolder(s.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize()).isPresent());
+    }
+
+    /**
+     * Where "who is hosting" is published for this world: pkarr relays, or, in a development environment
+     * with {@code dropin.dev.sharedDir} set and {@code dropin.dev.online} not set, a file in that folder.
+     */
+    public static Rendezvous rendezvous(CoopWorld world) {
+        Optional<String> shared = DropIn.switches().read("dropin.dev.sharedDir");
+        boolean online = DropIn.switches().read("dropin.dev.online").map(Boolean::parseBoolean).orElse(false);
+        if (shared.isPresent() && !online) {
+            return new FileRendezvous(Path.of(shared.get()).resolve("rendezvous").resolve(world.worldId() + ".json"));
+        }
+        return new PkarrRendezvous(world.keys(), new HttpPkarrClient(relays(), Duration.ofSeconds(8)));
+    }
+
+    /** {@code config/dropin/coop.json}: {@code {"pkarrRelays": ["https://..."]}}. Defaults when absent or unreadable. */
+    public static List<URI> relays() {
+        Path file = CONFIG_DIR.resolve("coop.json");
+        if (Files.isRegularFile(file)) {
+            try {
+                JsonObject json = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8)).getAsJsonObject();
+                List<URI> relays = new ArrayList<>();
+                for (JsonElement element : json.getAsJsonArray("pkarrRelays")) {
+                    URI uri = URI.create(element.getAsString());
+                    if ("https".equals(uri.getScheme()) || "http".equals(uri.getScheme())) {
+                        relays.add(uri);
+                    }
+                }
+                if (!relays.isEmpty()) {
+                    return relays;
+                }
+            } catch (IOException | RuntimeException e) {
+                DropIn.LOGGER.warn("config/dropin/coop.json is unreadable, using the default pkarr relays", e);
+            }
+        }
+        return HttpPkarrClient.DEFAULT_RELAYS;
+    }
+}
