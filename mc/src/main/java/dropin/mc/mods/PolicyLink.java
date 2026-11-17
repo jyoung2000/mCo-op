@@ -121,7 +121,7 @@ public final class PolicyLink implements PolicyClientSession.Local, AutoCloseabl
             if (failure != null) {
                 throw new FetchException(FetchException.Kind.LOST, failure);
             }
-            session.requestMod(entry.sha512());
+            pipe.execute(() -> session.requestMod(entry.sha512()));
             // Slow links exist; a stalled one must not hang the screen for ever.
             long seconds = 120 + entry.size() / (16 * 1024);
             request.done().get(seconds, TimeUnit.SECONDS);

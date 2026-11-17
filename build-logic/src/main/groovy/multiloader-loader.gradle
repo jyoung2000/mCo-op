@@ -172,5 +172,6 @@ ext.selftestSystemProps = { ->
     if (project.hasProperty('dropin.lanPort')) props['dropin.dev.lanPort'] = project.property('dropin.lanPort').toString()
     if (project.hasProperty('dropin.sharedDir')) props['dropin.dev.sharedDir'] = project.property('dropin.sharedDir').toString().replace('\\', '/')
     if (project.hasProperty('dropin.online')) props['dropin.dev.online'] = project.property('dropin.online').toString()
+    if (project.hasProperty('dropin.selftestTimeoutSec')) props['dropin.dev.selftestTimeoutSec'] = project.property('dropin.selftestTimeoutSec').toString()
     return props
 }

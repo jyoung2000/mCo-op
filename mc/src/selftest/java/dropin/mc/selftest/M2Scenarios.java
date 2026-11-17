@@ -161,7 +161,7 @@ final class M2Scenarios {
     }
 
     /** True once B's copy is complete and the sync is waiting for the next checkpoint. Polled twice a second. */
-    private static StepRunner.Step copyComplete(Minecraft mc, State state) {
+    static StepRunner.Step copyComplete(Minecraft mc, State state) {
         int[] ticks = {0};
         int[] waiting = {0};
         return () -> {

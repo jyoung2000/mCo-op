@@ -77,6 +77,8 @@ $suites = [ordered]@{
            Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
     )
     m2b = @(
+        @{ Id = 'policy-unit'; Unit = @(':core:test', '--tests', 'dropin.core.policy.*') },
+        @{ Id = 'mods-unit'; Unit = @(':core:test', '--tests', 'dropin.core.mods.*') },
         # The spike of M2b step 1: the game starts with test mod Z, asks the helper for X instead and quits; the
         # helper swaps mods/ once the game is gone; the game is started again as a2 and must have loaded X, not Z.
         @{ Id = 'swap-spike.fabric'; Scenario = 'swap-spike'; Mods = @{ a = @('z') }
@@ -84,7 +86,38 @@ $suites = [ordered]@{
            Roles = @((New-Role 'a' 'fabric' 'a')) },
         @{ Id = 'swap-spike.neoforge'; Scenario = 'swap-spike'; Mods = @{ a = @('z') }
            Relaunch = @{ GameFile = 'config\dropin\modswap.result.json'; Index = 0; Role = 'a2' }
-           Roles = @((New-Role 'a' 'neoforge' 'a')) }
+           Roles = @((New-Role 'a' 'neoforge' 'a')) },
+        # A is the owner and hosts with test mod X. B approves the consent screen, its game exits, the helper swaps
+        # B's mods/, and B is started again as b2 on the same game folder.
+        @{ Id = 'mod-join.fabric'; Scenario = 'mod-join'; TimeoutSec = 900; Mods = @{ a = @('x') }
+           Relaunch = @{ GameFile = 'config\dropin\modswap.result.json'; Index = 1; Role = 'b2' }
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+        @{ Id = 'mod-join.neoforge'; Scenario = 'mod-join'; TimeoutSec = 900; Mods = @{ a = @('x') }
+           Relaunch = @{ GameFile = 'config\dropin\modswap.result.json'; Index = 1; Role = 'b2' }
+           Roles = @((New-Role 'a' 'neoforge' 'a'), (New-Role 'b' 'neoforge' 'b')) },
+        @{ Id = 'mod-decline'; Scenario = 'mod-decline'; Mods = @{ a = @('x') }
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+        # The owner (X) restarts with X and Y while B (X) hosts; B's session ends, and B gets back in after its own restart.
+        @{ Id = 'mod-change-live'; Scenario = 'mod-change-live'; TimeoutSec = 1500; Mods = @{ a = @('x'); b = @('x') }
+           Relaunch = @(@{ Marker = 'restart-a'; Index = 0; Role = 'a2' },
+                        @{ GameFile = 'config\dropin\modswap.result.json'; Index = 1; Role = 'b2' })
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+        @{ Id = 'mod-tamper'; Scenario = 'mod-tamper'; Mods = @{ a = @('x') }
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+        @{ Id = 'mod-keep-extra'; Scenario = 'mod-keep-extra'; TimeoutSec = 900; Mods = @{ a = @('x'); b = @('x', 'z') }
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+        @{ Id = 'owner-known-to-members'; Scenario = 'owner-known-to-members'; TimeoutSec = 900
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'neoforge' 'b')) },
+        @{ Id = 'owner-rights'; Scenario = 'owner-rights'; TimeoutSec = 900
+           Roles = @((New-Role 'a' 'neoforge' 'a'), (New-Role 'b' 'fabric' 'b')) },
+        @{ Id = 'datapack-mismatch'; Scenario = 'datapack-mismatch'; TimeoutSec = 900
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+        @{ Id = 'mods-tab'; Scenario = 'mods-tab'; Mods = @{ a = @('x'); b = @('z') }
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+        # B starts with its own jars Y and Z; after the swap both must be under mods/.dropin-disabled/, unchanged.
+        @{ Id = 'swap-restores'; Scenario = 'swap-restores'; TimeoutSec = 900; Mods = @{ a = @('x'); b = @('y', 'z') }
+           Relaunch = @{ GameFile = 'config\dropin\modswap.result.json'; Index = 1; Role = 'b2' }
+           Roles = @((New-Role 'a' 'neoforge' 'a'), (New-Role 'b' 'neoforge' 'b')) }
     )
 }
 
@@ -102,6 +135,19 @@ $onlineSuites = @{
         @{ Id = 'first-download-root-match.online'; Scenario = 'first-download-root-match'; Online = $true
            Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
     )
+    m2b = @(
+        # The owner's only mod is a real one that Modrinth's hash lookup knows; B downloads it from Modrinth.
+        @{ Id = 'mod-join.online'; Scenario = 'mod-join'; Online = $true; TimeoutSec = 900; Mods = @{ a = @('online') }
+           Relaunch = @{ GameFile = 'config\dropin\modswap.result.json'; Index = 1; Role = 'b2' }
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
+    )
+}
+
+# The real mod of the online smoke (Fabric): small, no dependencies, published on Modrinth for Minecraft 26.3.
+$onlineMod = @{
+    File = 'ferritecore-9.0.0-fabric.jar'
+    Url = 'https://cdn.modrinth.com/data/uXXizFIs/versions/d5ddUdiB/ferritecore-9.0.0-fabric.jar'
+    Sha512 = 'd81fa97e11784c19d42f89c2f433831d007603dd7193cee45fa177e4a6a9c52b384b198586e04a0f7f63cd996fed713322578bde9a8db57e1188854ae5cbe584'
 }
 
 function Resolve-Jdk25 {
@@ -134,7 +180,24 @@ function Get-GameDir([string]$slot) {
 }
 
 function Get-TestMod([string]$loader, [string]$name) {
+    if ($name -eq 'online') { return Get-OnlineMod }
     return Join-Path $root "build\testmods\$loader\dropin-testmod-$name.jar"
+}
+
+# Downloads the online smoke's mod once (build/testmods/online) and checks it against the published hash.
+function Get-OnlineMod {
+    $dir = Join-Path $root 'build\testmods\online'
+    $file = Join-Path $dir $onlineMod.File
+    if (-not (Test-Path $file)) {
+        New-Item -ItemType Directory -Force $dir | Out-Null
+        Invoke-WebRequest -Uri $onlineMod.Url -OutFile $file -UserAgent 'dropin-coop/selftest' -UseBasicParsing
+    }
+    $hash = (Get-FileHash -Algorithm SHA512 $file).Hash.ToLower()
+    if ($hash -ne $onlineMod.Sha512) {
+        Remove-Item -Force $file
+        throw "The downloaded $($onlineMod.File) does not have the published hash."
+    }
+    return $file
 }
 
 # $mods: names of test mods (x, y, z) that are in the slot's mods folder when the game first starts.
@@ -182,6 +245,8 @@ function Start-Client($scenario, $role, [int]$port) {
         ('"-Pdropin.sharedDir={0}"' -f $sharedDir)
     )
     if ($scenario.Online) { $gradleArgs += '"-Pdropin.online=true"' }
+    # The game's own watchdog (540 s by default) must not end a scenario that is allowed to run longer.
+    if ($scenario.TimeoutSec) { $gradleArgs += ('"-Pdropin.selftestTimeoutSec={0}"' -f $scenario.TimeoutSec) }
     $cmdLine = '/c ""{0}" {1} > "{2}" 2>&1"' -f $gradlew, ($gradleArgs -join ' '), $log
     return Start-Process -FilePath 'cmd.exe' -ArgumentList $cmdLine -WorkingDirectory $root -WindowStyle Hidden -PassThru
 }

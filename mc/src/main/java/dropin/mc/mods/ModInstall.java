@@ -26,6 +26,7 @@ import java.util.function.Consumer;
  */
 public final class ModInstall {
     private static final String K = "text.dropin_coop.";
+    private static final long LINK_TIMEOUT_MS = 15_000;
 
     /** A failure the consent screen shows as it is. */
     public static final class InstallException extends IOException {
@@ -41,7 +42,14 @@ public final class ModInstall {
         }
     }
 
+    private static final java.util.concurrent.atomic.AtomicInteger MODRINTH_DOWNLOADS = new java.util.concurrent.atomic.AtomicInteger();
+
     private ModInstall() {
+    }
+
+    /** How many mod files this game downloaded from Modrinth since it started. Read by the self-tests. */
+    public static int modrinthDownloads() {
+        return MODRINTH_DOWNLOADS.get();
     }
 
     /**
@@ -113,6 +121,7 @@ public final class ModInstall {
         try (ModStore.Incoming incoming = store.receive(entry)) {
             WorldPolicy.modrinth().download(entry.url(), incoming);
             incoming.commit();
+            MODRINTH_DOWNLOADS.incrementAndGet();
             DropIn.LOGGER.info("Mod file {} downloaded from Modrinth and verified", entry.path());
             return true;
         } catch (IOException | RuntimeException e) {
@@ -131,7 +140,13 @@ public final class ModInstall {
             host = status.address();
         }
         try {
-            return PolicyLink.open(mc, world, host);
+            PolicyLink link = PolicyLink.open(mc, world, host);
+            // The host only serves files once the handshake is done; its policy answer is the sign of that.
+            if (!link.await(LINK_TIMEOUT_MS)) {
+                link.close();
+                throw new InstallException(Component.translatable(K + "mods.error.failed", "the host did not answer"));
+            }
+            return link;
         } catch (IOException e) {
             throw new InstallException(Component.translatable(K + "mods.error.failed", String.valueOf(e.getMessage())));
         }
