@@ -75,6 +75,18 @@ class CoopWorldStoreTest {
     }
 
     @Test
+    void theOwnerKeyCanBeExportedByTheOwnerOnly() throws IOException {
+        CoopWorld owned = importIt();
+        Path target = config.resolve("exported.key");
+        store.exportOwnerKey(owned.worldId(), target);
+        assertEquals(Files.readString(config.resolve("worlds").resolve(owned.worldId() + ".owner.key")), Files.readString(target));
+
+        CoopWorld joined = store.joinWithInvite(new Invite(new byte[32], new byte[16]), "Joined");
+        assertThrows(IOException.class, () -> store.exportOwnerKey(joined.worldId(), config.resolve("none.key")));
+        assertFalse(Files.exists(config.resolve("none.key")));
+    }
+
+    @Test
     void importingTwiceIsRefused() throws IOException {
         importIt();
         assertThrows(IllegalStateException.class, this::importIt);

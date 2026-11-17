@@ -21,6 +21,11 @@
   },
   "client": [
     "mc.IntegratedServerFocusMixin",
+    "mc.IntegratedServerNewCoopMixin",
+    "mc.PauseScreenMixin",
+    "mc.SelectWorldScreenMixin",
+    "mc.TitleScreenMixin",
+    "mc.WorldListEntryMixin",
     "mc.WorldOpenFlowsMixin",
     "mc.dev.IntegratedServerOfflineLanMixin",
     "mc.dev.MinecraftTickMixin",

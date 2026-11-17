@@ -43,6 +43,25 @@ $suites = [ordered]@{
            Roles = @((New-Role 'host' 'fabric' 'a'), (New-Role 'pinger' 'fabric' 'b')) },
         @{ Id = 'prod-guard'; Unit = @(':core:test', '--tests', 'dropin.core.dev.DevSwitchesTest') }
     )
+    m1 = @(
+        @{ Id = 'menu'; Scenario = 'menu'; Roles = @((New-Role 'solo' 'fabric' 'a')) },
+        @{ Id = 'import-saves'; Scenario = 'import-saves'; Roles = @((New-Role 'solo' 'fabric' 'a')) },
+        @{ Id = 'import-zip'; Scenario = 'import-zip'; Roles = @((New-Role 'solo' 'neoforge' 'a')) },
+        @{ Id = 'import-rejects'; Scenario = 'import-rejects'; Roles = @((New-Role 'solo' 'fabric' 'a')) },
+        @{ Id = 'remove'; Scenario = 'remove'; Roles = @((New-Role 'solo' 'neoforge' 'a')) },
+        @{ Id = 'drop-in.fabric-neoforge'; Scenario = 'drop-in'
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'neoforge' 'b')) },
+        @{ Id = 'drop-in.neoforge-fabric'; Scenario = 'drop-in'
+           Roles = @((New-Role 'a' 'neoforge' 'a'), (New-Role 'b' 'fabric' 'b')) },
+        @{ Id = 'host-swap-own-inventory'; Scenario = 'host-swap-own-inventory'
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+        @{ Id = 'race'; Scenario = 'race'
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+        @{ Id = 'owner-invite'; Scenario = 'owner-invite'; Roles = @((New-Role 'solo' 'fabric' 'a')) },
+        @{ Id = 'owner-invite.unit'; Unit = @(':core:test', '--tests', 'dropin.core.invite.InviteTest') },
+        @{ Id = 'players-tab'; Scenario = 'players-tab'
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
+    )
 }
 
 # Opt-in scenarios that touch public infrastructure (the real e4mc relay). Only run with -Online.
@@ -50,6 +69,10 @@ $onlineSuites = @{
     m0 = @(
         @{ Id = 'tunnel-join'; Scenario = 'tunnel-join'; Online = $true
            Roles = @((New-Role 'host' 'fabric' 'a'), (New-Role 'joiner' 'fabric' 'b')) }
+    )
+    m1 = @(
+        @{ Id = 'drop-in.online'; Scenario = 'drop-in'; Online = $true
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
     )
 }
 
@@ -85,7 +108,7 @@ function Get-GameDir([string]$slot) {
 function Initialize-GameDir([string]$slot) {
     $dir = Get-GameDir $slot
     New-Item -ItemType Directory -Force $dir | Out-Null
-    foreach ($sub in @('dropin-selftest', 'saves')) {
+    foreach ($sub in @('dropin-selftest', 'saves', 'backups', 'config\dropin')) {
         $path = Join-Path $dir $sub
         if (Test-Path $path) { Remove-Item -Recurse -Force $path }
     }

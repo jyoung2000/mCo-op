@@ -90,7 +90,7 @@ public final class CoopLauncher {
         }
     }
 
-    static void remember(CoopWorld world, String uuid, String name) {
+    public static void remember(CoopWorld world, String uuid, String name) {
         if (uuid == null || uuid.isEmpty()) {
             return;
         }

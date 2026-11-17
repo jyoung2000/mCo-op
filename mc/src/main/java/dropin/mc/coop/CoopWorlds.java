@@ -69,12 +69,34 @@ public final class CoopWorlds {
         return new PkarrRendezvous(world.keys(), new HttpPkarrClient(relays(), Duration.ofSeconds(8)));
     }
 
+    /** Makes a running server count as co-op from now on ("Make co-op" in the pause menu). */
+    public static void markCoop(MinecraftServer server) {
+        COOP_SERVERS.put(server, Boolean.TRUE);
+    }
+
+    /** {@code config/dropin/coop.json}: {@code "titleButton": false} hides the title-screen button (DESIGN 4.15). */
+    public static boolean titleButton() {
+        Path file = CONFIG_DIR.resolve("coop.json");
+        if (Files.isRegularFile(file)) {
+            try {
+                JsonObject json = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8)).getAsJsonObject();
+                return !json.has("titleButton") || json.get("titleButton").getAsBoolean();
+            } catch (IOException | RuntimeException e) {
+                return true;
+            }
+        }
+        return true;
+    }
+
     /** {@code config/dropin/coop.json}: {@code {"pkarrRelays": ["https://..."]}}. Defaults when absent or unreadable. */
     public static List<URI> relays() {
         Path file = CONFIG_DIR.resolve("coop.json");
         if (Files.isRegularFile(file)) {
             try {
                 JsonObject json = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8)).getAsJsonObject();
+                if (!json.has("pkarrRelays")) {
+                    return HttpPkarrClient.DEFAULT_RELAYS;
+                }
                 List<URI> relays = new ArrayList<>();
                 for (JsonElement element : json.getAsJsonArray("pkarrRelays")) {
                     URI uri = URI.create(element.getAsString());

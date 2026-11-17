@@ -4,6 +4,7 @@ import dropin.core.pkarr.Rendezvous;
 import dropin.core.pkarr.RendezvousRecord;
 import dropin.core.world.CoopWorld;
 import dropin.mc.DropIn;
+import dropin.tunnel.Config;
 import dropin.tunnel.E4mcClient;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.server.IntegratedServer;
@@ -26,6 +27,7 @@ public final class HostSession implements Runnable {
     private static final long HEARTBEAT_MS = 5 * 60_000;
     private static final long RETRY_MS = 60_000;
     private static final long MEMBERS_MS = 5_000;
+    private static final long DOMAIN_WAIT_MS = 30_000;
 
     private static volatile HostSession current;
 
@@ -35,6 +37,18 @@ public final class HostSession implements Runnable {
     private final RendezvousRecord base;
     private volatile String domain = "";
     private volatile boolean cancelled;
+    private volatile String announcedState = "";
+    private volatile String announcedAddr = "";
+
+    /** The state last published successfully ("" before the first publish). */
+    public String announcedState() {
+        return announcedState;
+    }
+
+    /** The e4mc domain in the record last published successfully ("" if none). */
+    public String announcedAddr() {
+        return announcedAddr;
+    }
 
     private HostSession(Minecraft mc, CoopWorld world, Rendezvous rendezvous, String sess, String uuid, String name) {
         this.mc = mc;
@@ -56,7 +70,7 @@ public final class HostSession implements Runnable {
         return domain;
     }
 
-    static void start(Minecraft mc, CoopWorld world, Rendezvous rendezvous, String sess, String uuid, String name) {
+    public static void start(Minecraft mc, CoopWorld world, Rendezvous rendezvous, String sess, String uuid, String name) {
         HostSession old = current;
         if (old != null) {
             old.cancelled = true;
@@ -83,6 +97,11 @@ public final class HostSession implements Runnable {
                 return;
             }
             String lan = openToLan(server);
+            if (DropIn.switches().flag("dropin.dev.online")) {
+                // Development only: the online smoke test must go through the relay, not the LAN shortcut.
+                lan = "";
+            }
+            long started = System.currentTimeMillis();
             String published = null;
             long lastPublish = 0;
             long lastTry = 0;
@@ -90,14 +109,22 @@ public final class HostSession implements Runnable {
             while (!cancelled && mc.getSingleplayerServer() == server && server.isRunning()) {
                 long now = System.currentTimeMillis();
                 String wanted = domain;
+                // Until the tunnel has a domain, friends outside the LAN could not reach this session. They are
+                // told "starting" (and wait) instead of "host" with no address (and start a second session).
+                boolean waitingForDomain = wanted.isEmpty() && Config.INSTANCE.hostEnabled.value()
+                        && now - started < DOMAIN_WAIT_MS;
+                String state = waitingForDomain ? RendezvousRecord.STARTING : RendezvousRecord.HOST;
+                String key = state + "|" + wanted;
                 boolean due = published == null ? now - lastTry >= (lastTry == 0 ? 0 : RETRY_MS)
-                        : !published.equals(wanted) || now - lastPublish >= HEARTBEAT_MS;
+                        : !published.equals(key) || now - lastPublish >= HEARTBEAT_MS;
                 if (due) {
                     lastTry = now;
-                    if (publish(RendezvousRecord.HOST, wanted, lan)) {
-                        published = wanted;
+                    if (publish(state, wanted, lan)) {
+                        published = key;
                         lastPublish = now;
-                        DropIn.LOGGER.info("Co-op world '{}' announced: domain='{}' lan='{}'", world.name(), wanted, lan);
+                        announcedState = state;
+                        announcedAddr = wanted;
+                        DropIn.LOGGER.info("Co-op world '{}' announced as {}: domain='{}' lan='{}'", world.name(), state, wanted, lan);
                     }
                 }
                 if (now - lastMembers >= MEMBERS_MS) {

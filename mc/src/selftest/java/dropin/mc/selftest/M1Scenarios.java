@@ -1,0 +1,689 @@
+package dropin.mc.selftest;
+
+import dropin.core.crypto.Ed25519;
+import dropin.core.crypto.WorldKeys;
+import dropin.core.invite.Invite;
+import dropin.core.pkarr.RendezvousRecord;
+import dropin.core.world.CoopWorld;
+import dropin.core.world.CoopWorldStore;
+import dropin.mc.DropIn;
+import dropin.mc.coop.CoopWorlds;
+import dropin.mc.coop.HostSession;
+import dropin.mc.menu.CoopActions;
+import dropin.mc.menu.CoopWorldsScreen;
+import dropin.mc.menu.InviteScreen;
+import dropin.mc.menu.PlayersScreen;
+import dropin.mc.selftest.Scenarios.Context;
+import dropin.tunnel.Agnos;
+import dropin.tunnel.Config;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.events.GuiEventListener;
+import net.minecraft.client.gui.screens.DisconnectedScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.client.gui.screens.worldselection.SelectWorldScreen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.server.IntegratedServer;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.world.Difficulty;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.LevelSettings;
+import net.minecraft.world.level.WorldDataConfiguration;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.levelgen.WorldOptions;
+import net.minecraft.world.level.levelgen.presets.WorldPresets;
+
+import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.security.SecureRandom;
+import java.util.List;
+import java.util.function.Predicate;
+import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
+
+import static dropin.mc.selftest.Scenarios.PEER_TICKS;
+import static dropin.mc.selftest.Scenarios.SHORT_TICKS;
+import static dropin.mc.selftest.Scenarios.STARTUP_TICKS;
+import static dropin.mc.selftest.Scenarios.WORLD_ID;
+import static dropin.mc.selftest.Scenarios.WORLD_TICKS;
+import static dropin.mc.selftest.Scenarios.atMainMenu;
+import static dropin.mc.selftest.Scenarios.failIfDisconnected;
+import static dropin.mc.selftest.Scenarios.inWorld;
+
+/**
+ * The scripted scenarios of gate suite {@code m1} (MILESTONES). Development only.
+ * They go through the same code as the buttons ({@link CoopActions}, {@link CoopWorldsScreen#play()}) and
+ * assert on files and game state.
+ */
+final class M1Scenarios {
+    private static final String K = "text.dropin_coop.";
+    private static final String WORLD_READY = "world-ready";
+    private static final String INVITE_FILE = "invite.txt";
+    private static final String WORLD_COPY = "world-copy";
+    private static final String A_HOSTING = "a-hosting";
+
+    private M1Scenarios() {}
+
+    /** What a scenario learns as it runs. */
+    private static final class State {
+        CoopWorld world;
+        String otherName;
+        long goAt;
+    }
+
+    static StepRunner build(String key, Context ctx) {
+        return switch (key) {
+            case "menu:solo" -> menu(ctx);
+            case "import-saves:solo" -> importSaves(ctx);
+            case "import-zip:solo" -> importZip(ctx);
+            case "import-rejects:solo" -> importRejects(ctx);
+            case "remove:solo" -> remove(ctx);
+            case "owner-invite:solo" -> ownerInvite(ctx);
+            case "drop-in:a" -> dropInA(ctx, false);
+            case "drop-in:b" -> dropInB(ctx, false);
+            case "players-tab:a" -> dropInA(ctx, true);
+            case "players-tab:b" -> dropInB(ctx, true);
+            case "host-swap-own-inventory:a" -> swapA(ctx);
+            case "host-swap-own-inventory:b" -> swapB(ctx);
+            case "race:a" -> race(ctx, true);
+            case "race:b" -> race(ctx, false);
+            default -> null;
+        };
+    }
+
+    // ---- building blocks --------------------------------------------------------------------------
+
+    private static StepRunner base(Context ctx) {
+        return new StepRunner()
+                .action("configure tunnel", () -> {
+                    if (!ctx.online()) {
+                        // DESIGN 4.12: self-tests run with the e4mc tunnel disabled. Not written to the config file.
+                        Config.INSTANCE.hostEnabled.setOverride(false);
+                    }
+                })
+                .step("main menu", STARTUP_TICKS, () -> atMainMenu(ctx.mc()));
+    }
+
+    private static StepRunner createWorld(StepRunner runner, Context ctx) {
+        Minecraft mc = ctx.mc();
+        return runner
+                .action("create world", () -> {
+                    LevelSettings settings = new LevelSettings(WORLD_ID, GameType.CREATIVE,
+                            new LevelSettings.DifficultySettings(Difficulty.PEACEFUL, false, false), true,
+                            WorldDataConfiguration.DEFAULT);
+                    mc.createWorldOpenFlows().createFreshLevel(WORLD_ID, settings, new WorldOptions(Scenarios.SEED, false, false),
+                            registries -> registries.lookupOrThrow(Registries.WORLD_PRESET)
+                                    .getOrThrow(WorldPresets.FLAT).value().createWorldDimensions(),
+                            mc.gui.screen());
+                })
+                .step("world loaded", WORLD_TICKS, () -> inWorld(mc) && mc.getSingleplayerServer() != null);
+    }
+
+    private static StepRunner quitToTitle(StepRunner runner, Context ctx) {
+        Minecraft mc = ctx.mc();
+        return runner
+                .action("save and quit", () -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE))
+                .step("world closed", WORLD_TICKS, () -> mc.getSingleplayerServer() == null && mc.level == null)
+                .action("title screen", () -> mc.gui.setScreen(new TitleScreen()))
+                .step("back at the main menu", SHORT_TICKS, () -> atMainMenu(mc));
+    }
+
+    private static StepRunner importWorld(StepRunner runner, Context ctx, State state) {
+        return runner.action("import from saves", () -> {
+            CoopActions.Outcome outcome = CoopActions.importFromSaves(ctx.mc(), WORLD_ID, true);
+            require(outcome.ok(), "import failed: " + outcome.message().getString());
+            expectKey(outcome, "import.done");
+            state.world = outcome.world();
+        });
+    }
+
+    /** Opens the Co-op Worlds screen, selects the world and presses Play: the real launch flow. */
+    private static void pressPlay(Minecraft mc, State state) {
+        CoopWorldsScreen screen = new CoopWorldsScreen(new TitleScreen());
+        mc.gui.setScreen(screen);
+        require(screen.worlds().stream().anyMatch(world -> world.worldId().equals(state.world.worldId())),
+                "the Co-op Worlds screen does not list the world");
+        screen.select(state.world.worldId());
+        screen.play();
+    }
+
+    private static boolean hosting(Context ctx) {
+        Minecraft mc = ctx.mc();
+        IntegratedServer server = mc.getSingleplayerServer();
+        HostSession session = HostSession.current();
+        return inWorld(mc) && server != null && server.isPublished() && session != null
+                && session.announcedState().equals(RendezvousRecord.HOST)
+                && (!ctx.online() || !session.announcedAddr().isEmpty());
+    }
+
+    private static boolean joinedRemote(Minecraft mc) {
+        failIfDisconnected(mc);
+        return inWorld(mc) && mc.getSingleplayerServer() == null;
+    }
+
+    // ---- menu -------------------------------------------------------------------------------------
+
+    private static StepRunner menu(Context ctx) {
+        Minecraft mc = ctx.mc();
+        State state = new State();
+        return base(ctx)
+                .action("know one co-op world", () -> {
+                    CoopActions.Outcome outcome = CoopActions.joinWithInvite(mc, randomInvite().encode());
+                    require(outcome.ok(), "could not register a world: " + outcome.message().getString());
+                    state.world = outcome.world();
+                })
+                .action("fresh title screen", () -> mc.gui.setScreen(new TitleScreen()))
+                .step("title screen has the button", SHORT_TICKS, () -> titleButton(mc) != null)
+                .action("button overlaps nothing", () -> {
+                    Button ours = titleButton(mc);
+                    require(ours.getX() >= 0 && ours.getX() + ours.getWidth() <= mc.gui.screen().width, "button is off screen");
+                    for (GuiEventListener child : mc.gui.screen().children()) {
+                        if (child instanceof AbstractWidget other && other != ours && other.visible && overlaps(ours, other)) {
+                            throw new IllegalStateException("Co-op Worlds button overlaps '" + other.getMessage().getString() + "'");
+                        }
+                    }
+                })
+                .action("press it", () -> titleButton(mc).onPress(new KeyEvent(257, 0, 0)))
+                .step("Co-op Worlds screen opened", SHORT_TICKS, () -> mc.gui.screen() instanceof CoopWorldsScreen)
+                .action("screen lists the world", () -> {
+                    CoopWorldsScreen screen = (CoopWorldsScreen) mc.gui.screen();
+                    require(screen.worlds().stream().anyMatch(world -> world.worldId().equals(state.world.worldId())),
+                            "the known co-op world is not listed");
+                    require(buttonContaining(screen, state.world.name()) != null, "no row shows the world's name");
+                    require(!CoopWorldsScreen.TITLE.getString().equals("menu.dropin_coop.title"), "the language file is not loaded");
+                })
+                .action("singleplayer list", () -> mc.gui.setScreen(new SelectWorldScreen(new TitleScreen())))
+                .step("singleplayer list has the button too", SHORT_TICKS,
+                        () -> buttonContaining(mc.gui.screen(), CoopWorldsScreen.TITLE.getString()) != null);
+    }
+
+    private static Button titleButton(Minecraft mc) {
+        return mc.gui.screen() instanceof TitleScreen screen ? buttonContaining(screen, CoopWorldsScreen.TITLE.getString()) : null;
+    }
+
+    private static Button buttonContaining(Screen screen, String text) {
+        for (GuiEventListener child : screen.children()) {
+            if (child instanceof Button button && button.getMessage().getString().contains(text)) {
+                return button;
+            }
+        }
+        return null;
+    }
+
+    private static boolean overlaps(AbstractWidget a, AbstractWidget b) {
+        return a.getX() < b.getX() + b.getWidth() && b.getX() < a.getX() + a.getWidth()
+                && a.getY() < b.getY() + b.getHeight() && b.getY() < a.getY() + a.getHeight();
+    }
+
+    // ---- import, remove, owner --------------------------------------------------------------------
+
+    private static StepRunner importSaves(Context ctx) {
+        Minecraft mc = ctx.mc();
+        State state = new State();
+        StepRunner runner = importWorld(quitToTitle(createWorld(base(ctx), ctx), ctx), ctx, state);
+        int[] waited = {0};
+        return runner
+                .action("files and invite", () -> {
+                    CoopWorld world = state.world;
+                    Path folder = mc.getLevelSource().getLevelPath(WORLD_ID);
+                    require(Files.isRegularFile(folder.resolve("dropin/world.json")), "no dropin/world.json");
+                    require(CoopWorldStore.readMarker(folder).orElse("").equals(world.worldId()), "marker names another world");
+                    require(Files.isRegularFile(worldsDir().resolve(world.worldId() + ".json")), "no key file");
+                    try (Stream<Path> backups = Files.list(mc.getLevelSource().getBackupPath())) {
+                        require(backups.anyMatch(file -> file.getFileName().toString().contains(WORLD_ID)), "no backup was made");
+                    }
+                    Invite decoded = Invite.decode(world.invite().encode());
+                    require(WorldKeys.fromSeed(decoded.seed()).worldId().equals(world.worldId()), "invite decodes to another world id");
+                    require(CoopWorlds.store().list().stream().anyMatch(w -> w.worldId().equals(world.worldId())), "not in the co-op list");
+                })
+                .action("co-op screen lists it", () -> {
+                    CoopWorldsScreen screen = new CoopWorldsScreen(new TitleScreen());
+                    mc.gui.setScreen(screen);
+                    require(buttonContaining(screen, state.world.name()) != null, "the imported world is not on the screen");
+                })
+                .action("singleplayer list", () -> mc.gui.setScreen(new SelectWorldScreen(new TitleScreen())))
+                // long enough for the list to load its entries, which is where the badge is added
+                .step("singleplayer list still works", SHORT_TICKS, () -> ++waited[0] >= 100
+                        && mc.gui.screen() instanceof SelectWorldScreen && CoopActions.isCoopLevel(mc, WORLD_ID));
+    }
+
+    private static StepRunner importZip(Context ctx) {
+        Minecraft mc = ctx.mc();
+        Path zip = ctx.sharedDir().resolve("zipped-world.zip");
+        return quitToTitle(createWorld(base(ctx), ctx), ctx)
+                .action("zip the world", () -> zipTree(mc.getLevelSource().getLevelPath(WORLD_ID), zip))
+                .action("open the Co-op Worlds screen", () -> mc.gui.setScreen(new CoopWorldsScreen(new TitleScreen())))
+                .action("drop the zip on it", () -> mc.gui.screen().onFilesDrop(List.of(zip)))
+                .step("invite is shown", SHORT_TICKS, () -> mc.gui.screen() instanceof InviteScreen)
+                .action("extracted and imported", () -> {
+                    CoopWorld world = ((InviteScreen) mc.gui.screen()).world();
+                    Path folder = mc.getLevelSource().getBaseDir().resolve("zipped-world");
+                    require(Files.isRegularFile(folder.resolve("level.dat")), "the zip was not extracted into saves/zipped-world");
+                    require(CoopWorldStore.readMarker(folder).orElse("").equals(world.worldId()), "the extracted world is not marked");
+                    require(CoopActions.folders(mc).getOrDefault(world.worldId(), "").equals("zipped-world"), "world is not listed with its folder");
+                    require(CoopWorldStore.readMarker(mc.getLevelSource().getLevelPath(WORLD_ID)).isEmpty(), "the original world was changed");
+                });
+    }
+
+    private static StepRunner importRejects(Context ctx) {
+        Minecraft mc = ctx.mc();
+        State state = new State();
+        StepRunner runner = createWorld(base(ctx), ctx)
+                .action("an open world is refused", () -> {
+                    CoopActions.Outcome outcome = CoopActions.importFromSaves(mc, WORLD_ID, true);
+                    expectRefused(outcome, "import.open");
+                    require(CoopWorldStore.readMarker(mc.getLevelSource().getLevelPath(WORLD_ID)).isEmpty(), "an open world was marked");
+                });
+        return importWorld(quitToTitle(runner, ctx), ctx, state)
+                .action("an already co-op world is refused", () ->
+                        expectRefused(CoopActions.importFromSaves(mc, WORLD_ID, true), "import.already_coop"))
+                .action("a path-escaping zip is refused", () -> {
+                    Path zip = ctx.sharedDir().resolve("evil.zip");
+                    try (OutputStream out = Files.newOutputStream(zip); ZipOutputStream zos = new ZipOutputStream(out)) {
+                        for (String name : new String[]{"level.dat", "../evil.txt"}) {
+                            zos.putNextEntry(new ZipEntry(name));
+                            zos.write("x".getBytes(StandardCharsets.UTF_8));
+                            zos.closeEntry();
+                        }
+                    }
+                    expectRefused(CoopActions.importDropped(mc, List.of(zip)), "import.zip_escape");
+                    Path saves = mc.getLevelSource().getBaseDir();
+                    require(!Files.exists(saves.resolve("../evil.txt")), "the escaping entry was written");
+                    require(!Files.exists(saves.resolve("evil")), "a folder was created for the refused zip");
+                })
+                .action("a folder without level.dat is refused", () -> {
+                    Path folder = Files.createDirectories(ctx.sharedDir().resolve("not-a-world"));
+                    Files.writeString(folder.resolve("readme.txt"), "hello");
+                    expectRefused(CoopActions.importDropped(mc, List.of(folder)), "import.no_level_dat");
+                    require(!Files.exists(mc.getLevelSource().getBaseDir().resolve("not-a-world")), "the folder was copied into saves");
+                });
+    }
+
+    private static StepRunner remove(Context ctx) {
+        Minecraft mc = ctx.mc();
+        State state = new State();
+        return importWorld(quitToTitle(createWorld(base(ctx), ctx), ctx), ctx, state)
+                .action("remove", () -> {
+                    CoopActions.Outcome outcome = CoopActions.remove(mc, state.world);
+                    require(outcome.ok(), "remove failed: " + outcome.message().getString());
+                    String id = state.world.worldId();
+                    require(!Files.exists(mc.getLevelSource().getLevelPath(WORLD_ID).resolve("dropin")), "dropin/ is still there");
+                    require(!Files.exists(worldsDir().resolve(id + ".json")), "the key file is still there");
+                    require(!Files.exists(worldsDir().resolve(id + ".owner.key")), "the owner key is still there");
+                    require(CoopWorlds.store().list().isEmpty(), "the world is still in the co-op list");
+                })
+                .action("open it from singleplayer", () -> mc.createWorldOpenFlows().openWorld(WORLD_ID, () -> {}))
+                .step("world loaded", WORLD_TICKS, () -> inWorld(mc) && mc.getSingleplayerServer() != null)
+                .action("it is plain singleplayer", () -> {
+                    IntegratedServer server = mc.getSingleplayerServer();
+                    require(!server.isPublished(), "the world was opened to LAN");
+                    require(HostSession.current() == null, "a co-op host session is running");
+                    require(!CoopWorlds.isCoopServer(server), "the world still counts as co-op");
+                });
+    }
+
+    private static StepRunner ownerInvite(Context ctx) {
+        Minecraft mc = ctx.mc();
+        State state = new State();
+        return importWorld(quitToTitle(createWorld(base(ctx), ctx), ctx), ctx, state)
+                .action("invite carries the owner key's fingerprint", () -> {
+                    CoopWorld world = state.world;
+                    Invite decoded = Invite.decode(world.invite().encode());
+                    require(WorldKeys.fromSeed(decoded.seed()).worldId().equals(world.worldId()), "invite decodes to another world id");
+                    require(Files.isRegularFile(worldsDir().resolve(world.worldId() + ".owner.key")), "no owner key file");
+                    byte[] ownerPublic = Ed25519.publicKeyBytes(CoopWorlds.store().ownerKey(world.worldId()).orElseThrow().getPublic());
+                    require(decoded.matchesOwner(ownerPublic), "the invite's fingerprint is not that of the owner key on disk");
+                    require(CoopWorlds.store().isOwner(world.worldId()), "the importer is not the owner");
+                })
+                .action("a world joined by invite has no owner key", () -> {
+                    CoopActions.Outcome outcome = CoopActions.joinWithInvite(mc, randomInvite().encode());
+                    require(outcome.ok(), "join with invite failed: " + outcome.message().getString());
+                    String id = outcome.world().worldId();
+                    require(!Files.exists(worldsDir().resolve(id + ".owner.key")), "an owner key file was written for a joined world");
+                    require(!CoopWorlds.store().isOwner(id), "the joiner counts as owner");
+                    expectRefused(CoopActions.exportOwnerKey(mc, outcome.world()), "owner.not_owner");
+                    expectRefused(CoopActions.joinWithInvite(mc, "dropin1-AAAAA-AAAAA"), "invite.bad");
+                })
+                .action("export owner key", () -> {
+                    CoopActions.Outcome outcome = CoopActions.exportOwnerKey(mc, state.world);
+                    require(outcome.ok(), "export failed: " + outcome.message().getString());
+                    Path exported = mc.gameDirectory.toPath().resolve("dropin-owner-key-" + state.world.worldId().substring(0, 8) + ".key");
+                    require(Files.readString(exported).equals(Files.readString(worldsDir().resolve(state.world.worldId() + ".owner.key"))),
+                            "the exported key differs from the key on disk");
+                    Files.delete(exported);
+                });
+    }
+
+    // ---- two players: shared setup ------------------------------------------------------------------
+
+    /** A: makes the world, imports it, and leaves the invite and a copy of the folder for B. */
+    private static StepRunner setupA(Context ctx, State state) {
+        Minecraft mc = ctx.mc();
+        return importWorld(quitToTitle(createWorld(base(ctx), ctx), ctx), ctx, state)
+                .action("share invite and world copy", () -> {
+                    copyTree(mc.getLevelSource().getLevelPath(WORLD_ID), ctx.sharedDir().resolve(WORLD_COPY));
+                    ctx.writeShared(INVITE_FILE, state.world.invite().encode());
+                    ctx.writeShared(WORLD_READY, "ok");
+                });
+    }
+
+    /** B: joins with the invite and brings in the copy of the folder "by hand" (dropped on the screen). */
+    private static StepRunner setupB(Context ctx, State state) {
+        Minecraft mc = ctx.mc();
+        return base(ctx)
+                .step("A shared the world", STARTUP_TICKS + WORLD_TICKS, () -> ctx.sharedExists(WORLD_READY))
+                .action("join with invite", () -> {
+                    CoopActions.Outcome outcome = CoopActions.joinWithInvite(mc, ctx.readShared(INVITE_FILE));
+                    require(outcome.ok(), "join with invite failed: " + outcome.message().getString());
+                    state.world = outcome.world();
+                    require(!CoopWorlds.store().isOwner(state.world.worldId()), "B has an owner key");
+                })
+                .action("bring in the world copy", () -> {
+                    CoopActions.Outcome outcome = CoopActions.importDropped(mc, List.of(ctx.sharedDir().resolve(WORLD_COPY)));
+                    require(outcome.ok(), "could not attach the copy: " + outcome.message().getString());
+                    expectKey(outcome, "import.copy_attached");
+                    require(outcome.world().worldId().equals(state.world.worldId()), "the copy belongs to another world");
+                });
+    }
+
+    // ---- drop-in, players-tab -------------------------------------------------------------------------
+
+    private static StepRunner dropInA(Context ctx, boolean playersTab) {
+        Minecraft mc = ctx.mc();
+        State state = new State();
+        StepRunner runner = setupA(ctx, state)
+                .action("press Play", () -> pressPlay(mc, state))
+                .step("hosting, announced", WORLD_TICKS, () -> hosting(ctx))
+                .action("force-load probe chunk", () -> {
+                    IntegratedServer server = mc.getSingleplayerServer();
+                    server.execute(() -> server.getCommands()
+                            .performPrefixedCommand(server.createCommandSourceStack(), "forceload add 0 0"));
+                })
+                .action("tell B", () -> ctx.writeShared(A_HOSTING, "ok"))
+                .step("B dropped in", PEER_TICKS, () -> mc.getSingleplayerServer().getPlayerList().getPlayerCount() == 2)
+                .step("sees B", SHORT_TICKS, () -> mc.level != null && mc.level.players().size() == 2)
+                .step("reads block placed by B", SHORT_TICKS,
+                        () -> mc.getSingleplayerServer().overworld().getBlockState(Scenarios.PROBE_POS).is(Blocks.GOLD_BLOCK));
+        if (playersTab) {
+            playersTabChecks(runner, mc, state, true);
+        }
+        return runner
+                .action("tell B", () -> ctx.writeShared(Scenarios.HOST_DONE, "ok"))
+                .step("B finished", SHORT_TICKS, () -> ctx.sharedExists(Scenarios.PEER_DONE));
+    }
+
+    private static StepRunner dropInB(Context ctx, boolean playersTab) {
+        Minecraft mc = ctx.mc();
+        State state = new State();
+        StepRunner runner = setupB(ctx, state)
+                .step("A is hosting", WORLD_TICKS + PEER_TICKS, () -> ctx.sharedExists(A_HOSTING))
+                .action("press Play", () -> pressPlay(mc, state))
+                .step("landed in A's session", PEER_TICKS, () -> joinedRemote(mc))
+                .step("sees A", SHORT_TICKS, () -> {
+                    failIfDisconnected(mc);
+                    return mc.level != null && mc.level.players().size() == 2;
+                })
+                .action("place block", () -> mc.player.connection.sendCommand(Scenarios.PROBE_COMMAND));
+        if (playersTab) {
+            playersTabChecks(runner, mc, state, false);
+        }
+        return runner
+                .step("A read the block", SHORT_TICKS, () -> {
+                    failIfDisconnected(mc);
+                    return ctx.sharedExists(Scenarios.HOST_DONE);
+                })
+                .action("tell A", () -> ctx.writeShared(Scenarios.PEER_DONE, "ok"));
+    }
+
+    /** Gate players-tab: both names listed on both sides, with A (the importer) marked as owner. */
+    private static void playersTabChecks(StepRunner runner, Minecraft mc, State state, boolean iAmA) {
+        runner.step("Players tab lists both names", SHORT_TICKS, () -> {
+                    String me = mc.getUser().getName();
+                    String other = null;
+                    for (Player player : mc.level.players()) {
+                        if (!player.getGameProfile().name().equals(me)) {
+                            other = player.getGameProfile().name();
+                        }
+                    }
+                    if (other == null) {
+                        return false;
+                    }
+                    state.otherName = other;
+                    List<PlayersScreen.Row> rows = PlayersScreen.rowsOf(state.world.worldId());
+                    final String otherName = other;
+                    return rows.stream().anyMatch(row -> row.name().equals(me))
+                            && rows.stream().anyMatch(row -> row.name().equals(otherName));
+                })
+                .action("A is marked as owner", () -> {
+                    String nameOfA = iAmA ? mc.getUser().getName() : state.otherName;
+                    List<PlayersScreen.Row> rows = PlayersScreen.rowsOf(state.world.worldId());
+                    for (PlayersScreen.Row row : rows) {
+                        if (row.owner() != row.name().equals(nameOfA)) {
+                            throw new IllegalStateException("Players tab: " + row.name() + " owner=" + row.owner()
+                                    + ", expected only " + nameOfA + " to be marked as owner");
+                        }
+                    }
+                });
+    }
+
+    // ---- host-swap-own-inventory ------------------------------------------------------------------------
+
+    private static StepRunner swapA(Context ctx) {
+        Minecraft mc = ctx.mc();
+        State state = new State();
+        return setupA(ctx, state)
+                .action("press Play", () -> pressPlay(mc, state))
+                .step("hosting, announced", WORLD_TICKS, () -> hosting(ctx))
+                .action("tell B", () -> ctx.writeShared(A_HOSTING, "ok"))
+                .step("B dropped in", PEER_TICKS, () -> mc.getSingleplayerServer().getPlayerList().getPlayerCount() == 2)
+                .action("give and move", () -> {
+                    mc.player.connection.sendCommand("give @s minecraft:diamond 3");
+                    mc.player.connection.sendCommand("tp @s 100 -60 100");
+                })
+                .step("A has its item at its place", SHORT_TICKS, () -> has(mc, Items.DIAMOND) && near(mc, 100, 100))
+                .step("B has its item at its place", SHORT_TICKS, () -> ctx.sharedExists("b-marked"))
+                .action("A quits", () -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE))
+                .step("world closed", WORLD_TICKS, () -> mc.getSingleplayerServer() == null && mc.level == null)
+                .action("title screen", () -> mc.gui.setScreen(new TitleScreen()))
+                .action("copy the world folder to B", () -> {
+                    copyTree(mc.getLevelSource().getLevelPath(WORLD_ID), ctx.sharedDir().resolve("world-copy-2"));
+                    ctx.writeShared("swap-ready", "ok");
+                })
+                .step("B is hosting", WORLD_TICKS + PEER_TICKS, () -> ctx.sharedExists("b-hosting"))
+                .action("press Play", () -> pressPlay(mc, state))
+                .step("landed in B's session", PEER_TICKS, () -> joinedRemote(mc))
+                .step("A has A's item at A's position", SHORT_TICKS, () -> {
+                    failIfDisconnected(mc);
+                    return has(mc, Items.DIAMOND) && near(mc, 100, 100);
+                })
+                .action("A does not have B's item", () -> require(!has(mc, Items.EMERALD), "A got B's inventory"))
+                .action("tell B", () -> ctx.writeShared("a-done", "ok"));
+    }
+
+    private static StepRunner swapB(Context ctx) {
+        Minecraft mc = ctx.mc();
+        State state = new State();
+        return setupB(ctx, state)
+                .step("A is hosting", WORLD_TICKS + PEER_TICKS, () -> ctx.sharedExists(A_HOSTING))
+                .action("press Play", () -> pressPlay(mc, state))
+                .step("landed in A's session", PEER_TICKS, () -> joinedRemote(mc))
+                .action("give and move", () -> {
+                    mc.player.connection.sendCommand("give @s minecraft:emerald 3");
+                    mc.player.connection.sendCommand("tp @s -100 -60 -100");
+                })
+                .step("B has its item at its place", SHORT_TICKS, () -> {
+                    failIfDisconnected(mc);
+                    return has(mc, Items.EMERALD) && near(mc, -100, -100);
+                })
+                .action("tell A", () -> ctx.writeShared("b-marked", "ok"))
+                .step("A quit", PEER_TICKS, () -> mc.gui.screen() instanceof DisconnectedScreen || (mc.level == null && mc.gui.screen() instanceof TitleScreen))
+                .action("title screen", () -> mc.gui.setScreen(new TitleScreen()))
+                .step("A copied the world folder", WORLD_TICKS, () -> ctx.sharedExists("swap-ready"))
+                .action("replace the local copy", () -> {
+                    Path local = mc.getLevelSource().getLevelPath(CoopActions.folders(mc).get(state.world.worldId()));
+                    deleteTree(local);
+                    copyTree(ctx.sharedDir().resolve("world-copy-2"), local);
+                })
+                .action("press Play", () -> pressPlay(mc, state))
+                .step("hosting, announced", WORLD_TICKS, () -> hosting(ctx))
+                .action("B has B's item at B's position", () -> {
+                    require(has(mc, Items.EMERALD), "B hosts without B's item (loaded someone else's player data?)");
+                    require(near(mc, -100, -100), "B hosts at " + mc.player.getX() + "," + mc.player.getZ() + ", not at B's position");
+                    require(!has(mc, Items.DIAMOND), "B got A's inventory");
+                })
+                .action("tell A", () -> ctx.writeShared("b-hosting", "ok"))
+                .step("A dropped in", PEER_TICKS, () -> mc.getSingleplayerServer().getPlayerList().getPlayerCount() == 2)
+                .step("A finished", SHORT_TICKS, () -> ctx.sharedExists("a-done"));
+    }
+
+    private static boolean has(Minecraft mc, Item item) {
+        Predicate<ItemStack> isItem = stack -> stack.is(item);
+        return mc.player != null && mc.player.getInventory().contains(isItem);
+    }
+
+    private static boolean near(Minecraft mc, double x, double z) {
+        return mc.player != null && Math.abs(mc.player.getX() - x) < 2 && Math.abs(mc.player.getZ() - z) < 2;
+    }
+
+    // ---- race -------------------------------------------------------------------------------------------
+
+    private static StepRunner race(Context ctx, boolean iAmA) {
+        Minecraft mc = ctx.mc();
+        State state = new State();
+        String mine = iAmA ? "race-a" : "race-b";
+        String theirs = iAmA ? "race-b" : "race-a";
+        StepRunner runner;
+        if (iAmA) {
+            runner = setupA(ctx, state)
+                    .step("B is ready", STARTUP_TICKS, () -> ctx.sharedExists("b-ready"))
+                    .action("set the start time", () -> ctx.writeShared("go", Long.toString(System.currentTimeMillis() + 3000)));
+        } else {
+            runner = setupB(ctx, state)
+                    .action("ready", () -> ctx.writeShared("b-ready", "ok"));
+        }
+        return runner
+                .step("start time known", STARTUP_TICKS, () -> {
+                    if (!ctx.sharedExists("go")) {
+                        return false;
+                    }
+                    state.goAt = Long.parseLong(ctx.readShared("go"));
+                    return true;
+                })
+                .step("start time reached", SHORT_TICKS, () -> System.currentTimeMillis() >= state.goAt)
+                .action("press Play", () -> {
+                    DropIn.LOGGER.info("race: pressing Play {} ms after the start time", System.currentTimeMillis() - state.goAt);
+                    pressPlay(mc, state);
+                })
+                .step("in the world", WORLD_TICKS + PEER_TICKS, () -> {
+                    failIfDisconnected(mc);
+                    return inWorld(mc);
+                })
+                .action("report role", () -> ctx.writeShared(mine, mc.getSingleplayerServer() != null ? "host" : "join"))
+                .step("other reported", WORLD_TICKS + PEER_TICKS, () -> ctx.sharedExists(theirs))
+                .action("exactly one hosts", () -> {
+                    String myRole = ctx.readShared(mine);
+                    String theirRole = ctx.readShared(theirs);
+                    require(!myRole.equals(theirRole), "both ended up as '" + myRole + "'");
+                })
+                .step("both in one session", PEER_TICKS, () -> {
+                    failIfDisconnected(mc);
+                    return mc.level != null && mc.level.players().size() == 2;
+                })
+                .action("tell the other", () -> ctx.writeShared(mine + "-ok", "ok"))
+                .step("other finished", SHORT_TICKS, () -> ctx.sharedExists(theirs + "-ok"));
+    }
+
+    // ---- helpers ----------------------------------------------------------------------------------------
+
+    private static Path worldsDir() {
+        return Agnos.configDir().resolve("dropin").resolve("worlds");
+    }
+
+    private static Invite randomInvite() {
+        SecureRandom random = new SecureRandom();
+        byte[] seed = new byte[32];
+        byte[] fingerprint = new byte[16];
+        random.nextBytes(seed);
+        random.nextBytes(fingerprint);
+        return new Invite(seed, fingerprint);
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) {
+            throw new IllegalStateException(message);
+        }
+    }
+
+    private static void expectKey(CoopActions.Outcome outcome, String key) {
+        require(outcome.key().equals(K + key), "expected message " + key + ", got " + outcome.key());
+        require(!outcome.message().getString().startsWith(K), "message " + outcome.key() + " has no translation");
+    }
+
+    private static void expectRefused(CoopActions.Outcome outcome, String key) {
+        require(!outcome.ok(), "expected a refusal (" + key + "), but it was accepted");
+        expectKey(outcome, key);
+    }
+
+    private static void copyTree(Path from, Path to) throws IOException {
+        Files.walkFileTree(from, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                Files.createDirectories(to.resolve(from.relativize(dir).toString()));
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                if (!file.getFileName().toString().equals("session.lock")) {
+                    Files.copy(file, to.resolve(from.relativize(file).toString()));
+                }
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
+    private static void deleteTree(Path dir) throws IOException {
+        Files.walkFileTree(dir, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Files.delete(file);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult postVisitDirectory(Path d, IOException e) throws IOException {
+                Files.delete(d);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
+    private static void zipTree(Path folder, Path zip) throws IOException {
+        Files.createDirectories(zip.getParent());
+        try (OutputStream out = Files.newOutputStream(zip); ZipOutputStream zos = new ZipOutputStream(out);
+             Stream<Path> files = Files.walk(folder)) {
+            for (Path file : files.filter(Files::isRegularFile).toList()) {
+                if (file.getFileName().toString().equals("session.lock")) {
+                    continue;
+                }
+                zos.putNextEntry(new ZipEntry(folder.relativize(file).toString().replace('\\', '/')));
+                Files.copy(file, zos);
+                zos.closeEntry();
+            }
+        }
+    }
+}

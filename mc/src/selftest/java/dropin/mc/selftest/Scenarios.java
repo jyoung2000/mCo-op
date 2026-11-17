@@ -37,19 +37,19 @@ import java.nio.file.Path;
  * World actions use commands; assertions read game state, not screenshots.
  */
 final class Scenarios {
-    private static final String WORLD_ID = "dropin-selftest";
-    private static final long SEED = 20261116L;
+    static final String WORLD_ID = "dropin-selftest";
+    static final long SEED = 20261116L;
     /** In a chunk the host force-loads, so the block can be placed and read wherever the players stand. */
-    private static final BlockPos PROBE_POS = new BlockPos(0, 250, 0);
-    private static final String PROBE_COMMAND = "setblock 0 250 0 minecraft:gold_block";
+    static final BlockPos PROBE_POS = new BlockPos(0, 250, 0);
+    static final String PROBE_COMMAND = "setblock 0 250 0 minecraft:gold_block";
 
-    private static final int STARTUP_TICKS = 12_000;
-    private static final int WORLD_TICKS = 6_000;
-    private static final int PEER_TICKS = 6_000;
-    private static final int SHORT_TICKS = 2_400;
+    static final int STARTUP_TICKS = 12_000;
+    static final int WORLD_TICKS = 6_000;
+    static final int PEER_TICKS = 6_000;
+    static final int SHORT_TICKS = 2_400;
 
-    private static final String HOST_DONE = "host-done";
-    private static final String PEER_DONE = "peer-done";
+    static final String HOST_DONE = "host-done";
+    static final String PEER_DONE = "peer-done";
     private static final String DOMAIN_FILE = "domain.txt";
 
     private Scenarios() {}
@@ -87,8 +87,13 @@ final class Scenarios {
     static StepRunner build(SelfTestSpec spec, Context ctx) {
         String key = spec.scenario() + ":" + spec.role();
         boolean expectOnline = spec.scenario().equals("tunnel-join");
-        if (expectOnline != ctx.online()) {
+        boolean eitherWay = spec.scenario().equals("drop-in");
+        if (!eitherWay && expectOnline != ctx.online()) {
             throw new IllegalStateException(key + " needs dropin.dev.online=" + expectOnline);
+        }
+        StepRunner m1 = M1Scenarios.build(key, ctx);
+        if (m1 != null) {
+            return m1;
         }
         return switch (key) {
             case "lan-join:host", "tunnel-join:host" -> joinHost(ctx);
@@ -223,15 +228,15 @@ final class Scenarios {
 
     // ---- helpers --------------------------------------------------------------------------------
 
-    private static boolean atMainMenu(Minecraft mc) {
+    static boolean atMainMenu(Minecraft mc) {
         return mc.gui.overlay() == null && mc.gui.screen() != null && mc.level == null;
     }
 
-    private static boolean inWorld(Minecraft mc) {
+    static boolean inWorld(Minecraft mc) {
         return mc.player != null && mc.level != null && mc.gui.overlay() == null;
     }
 
-    private static void failIfDisconnected(Minecraft mc) {
+    static void failIfDisconnected(Minecraft mc) {
         Screen screen = mc.gui.screen();
         if (screen instanceof DisconnectedScreen) {
             throw new IllegalStateException("disconnected: " + screen.getTitle().getString());

@@ -126,6 +126,15 @@ public final class CoopWorldStore {
         }
     }
 
+    /** "Export owner key" (DESIGN 4.13): copies the owner key file to {@code target} for backup. */
+    public void exportOwnerKey(String worldId, Path target) throws IOException {
+        Path file = ownerKeyFile(worldId);
+        if (!Files.isRegularFile(file)) {
+            throw new IOException("no owner key for " + worldId + " on this PC");
+        }
+        Files.copy(file, target, StandardCopyOption.REPLACE_EXISTING);
+    }
+
     // ---- import, join, remove ----------------------------------------------------------------
 
     /**
