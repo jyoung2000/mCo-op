@@ -40,6 +40,7 @@ public class CoopWorldsScreen extends Screen {
     private Button playButton;
     private Button inviteButton;
     private Button playersButton;
+    private Button modsButton;
     private Button removeButton;
     private Button exportButton;
     private Component notice = Component.empty();
@@ -118,12 +119,15 @@ public class CoopWorldsScreen extends Screen {
         footer(K + "button.new", left, row1, buttonWidth, 1, gap, this::createNew);
         footer(K + "button.import", left, row1, buttonWidth, 2, gap, () -> this.minecraft.gui.setScreen(new ImportScreen(this)));
         footer(K + "button.join", left, row1, buttonWidth, 3, gap, () -> this.minecraft.gui.setScreen(new JoinInviteScreen(this)));
-        inviteButton = footer(K + "button.invite", left, row2, buttonWidth, 0, gap,
+        int fifth = (listWidth - 4 * gap) / 5;
+        inviteButton = footer(K + "button.invite", left, row2, fifth, 0, gap,
                 () -> selectedWorld().ifPresent(world -> this.minecraft.gui.setScreen(new InviteScreen(this, world))));
-        playersButton = footer(K + "button.players", left, row2, buttonWidth, 1, gap,
+        playersButton = footer(K + "button.players", left, row2, fifth, 1, gap,
                 () -> selectedWorld().ifPresent(world -> this.minecraft.gui.setScreen(new PlayersScreen(this, world.worldId()))));
-        removeButton = footer(K + "button.remove", left, row2, buttonWidth, 2, gap, this::confirmRemove);
-        exportButton = footer(K + "button.export_key", left, row2, buttonWidth, 3, gap,
+        modsButton = footer(K + "button.mods", left, row2, fifth, 2, gap,
+                () -> selectedWorld().ifPresent(world -> this.minecraft.gui.setScreen(new ModsScreen(this, world.worldId()))));
+        removeButton = footer(K + "button.remove", left, row2, fifth, 3, gap, this::confirmRemove);
+        exportButton = footer(K + "button.export_key", left, row2, fifth, 4, gap,
                 () -> selectedWorld().ifPresent(world -> notice = CoopActions.exportOwnerKey(this.minecraft, world).message()));
         this.addRenderableWidget(Button.builder(CommonComponents.GUI_BACK, button -> onClose())
                 .bounds(this.width / 2 - 100, this.height - 26, 200, 20).build());
@@ -166,6 +170,7 @@ public class CoopWorldsScreen extends Screen {
             playButton.active = any;
             inviteButton.active = any;
             playersButton.active = any;
+            modsButton.active = any;
             removeButton.active = any;
             exportButton.active = any && CoopWorlds.store().isOwner(selected);
         }
@@ -208,9 +213,7 @@ public class CoopWorldsScreen extends Screen {
                 if (status.kind() == CoopStatus.Kind.PLAYING) {
                     CoopLauncher.remember(world, status.hostUuid(), status.hostName());
                     CoopLauncher.remember(world, this.minecraft.getUser().getProfileId().toString(), this.minecraft.getUser().getName());
-                    ConnectScreen.startConnecting(this, this.minecraft, ServerAddress.parseString(status.address()),
-                            new ServerData(world.name(), status.address(), ServerData.Type.OTHER), false, null);
-                    dropin.mc.member.SyncClient.start(this.minecraft, world, status.address());
+                    dropin.mc.mods.JoinGate.join(this.minecraft, world, status.address(), this);
                 } else {
                     this.minecraft.gui.setScreen(new AlertScreen(() -> this.minecraft.gui.setScreen(this), TITLE,
                             Component.translatable(K + "first_join_needs_host")));

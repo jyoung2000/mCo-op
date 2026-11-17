@@ -115,7 +115,7 @@ public final class HostSession implements Runnable {
                 boolean waitingForDomain = wanted.isEmpty() && Config.INSTANCE.hostEnabled.value()
                         && now - started < DOMAIN_WAIT_MS;
                 String state = waitingForDomain ? RendezvousRecord.STARTING : RendezvousRecord.HOST;
-                String key = state + "|" + wanted;
+                String key = state + "|" + wanted + "|" + policyVersion();
                 boolean due = published == null ? now - lastTry >= (lastTry == 0 ? 0 : RETRY_MS)
                         : !published.equals(key) || now - lastPublish >= HEARTBEAT_MS;
                 if (due) {
@@ -131,6 +131,10 @@ public final class HostSession implements Runnable {
                 if (now - lastMembers >= MEMBERS_MS) {
                     lastMembers = now;
                     recordPlayers(server);
+                    dropin.mc.host.HostSync sync = dropin.mc.host.HostSync.current();
+                    if (sync != null) {
+                        sync.shareMembers();
+                    }
                 }
                 Thread.sleep(500);
             }
@@ -145,6 +149,12 @@ public final class HostSession implements Runnable {
                 current = null;
             }
         }
+    }
+
+    private static long policyVersion() {
+        dropin.mc.host.HostSync sync = dropin.mc.host.HostSync.current();
+        dropin.mc.policy.WorldPolicy.Held held = sync == null ? null : sync.held();
+        return held == null ? 0 : held.version();
     }
 
     private IntegratedServer awaitWorld() throws InterruptedException {
@@ -205,7 +215,11 @@ public final class HostSession implements Runnable {
 
     private boolean publish(String state, String addr, String lan) {
         try {
-            rendezvous.publish(base.with(state, addr, lan, System.currentTimeMillis() / 1000));
+            RendezvousRecord record = base.with(state, addr, lan, System.currentTimeMillis() / 1000);
+            dropin.mc.host.HostSync sync = dropin.mc.host.HostSync.current();
+            dropin.mc.policy.WorldPolicy.Held held = sync == null ? null : sync.held();
+            // DESIGN 4.13: a member can see a policy change before connecting.
+            rendezvous.publish(held == null ? record : record.withPolicy(held.version(), held.policy().modManifestHash()));
             return true;
         } catch (Exception e) {
             DropIn.LOGGER.warn("Could not announce co-op world '{}' ({}): {}", world.name(), state, e.toString());

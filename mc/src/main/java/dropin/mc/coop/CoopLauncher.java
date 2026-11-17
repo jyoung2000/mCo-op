@@ -74,6 +74,11 @@ public final class CoopLauncher {
             }
             return;
         }
+        // DESIGN 4.14: the owner's mods and datapacks must be what the signed policy says before anyone plays.
+        if (!dropin.mc.policy.HostGate.ownerReady(mc, world, folder,
+                () -> mc.execute(() -> flows.openWorld(levelId, onCancel)), onCancel)) {
+            return;
+        }
         Env env = new Env();
         HostClaim.Result result;
         try {
@@ -96,6 +101,20 @@ public final class CoopLauncher {
             DropIn.LOGGER.info("Co-op world '{}': nobody is hosting, opening the local copy (announced={})",
                     world.name(), host.announced());
             remember(world, uuid, name);
+            // DESIGN 4.13: a member only hosts a copy that matches the owner's policy.
+            net.minecraft.client.gui.screens.Screen problem = dropin.mc.policy.HostGate.memberProblem(mc, world, folder, onCancel);
+            if (problem != null) {
+                DropIn.LOGGER.info("Co-op world '{}': this PC may not host it ({})", world.name(), problem.getClass().getSimpleName());
+                if (host.announced()) {
+                    try {
+                        rendezvous.publish(RendezvousRecord.of(RendezvousRecord.IDLE, uuid, name, host.sess(), System.currentTimeMillis() / 1000));
+                    } catch (Exception e) {
+                        DropIn.LOGGER.warn("Could not withdraw the host announcement of '{}': {}", world.name(), e.toString());
+                    }
+                }
+                mc.execute(() -> mc.gui.setScreen(problem));
+                return;
+            }
             // The copy is about to be opened by the game: a sync from an earlier session must have let go of it.
             SyncClient.stopAndWait(world.worldId(), 15_000);
             mc.execute(() -> {
@@ -110,13 +129,12 @@ public final class CoopLauncher {
         }
     }
 
-    /** Connects to a live host and keeps the local copy in step with it meanwhile (DESIGN 4.4, 4.7). */
+    /**
+     * Joins a live host: first the mod check of DESIGN 4.14, then the connection, with the local copy kept in
+     * step meanwhile (DESIGN 4.4, 4.7).
+     */
     public static void join(Minecraft mc, CoopWorld world, String address) {
-        mc.execute(() -> {
-            ConnectScreen.startConnecting(new TitleScreen(), mc, ServerAddress.parseString(address),
-                    new ServerData(world.name(), address, ServerData.Type.OTHER), false, null);
-            SyncClient.start(mc, world, address);
-        });
+        dropin.mc.mods.JoinGate.join(mc, world, address, new TitleScreen());
     }
 
     public static void remember(CoopWorld world, String uuid, String name) {

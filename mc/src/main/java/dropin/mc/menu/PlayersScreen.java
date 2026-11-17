@@ -4,6 +4,9 @@ import dropin.core.world.CoopWorld;
 import dropin.core.world.Member;
 import dropin.mc.DropIn;
 import dropin.mc.coop.CoopWorlds;
+import dropin.mc.policy.PolicyActions;
+import dropin.mc.policy.WorldPolicy;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.PlayerFaceExtractor;
@@ -20,12 +23,14 @@ import java.util.UUID;
 
 /**
  * The Players tab of DESIGN 4.15, from the members this PC knows about: head, name, owner badge,
- * "playing now" / "last seen". Skins come from the game's own lookup by UUID.
+ * "playing now" / "last seen". Skins come from the game's own lookup by UUID. The list is this PC's own,
+ * kept current by the member lists hosts and members exchange (DESIGN 4.13). The owner also gets the
+ * policy controls here: who is banned, and whether members may use commands.
  */
 public class PlayersScreen extends Screen {
     private static final String K = "text.dropin_coop.";
 
-    public record Row(String uuid, String name, boolean owner, boolean playingNow, long lastSeen) {
+    public record Row(String uuid, String name, boolean owner, boolean playingNow, long lastSeen, boolean banned) {
     }
 
     private final Screen parent;
@@ -48,10 +53,12 @@ public class PlayersScreen extends Screen {
         try {
             CoopWorld world = CoopWorlds.store().get(worldId).orElse(null);
             if (world != null) {
+                WorldPolicy.Held held = PolicyActions.held(Minecraft.getInstance(), world);
                 CoopStatus.Status status = CoopStatus.of(worldId);
                 for (Member member : world.members()) {
                     boolean playing = status.kind() == CoopStatus.Kind.PLAYING && member.uuid().equals(status.hostUuid());
-                    rows.add(new Row(member.uuid(), member.name(), member.isOwner(), playing, member.lastSeen()));
+                    rows.add(new Row(member.uuid(), member.name(), member.isOwner(), playing, member.lastSeen(),
+                            held != null && held.policy().isBanned(member.uuid())));
                 }
             }
         } catch (Exception e) {
@@ -61,9 +68,55 @@ public class PlayersScreen extends Screen {
         return rows;
     }
 
+    private CoopWorld world() {
+        try {
+            return CoopWorlds.store().get(worldId).orElse(null);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** An owner's change from this tab: signs a new policy version, then shows it. */
+    private void change(java.util.concurrent.Callable<?> action) {
+        try {
+            action.call();
+        } catch (Exception e) {
+            DropIn.LOGGER.error("Could not change the policy of {}", worldId, e);
+        }
+        this.rebuildWidgets();
+    }
+
     @Override
     protected void init() {
         rows = rowsOf(worldId);
+        CoopWorld world = world();
+        WorldPolicy.Held held = world == null ? null : PolicyActions.held(this.minecraft, world);
+        boolean owner = false;
+        try {
+            owner = held != null && CoopWorlds.store().isOwner(worldId);
+        } catch (Exception e) {
+            DropIn.LOGGER.warn("Could not tell who owns {}", worldId, e);
+        }
+        if (owner) {
+            // DESIGN 4.13: only the owner changes the policy; every change is a new signed version.
+            boolean allowed = held.policy().membersMayUseCommands();
+            this.addRenderableWidget(Button.builder(Component.translatable(K + (allowed ? "players.commands_on" : "players.commands_off")),
+                    button -> change(() -> PolicyActions.setMembersMayUseCommands(this.minecraft, world, !allowed)))
+                    .bounds(this.width / 2 - 100, this.height - 50, 200, 20).build());
+            int left = Math.max(10, this.width / 2 - 150);
+            int y = 36;
+            for (Row row : rows) {
+                if (y > this.height - 74) {
+                    break;
+                }
+                if (!row.owner()) {
+                    this.addRenderableWidget(Button.builder(Component.translatable(K + (row.banned() ? "players.unban" : "players.ban")),
+                            button -> change(() -> PolicyActions.setBanned(this.minecraft, world, row.uuid(), !row.banned())))
+                            .bounds(left + 250, y - 2, 50, 20).build());
+                }
+                y += 20;
+            }
+        }
         this.addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, button -> onClose())
                 .bounds(this.width / 2 - 100, this.height - 26, 200, 20).build());
     }
@@ -77,6 +130,9 @@ public class PlayersScreen extends Screen {
         MutableComponent text = Component.literal(row.name());
         if (row.owner()) {
             text.append(" ").append(Component.translatable(K + "players.owner"));
+        }
+        if (row.banned()) {
+            text.append(" ").append(Component.translatable(K + "players.banned"));
         }
         text.append("  ");
         if (row.playingNow()) {
@@ -103,7 +159,7 @@ public class PlayersScreen extends Screen {
             graphics.centeredText(this.font, Component.translatable(K + "players.none"), this.width / 2, y, -6250336);
         }
         for (Row row : rows) {
-            if (y > this.height - 46) {
+            if (y > this.height - 74) {
                 break;
             }
             try {

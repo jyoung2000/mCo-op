@@ -12,7 +12,9 @@ import dropin.mc.DropIn;
 import dropin.mc.coop.CoopWorlds;
 import dropin.mc.menu.CoopActions;
 import dropin.mc.net.SyncConnector;
+import dropin.mc.menu.ModConsentScreen;
 import dropin.mc.net.SyncPipe;
+import dropin.mc.policy.WorldPolicy;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 
@@ -47,6 +49,7 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
     private volatile boolean waitingShown;
     private final java.util.concurrent.atomic.AtomicLong applied = new java.util.concurrent.atomic.AtomicLong();
 
+    private volatile Path folderPath;
     private Path dropin;
     private Ledger ledger;
     private Manifest manifest;
@@ -151,7 +154,8 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
             if (!awaitJoin()) {
                 return;
             }
-            Path folder = folder();
+            Path folder = ensureFolder(mc, world);
+            folderPath = folder;
             dropin = folder.resolve(CoopWorldStore.MARKER_DIR);
             ledger = Ledger.load(world.keys().auth(), dropin.resolve("ledger.jsonl"));
             Path manifestFile = dropin.resolve("manifest").resolve("current.tsv");
@@ -260,8 +264,11 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
         return !stop && mc.player != null && mc.getSingleplayerServer() == null && mc.getConnection() != null;
     }
 
-    /** The world's folder under saves/; a new one on the first join. */
-    private Path folder() throws IOException {
+    /**
+     * The world's folder under saves/; a new one on the first join. A new folder is marked as an unfinished
+     * download at once (DESIGN 4.7), so it is never taken for a world before a checkpoint is complete.
+     */
+    public static synchronized Path ensureFolder(Minecraft mc, CoopWorld world) throws IOException {
         Path saves = mc.getLevelSource().getBaseDir();
         String known = CoopActions.folders(mc).get(world.worldId());
         if (known != null) {
@@ -277,6 +284,7 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
         }
         Files.createDirectories(folder);
         CoopWorlds.store().attachFolder(folder, world.worldId());
+        SyncState.EMPTY.save(folder.resolve(CoopWorldStore.MARKER_DIR).resolve("state.json"));
         return folder;
     }
 
@@ -338,6 +346,52 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
         state.save(dropin.resolve("state.json"));
         DropIn.LOGGER.info("The local copy of '{}' is complete through checkpoint {} (root {})", world.name(),
                 head.seq(), head.root());
+    }
+
+    @Override
+    public long policyVersion() {
+        WorldPolicy.Held mine = WorldPolicy.load(world, folderPath);
+        return mine == null ? 0 : mine.version();
+    }
+
+    /**
+     * DESIGN 4.14 "Mods changed while people are connected": a newer policy is stored, and if this PC's mods
+     * no longer match it, the game leaves the session and shows what is needed.
+     */
+    @Override
+    public String[] policyReceived(String policyJson, String manifestJson) {
+        try {
+            WorldPolicy.Exchange exchange = WorldPolicy.receive(world, folderPath, () -> folderPath, policyJson, manifestJson);
+            WorldPolicy.Held now = exchange.effective();
+            if (exchange.adopted() && (WorldPolicy.environmentProblem(now) != null || !WorldPolicy.diff(now).mayJoin())) {
+                stop = true;
+                ModConsentScreen.leaveAndShow(world, now);
+            }
+            return exchange.reply();
+        } catch (IOException | RuntimeException e) {
+            DropIn.LOGGER.warn("The host of '{}' sent a policy that is not valid: {}", world.name(), e.getMessage());
+            return null;
+        }
+    }
+
+    @Override
+    public String membersToOffer() {
+        try {
+            return CoopWorldStore.membersJson(CoopWorlds.store().get(world.worldId()).orElse(world).members());
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    @Override
+    public void membersReceived(String json) {
+        try {
+            WorldPolicy.Held mine = WorldPolicy.load(world, folderPath);
+            CoopWorlds.store().mergeMembers(world.worldId(), CoopWorldStore.parseMembers(json),
+                    mine == null ? "" : mine.policy().ownerUuid());
+        } catch (IOException | RuntimeException e) {
+            DropIn.LOGGER.warn("Could not merge the member list of '{}'", world.name(), e);
+        }
     }
 
     @Override

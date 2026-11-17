@@ -13,10 +13,17 @@ import dropin.core.world.CoopWorldStore;
 import dropin.mc.DropIn;
 import dropin.mc.coop.CoopWorlds;
 import dropin.mc.net.PathPolicy;
+import dropin.core.mods.ModManifest;
+import dropin.mc.menu.ModConsentScreen;
 import dropin.mc.net.SyncPipe;
+import dropin.mc.policy.DevHooks;
+import dropin.mc.policy.WorldPolicy;
 import io.netty.channel.Channel;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.permissions.LevelBasedPermissionSet;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.storage.LevelResource;
 
@@ -84,6 +91,9 @@ public final class HostSync implements SyncServerSession.Host {
     private volatile boolean needFullScan;
     private volatile boolean stopping;
     private volatile boolean finished;
+    private final Object policyLock = new Object();
+    private volatile WorldPolicy.Held held;
+    private volatile String membersShared = "";
 
     private HostSync(MinecraftServer server, CoopWorld world, Path root, Ledger ledger, Manifest manifest,
                      String hostUuid, String hostName, String sess) {
@@ -97,6 +107,7 @@ public final class HostSync implements SyncServerSession.Host {
         this.hostUuid = hostUuid;
         this.hostName = hostName;
         this.sess = sess;
+        this.held = WorldPolicy.load(world, root);
         this.needFullScan = ledger.size() == 0 || manifest.isEmpty() || !manifest.root().equals(ledger.last().root());
         long seconds = DropIn.switches().read("dropin.dev.checkpointSeconds").map(Long::parseLong)
                 .orElseGet(() -> (long) CoopWorlds.configInt("checkpointSeconds", 60));
@@ -487,6 +498,174 @@ public final class HostSync implements SyncServerSession.Host {
             }
         }
         return seq == Long.MAX_VALUE ? 0 : seq;
+    }
+
+    // ---- owner policy and mods (DESIGN 4.13, 4.14) ----------------------------------------------
+
+    /** The newest valid policy of the hosted world, or null if it has none yet. */
+    public WorldPolicy.Held held() {
+        return held;
+    }
+
+    /**
+     * A newer policy reached this host mid-session (the owner joined, or changed something from the menu).
+     * It is stored; then a checkpoint is taken and the policy goes to every member, whose game leaves if its
+     * mods no longer match. A host that is itself behind ends the session after the checkpoint.
+     */
+    public void adoptNewer(WorldPolicy.Held candidate) {
+        synchronized (policyLock) {
+            WorldPolicy.Held current = held;
+            if (current != null && candidate.version() <= current.version()) {
+                return;
+            }
+            try {
+                WorldPolicy.adopt(world, root, candidate);
+            } catch (IOException | RuntimeException e) {
+                DropIn.LOGGER.error("Could not store policy version {} of '{}'", candidate.version(), world.name(), e);
+                return;
+            }
+            held = candidate;
+        }
+        Thread thread = new Thread(() -> policyChanged(candidate), "dropin-coop-policy");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private void policyChanged(WorldPolicy.Held now) {
+        try {
+            checkpoint(true);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return;
+        } catch (Exception e) {
+            DropIn.LOGGER.error("Checkpoint of '{}' for the new policy failed", world.name(), e);
+        }
+        for (Peer peer : peers) {
+            peer.session().sendPolicy();
+        }
+        server.execute(() -> {
+            for (ServerPlayer player : new ArrayList<>(server.getPlayerList().getPlayers())) {
+                if (now.policy().isBanned(player.getUUID().toString())) {
+                    player.connection.disconnect(Component.translatable("text.dropin_coop.policy.banned"));
+                }
+            }
+        });
+        boolean behind;
+        try {
+            behind = WorldPolicy.environmentProblem(now) != null || !WorldPolicy.diff(now).mayJoin();
+        } catch (IOException | RuntimeException e) {
+            DropIn.LOGGER.error("Could not compare this PC's mods with policy version {}", now.version(), e);
+            behind = false;
+        }
+        if (behind) {
+            DropIn.LOGGER.info("This host's mods do not match policy version {} of '{}': ending the session", now.version(), world.name());
+            ModConsentScreen.leaveAndShow(world, now);
+        }
+    }
+
+    /** What the policy says about a player's command rights on this server, or null to leave it to the game. */
+    public static LevelBasedPermissionSet permissions(MinecraftServer server, java.util.UUID id) {
+        HostSync sync = current;
+        WorldPolicy.Held policy = sync == null || sync.server != server ? null : sync.held;
+        if (policy == null) {
+            return null;
+        }
+        if (policy.policy().isOwner(id.toString())) {
+            return LevelBasedPermissionSet.OWNER;
+        }
+        return policy.policy().membersMayUseCommands() ? LevelBasedPermissionSet.GAMEMASTER : LevelBasedPermissionSet.ALL;
+    }
+
+    /** Why this player may not log in to the hosted co-op world, or null. */
+    public static Component banMessage(MinecraftServer server, java.util.UUID id) {
+        HostSync sync = current;
+        WorldPolicy.Held policy = sync == null || sync.server != server ? null : sync.held;
+        return policy != null && policy.policy().isBanned(id.toString()) ? Component.translatable("text.dropin_coop.policy.banned") : null;
+    }
+
+    /** Sends the member list to the connected members when someone new is on it. */
+    public void shareMembers() {
+        String now = members();
+        if (now == null) {
+            return;
+        }
+        String people = CoopWorldStore.parseMembers(now).stream().map(m -> m.uuid() + m.name()).sorted()
+                .collect(java.util.stream.Collectors.joining(","));
+        if (!people.equals(membersShared)) {
+            membersShared = people;
+            for (Peer peer : peers) {
+                peer.session().sendMembers();
+            }
+        }
+    }
+
+    @Override
+    public String[] policy() {
+        String[] forged = DevHooks.active() ? DevHooks.policyOverride : null;
+        if (forged != null) {
+            return forged;
+        }
+        WorldPolicy.Held now = held;
+        return now == null ? null : now.json();
+    }
+
+    @Override
+    public void policyOffered(SyncServerSession session, String policyJson, String manifestJson) {
+        if (policyJson.isEmpty()) {
+            return;
+        }
+        try {
+            adoptNewer(WorldPolicy.verify(world, policyJson, manifestJson));
+        } catch (IOException | RuntimeException e) {
+            DropIn.LOGGER.warn("A member offered a policy for '{}' that is not valid: {}", world.name(), e.getMessage());
+        }
+    }
+
+    @Override
+    public String members() {
+        try {
+            return CoopWorldStore.membersJson(CoopWorlds.store().get(world.worldId()).orElse(world).members());
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    @Override
+    public void membersOffered(SyncServerSession session, String json) {
+        try {
+            WorldPolicy.Held now = held;
+            CoopWorlds.store().mergeMembers(world.worldId(), CoopWorldStore.parseMembers(json),
+                    now == null ? "" : now.policy().ownerUuid());
+        } catch (IOException | RuntimeException e) {
+            DropIn.LOGGER.warn("Could not merge a member list into '{}'", world.name(), e);
+        }
+    }
+
+    /** Only files of the signed mod list are ever served (DESIGN 4.14 "Safety"). */
+    @Override
+    public Path modFile(String sha512) {
+        WorldPolicy.Held now = held;
+        ModManifest.Entry entry = now == null ? null : now.manifest().bySha512(sha512);
+        if (entry == null) {
+            return null;
+        }
+        Path file = WorldPolicy.modsDir().resolve(entry.path());
+        if (!Files.isRegularFile(file)) {
+            file = WorldPolicy.store().file(sha512);
+        }
+        if (Files.isRegularFile(file) && DevHooks.active() && DevHooks.tamperMods) {
+            try {
+                byte[] bytes = Files.readAllBytes(file);
+                bytes[bytes.length - 1] ^= 1;
+                Path tampered = Files.createTempFile("dropin-tampered", ".jar");
+                Files.write(tampered, bytes);
+                tampered.toFile().deleteOnExit();
+                return tampered;
+            } catch (IOException e) {
+                return null;
+            }
+        }
+        return Files.isRegularFile(file) ? file : null;
     }
 
     // ---- SyncServerSession.Host -----------------------------------------------------------------

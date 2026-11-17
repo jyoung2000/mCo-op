@@ -6,6 +6,7 @@
   "mixins": [
     "mc.IOWorkerMixin",
     "mc.MinecraftServerStopMixin",
+    "mc.PlayerListBanMixin",
     "mc.PlayerListOwnDataMixin",
     "tunnel.BanListCommandsMixin",
     "tunnel.BanPlayerCommandsMixin",
@@ -24,6 +25,7 @@
   "client": [
     "mc.IntegratedServerFocusMixin",
     "mc.IntegratedServerNewCoopMixin",
+    "mc.IntegratedServerPermissionsMixin",
     "mc.PauseScreenMixin",
     "mc.SelectWorldScreenMixin",
     "mc.TitleScreenMixin",
