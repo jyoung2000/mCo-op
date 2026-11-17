@@ -469,3 +469,19 @@ State at `b5c639a` (2026-11-16), details in `docs/VERIFICATION.md`:
 - Upstream source needed only 6 compile fixes for 26.3: `E4mcClient` (`src.hasPermission(4)` → `Commands.hasPermission(Commands.LEVEL_OWNERS).test(src)`),
   `Mirror` (`ClickEvent`/`HoverEvent` are interfaces with records `RunCommand`, `CopyToClipboard`, `ShowText`; chat is `Minecraft.gui.hud.getChat().addClientSystemMessage`),
   and the Fabric entry point (command API v1 fallback removed).
+
+## After M3: performance test and online handoff (2026-11-17)
+
+Asked by the owner in chat ("make it seamless and performance test"). Numbers and runs: docs/VERIFICATION.md.
+
+- `HostSync.Perf` / `takePerf()`: per-checkpoint cost (server thread held by the save; work off it). The checkpoint log line now shows `save N ms`.
+- `PerfScenarios` + `-Suite perf` (in `$measureSuites`: runs by name only, never by `all`).
+- `handoff-3.online` in the online suites (`-Suite m3 -Online`). `handoff-3`: B takes its own LAN port before taking over; C joins after B has its copy (`joinB(..., go)`).
+- `HostSession`: an announce refused as stale (`PkarrClient.StaleRecordException`) is tried again after 2 s, at most 15 times, then every 60 s. Not from the design (DESIGN 4.3 gives 60 s for relays that are down); told the owner.
+- Signatures used (26.3): `MinecraftServer.getTickCount()` (1413), `getTickTimesNanos()` (1798), `saveEverything(boolean silent, boolean flush, boolean force)` (605), `ServerChunkCache.hasChunk(int x, int z)` (256), `CommandSourceStack.withSuppressedOutput()` (242), `WorldPresets.NORMAL`.
+- Left alone: `HttpPkarrClient.put` and `get` wait for every relay, so one slow relay slows each announce and each lookup. Returning early would change behaviour `PkarrTest` asserts; needs the owner's word.
+
+## M3b: save points (DESIGN 4.16), in progress
+
+Decided by the owner on 2026-11-17: owner only; smallest storage; ten per world, the eleventh replaces the oldest; export, import and "make single-player world"; player data included; commands `/dropin savepoint create|list|restore <name>` plus menu buttons; folder buttons Backups, Datapacks and (owner only) Mods; members rejoin by themselves after a restore (HANDOFF naming the host itself).
+Mine, told to the owner: storage layout, `.dropinsave` file, automatic `before-restore` save point, import only from the same world, save points only on the owner's PC and commands only while the owner hosts.

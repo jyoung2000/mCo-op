@@ -26,6 +26,12 @@ public final class HostSession implements Runnable {
     private static final long WORLD_START_TIMEOUT_MS = 10 * 60_000;
     private static final long HEARTBEAT_MS = 5 * 60_000;
     private static final long RETRY_MS = 60_000;
+    /**
+     * A relay that is still storing an earlier record of this world refuses the next one. After a handoff that
+     * earlier record is the old host's "handoff", so the new host tries again soon, a limited number of times.
+     */
+    private static final long CONFLICT_RETRY_MS = 2_000;
+    private static final int CONFLICT_RETRIES = 15;
     private static final long MEMBERS_MS = 5_000;
     private static final long DOMAIN_WAIT_MS = 30_000;
 
@@ -117,11 +123,16 @@ public final class HostSession implements Runnable {
                         && now - started < DOMAIN_WAIT_MS;
                 String state = waitingForDomain ? RendezvousRecord.STARTING : RendezvousRecord.HOST;
                 String key = state + "|" + wanted + "|" + policyVersion();
-                boolean due = published == null ? now - lastTry >= (lastTry == 0 ? 0 : RETRY_MS)
+                long retryMs = conflict && conflictTries < CONFLICT_RETRIES ? CONFLICT_RETRY_MS : RETRY_MS;
+                boolean due = published == null ? now - lastTry >= (lastTry == 0 ? 0 : retryMs)
                         : !published.equals(key) || now - lastPublish >= HEARTBEAT_MS;
                 if (due) {
                     lastTry = now;
+                    if (conflict) {
+                        conflictTries++;
+                    }
                     if (publish(state, wanted, lan)) {
+                        conflictTries = 0;
                         published = key;
                         lastPublish = now;
                         announcedState = state;
@@ -159,6 +170,9 @@ public final class HostSession implements Runnable {
     }
 
     private volatile dropin.mc.host.HostSync hostSync;
+    /** The last announce was refused because a relay holds, or is storing, another record of this world. */
+    private boolean conflict;
+    private int conflictTries;
 
     /** The session's last record, published from the stopping server (DESIGN 4.3 clean exit, 4.9 step 3). */
     private void announceLast(String state, String successorUuid) {
@@ -244,8 +258,10 @@ public final class HostSession implements Runnable {
             dropin.mc.policy.WorldPolicy.Held held = sync == null ? null : sync.held();
             // DESIGN 4.13: a member can see a policy change before connecting.
             rendezvous.publish(held == null ? record : record.withPolicy(held.version(), held.policy().modManifestHash()));
+            conflict = false;
             return true;
         } catch (Exception e) {
+            conflict = e instanceof dropin.core.pkarr.PkarrClient.StaleRecordException;
             DropIn.LOGGER.warn("Could not announce co-op world '{}' ({}): {}", world.name(), state, e.toString());
             return false;
         }

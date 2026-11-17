@@ -232,3 +232,34 @@ Not verified in this run:
 - A member on a relayed path during a handoff (it gets `HANDOFF` but is never the successor): unit-tested in the sync channel only.
 - The manual checklist (three real players, timing how long the others are out of the world).
 - The open items of M2b are unchanged (nothing reads `pv`/`mh`; a member sent away by a newer policy has no scenario; the helper under a real launcher).
+
+## Performance and online handoff: 2026-11-17 (after M3, before M3b)
+
+Measurements and one fix. Run on this PC, working tree on top of `a2d81f5`.
+
+**Performance** (`scripts/selftest.ps1 -Suite perf`, a measurement, not a gate; not part of `all`). PASS 287.2s. Log: `build/selftest-logs/perf-a.log`, lines `Self-test perf`.
+Normal-terrain world, 512 force-loaded chunks (2606 records), commands change 8 chunks a second in every phase, checkpoints every 10 s (`dropin.dev.checkpointSeconds=10`), both clients on this PC.
+
+| Phase | Ticks per s | Tick avg | Tick p99 | Tick max | Longest gap between ticks | Save pause per checkpoint | Work off the server thread |
+|---|---|---|---|---|---|---|---|
+| 1 alone, not hosting (60 s) | 20.0 | 4.07 ms | 5.28 ms | 12.9 ms | 68 ms | none (one game save: 31 ms) | none |
+| 2 hosting, nobody joined (60 s) | 20.0 | 4.02 ms | 5.00 ms | 8.5 ms | 73 ms | avg 14 ms, max 16 ms | avg 51 ms, max 61 ms |
+| 3 hosting, B downloading (20 s) | 20.0 | 4.67 ms | 11.08 ms | 13.2 ms | 68 ms | avg 21 ms, max 22 ms | avg 60 ms, max 60 ms |
+| 4 hosting, B has its copy (60 s) | 20.0 | 4.42 ms | 5.82 ms | 16.6 ms | 68 ms | avg 18 ms, max 20 ms | avg 54 ms, max 57 ms |
+
+First checkpoint (full scan of 2606 records): save 18 ms, 694 ms off the server thread. B had its full copy 19850 ms after it joined.
+The "longest gap" is read once per client tick, so it cannot show less than about 50 ms.
+
+**Handoff through the real relay** (`scripts/selftest.ps1 -Suite m3 -Online`, scenario `handoff-3.online`, three clients on this PC, real e4mc relay and real pkarr relays):
+- Run 1: FAIL. Test setup: the clients of a run share one LAN port and A still held it when B opened to LAN. `handoff-3` now gives B its own port.
+- Run 2: PASS 160.3s. C was back 71 s after the handoff: B's first announce was refused by the pkarr relays (HTTP 409/428, A's "handoff" record still being stored) and the next try was 60 s later.
+- Fix: `HostSession` tries again 2 s after an announce that was refused as stale, at most 15 times in a row, then every 60 s as before.
+- Run 3: FAIL in the scenario, not the handoff: through the relay C connected before B, the world correctly went to C, the scenario expects B. C hosted 5 s after the handoff and B found it after 6449 ms. `handoff-3` now lets C join after B has its copy.
+- Run 4: PASS 78.4s. Handoff at 14:32:30, B announced as host at 14:32:34, C found B after 5051 ms and was in the world by 14:32:37.
+
+**Gate after these changes:** `./gradlew build` exit 0 (`build/logs/gate-build.log`), `scripts/jarcheck.ps1` exit 0 (`build/logs/gate-jarcheck.log`), `scripts/selftest.ps1 -Suite all` exit 0, 39 of 39 (`build/logs/perf-gate-selftest-all.log`; `handoff-3` 48.8s, `handoff-no-full-copy` 134.8s).
+
+Not verified:
+- Performance with players on different PCs, with more than one member, with more loaded chunks than 512, with mobs (the world was peaceful), or at the default 60 s interval.
+- The member's side (frame rate, disk and CPU while downloading) was not measured.
+- The online handoff with players in different networks. All three clients were on one PC and one internet connection; relay speed varied between runs (an announce took 1 to 8 s).

@@ -88,7 +88,7 @@ final class Scenarios {
         String key = spec.scenario() + ":" + spec.role();
         boolean expectOnline = spec.scenario().equals("tunnel-join");
         boolean eitherWay = spec.scenario().equals("drop-in") || spec.scenario().equals("first-download-root-match")
-                || spec.scenario().equals("mod-join");
+                || spec.scenario().equals("mod-join") || spec.scenario().equals("handoff-3");
         if (!eitherWay && expectOnline != ctx.online()) {
             throw new IllegalStateException(key + " needs dropin.dev.online=" + expectOnline);
         }
@@ -107,6 +107,10 @@ final class Scenarios {
         StepRunner m3 = M3Scenarios.build(key, ctx);
         if (m3 != null) {
             return m3;
+        }
+        StepRunner perf = PerfScenarios.build(key, ctx);
+        if (perf != null) {
+            return perf;
         }
         return switch (key) {
             case "lan-join:host", "tunnel-join:host" -> joinHost(ctx);

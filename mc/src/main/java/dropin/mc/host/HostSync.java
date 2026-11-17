@@ -89,6 +89,13 @@ public final class HostSync implements SyncServerSession.Host {
 
     private static volatile HostSync current;
 
+    /**
+     * What the checkpoints since the last {@link #takePerf()} cost. {@code saveMs} is time the server thread was
+     * held by the save (no game ticks run meanwhile); {@code workMs} is the hashing and writing off that thread.
+     */
+    public record Perf(int checkpoints, long saveMsSum, long saveMsMax, long workMsSum, long workMsMax, long changed) {
+    }
+
     private record Peer(SyncServerSession session, SyncPipe pipe) {
     }
 
@@ -116,6 +123,13 @@ public final class HostSync implements SyncServerSession.Host {
     private volatile WorldPolicy.Held held;
     private volatile String membersShared = "";
     private final Object announceLock = new Object();
+    private final Object perfLock = new Object();
+    private int perfCheckpoints;
+    private long perfSaveSum;
+    private long perfSaveMax;
+    private long perfWorkSum;
+    private long perfWorkMax;
+    private long perfChanged;
     private volatile Announcer announcer;
     private boolean finalAnnounceTaken;
     /** The quit flow ran and the player decided to leave; {@link #expectedSuccessor} is who should take over (or null). */
@@ -213,9 +227,12 @@ public final class HostSync implements SyncServerSession.Host {
      * @return the new entry, or null if nothing changed
      */
     public LedgerEntry checkpoint(boolean save) throws IOException, InterruptedException {
+        AtomicLong saveNanos = new AtomicLong();
         if (save && !server.isSameThread()) {
             CompletableFuture<Void> saved = server.submit(() -> {
+                long from = System.nanoTime();
                 server.saveEverything(true, false, false);
+                saveNanos.set(System.nanoTime() - from);
             });
             long deadline = System.currentTimeMillis() + SAVE_TIMEOUT_MS;
             while (!saved.isDone()) {
@@ -225,14 +242,16 @@ public final class HostSync implements SyncServerSession.Host {
                 Thread.sleep(50);
             }
         }
+        long saveMs = saveNanos.get() / 1_000_000;
+        long started = 0;
+        Map<String, String> changed = new LinkedHashMap<>();
         checkpointLock.lock();
         try {
             if (finished) {
                 return null;
             }
             boolean full = needFullScan;
-            long started = System.currentTimeMillis();
-            Map<String, String> changed = new LinkedHashMap<>();
+            started = System.currentTimeMillis();
             Set<String> chunkKeys = ChunkStores.drain(root);
             if (full) {
                 chunkKeys.addAll(allChunkKeys());
@@ -282,11 +301,40 @@ public final class HostSync implements SyncServerSession.Host {
                 }
             }
             needFullScan = false;
-            DropIn.LOGGER.info("Checkpoint {} of '{}': {} records changed{}, root {}, {} ms", entry.seq(), world.name(),
-                    changed.size(), full ? " (full scan)" : "", entry.root(), System.currentTimeMillis() - started);
+            DropIn.LOGGER.info("Checkpoint {} of '{}': {} records changed{}, root {}, save {} ms, {} ms", entry.seq(),
+                    world.name(), changed.size(), full ? " (full scan)" : "", entry.root(), saveMs,
+                    System.currentTimeMillis() - started);
             return entry;
         } finally {
             checkpointLock.unlock();
+            if (started != 0) {
+                notePerf(saveMs, System.currentTimeMillis() - started, changed.size());
+            }
+        }
+    }
+
+    private void notePerf(long saveMs, long workMs, int changed) {
+        synchronized (perfLock) {
+            perfCheckpoints++;
+            perfSaveSum += saveMs;
+            perfSaveMax = Math.max(perfSaveMax, saveMs);
+            perfWorkSum += workMs;
+            perfWorkMax = Math.max(perfWorkMax, workMs);
+            perfChanged += changed;
+        }
+    }
+
+    /** The cost of the checkpoints since the last call; the counters start again from zero. */
+    public Perf takePerf() {
+        synchronized (perfLock) {
+            Perf perf = new Perf(perfCheckpoints, perfSaveSum, perfSaveMax, perfWorkSum, perfWorkMax, perfChanged);
+            perfCheckpoints = 0;
+            perfSaveSum = 0;
+            perfSaveMax = 0;
+            perfWorkSum = 0;
+            perfWorkMax = 0;
+            perfChanged = 0;
+            return perf;
         }
     }
 

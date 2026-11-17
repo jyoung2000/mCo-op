@@ -140,6 +140,11 @@ final class M2Scenarios {
 
     /** B: joins with the invite only and presses Play once A hosts. Nothing of the world is on B's disk. */
     static StepRunner joinB(Context ctx, State state, Map<String, String> switches) {
+        return joinB(ctx, state, switches, A_HOSTING);
+    }
+
+    /** As {@link #joinB(Context, State, Map)}, but Play is pressed only once the shared file {@code go} exists. */
+    static StepRunner joinB(Context ctx, State state, Map<String, String> switches, String go) {
         Minecraft mc = ctx.mc();
         return dev(base(ctx), switches)
                 .step("A shared the invite", STARTUP_TICKS + WORLD_TICKS, () -> ctx.sharedExists(WORLD_READY))
@@ -149,7 +154,7 @@ final class M2Scenarios {
                     state.world = outcome.world();
                     require(!CoopActions.folders(mc).containsKey(state.world.worldId()), "B already has a copy");
                 })
-                .step("A is hosting", WORLD_TICKS + PEER_TICKS, () -> ctx.sharedExists(A_HOSTING))
+                .step("A is hosting", WORLD_TICKS + 2 * PEER_TICKS, () -> ctx.sharedExists(A_HOSTING) && ctx.sharedExists(go))
                 .action("press Play", () -> pressPlay(mc, state))
                 .step("landed in A's session", PEER_TICKS, () -> joinedRemote(mc));
     }

@@ -129,6 +129,15 @@ $suites = [ordered]@{
     )
 }
 
+# Measurements, not gates: run by name only, never by "all".
+$measureSuites = @{
+    perf = @(
+        # A plays alone, then hosts, then B downloads and stays; server tick times and checkpoint costs are logged.
+        @{ Id = 'perf'; Scenario = 'perf'; TimeoutSec = 1800
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
+    )
+}
+
 # Opt-in scenarios that touch public infrastructure (the real e4mc relay). Only run with -Online.
 $onlineSuites = @{
     m0 = @(
@@ -148,6 +157,11 @@ $onlineSuites = @{
         @{ Id = 'mod-join.online'; Scenario = 'mod-join'; Online = $true; TimeoutSec = 900; Mods = @{ a = @('online') }
            Relaunch = @{ GameFile = 'config\dropin\modswap.result.json'; Index = 1; Role = 'b2' }
            Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
+    )
+    m3 = @(
+        # The handoff through the real relay: how long the members are out of the game.
+        @{ Id = 'handoff-3.online'; Scenario = 'handoff-3'; Online = $true; TimeoutSec = 900
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'fabric' 'c')) }
     )
 }
 
@@ -411,18 +425,20 @@ function Invoke-ClientScenario($scenario) {
 
 if ($Suite -eq 'all') {
     $selected = @($suites.Keys)
-} elseif ($suites.Contains($Suite)) {
+} elseif ($suites.Contains($Suite) -or $measureSuites.ContainsKey($Suite)) {
     $selected = @($Suite)
 } else {
-    throw "Unknown suite '$Suite'. Known: all, $($suites.Keys -join ', ')"
+    throw "Unknown suite '$Suite'. Known: all, $($suites.Keys -join ', '), $($measureSuites.Keys -join ', ')"
 }
 
 $scenarios = @()
 foreach ($name in $selected) {
     if ($Online) {
         if ($onlineSuites.ContainsKey($name)) { $scenarios += $onlineSuites[$name] }
-    } else {
+    } elseif ($suites.Contains($name)) {
         $scenarios += $suites[$name]
+    } else {
+        $scenarios += $measureSuites[$name]
     }
 }
 if ($Only) { $scenarios = @($scenarios | Where-Object { $_.Id -eq $Only }) }

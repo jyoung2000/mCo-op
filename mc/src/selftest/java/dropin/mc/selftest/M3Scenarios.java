@@ -155,6 +155,11 @@ final class M3Scenarios {
                 .step("copy complete", 2 * PEER_TICKS, copyComplete(mc, state));
         return mark(runner, mc, MARK_B)
                 .action("tell A", () -> {
+                    // The clients of one run share a LAN port, and A may still hold it when B starts hosting
+                    // (seen through the relay, where A stops a few seconds later). Real players pick a free port.
+                    try (java.net.ServerSocket free = new java.net.ServerSocket(0)) {
+                        System.setProperty("dropin.dev.lanPort", Integer.toString(free.getLocalPort()));
+                    }
                     ctx.writeShared("b-uuid", mc.getUser().getProfileId().toString());
                     ctx.writeShared("b-marked", "ok");
                 })
@@ -182,7 +187,9 @@ final class M3Scenarios {
     private static StepRunner handoffC(Context ctx) {
         Minecraft mc = ctx.mc();
         State state = new State();
-        StepRunner runner = joinB(ctx, state, HANDOFF_ON)
+        // C joins after B has its copy: the successor is the fully synced member that connected first, and
+        // the scenario expects that to be B (through the relay the two would otherwise race).
+        StepRunner runner = joinB(ctx, state, HANDOFF_ON, "b-marked")
                 .step("copy complete", 2 * PEER_TICKS, copyComplete(mc, state));
         return mark(runner, mc, MARK_C)
                 .action("tell A", () -> ctx.writeShared("c-marked", "ok"))
