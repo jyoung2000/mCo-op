@@ -19,14 +19,32 @@ public final class HostChangingScreen extends GenericMessageScreen {
 
     private final CoopWorld world;
     private final String oldHostUuid;
+    /** Set when the old host itself comes back (DESIGN 4.16): the session that ended. */
+    private final String endedSess;
     private volatile boolean done;
     private boolean started;
     private Button cancel;
 
     public HostChangingScreen(CoopWorld world, String oldHostUuid) {
+        this(world, oldHostUuid, null);
+    }
+
+    public HostChangingScreen(CoopWorld world, String oldHostUuid, String endedSess) {
         super(Component.translatable("text.dropin_coop.handoff.changing"));
         this.world = world;
         this.oldHostUuid = oldHostUuid;
+        this.endedSess = endedSess;
+    }
+
+    /** True if the old host announces a session other than the one that ended. */
+    private boolean oldHostIsBack() {
+        try {
+            return dropin.mc.coop.CoopWorlds.rendezvous(world).lookup()
+                    .filter(record -> record.isState(dropin.core.pkarr.RendezvousRecord.HOST) && !record.sess().equals(endedSess))
+                    .isPresent();
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     @Override
@@ -66,7 +84,8 @@ public final class HostChangingScreen extends GenericMessageScreen {
                 if (done) {
                     return;
                 }
-                if (status.kind() == CoopStatus.Kind.PLAYING && !status.hostUuid().equals(oldHostUuid)) {
+                if (status.kind() == CoopStatus.Kind.PLAYING
+                        && (!status.hostUuid().equals(oldHostUuid) || endedSess != null && oldHostIsBack())) {
                     done = true;
                     DropIn.LOGGER.info("Co-op world '{}': {} is the new host after {} ms, reconnecting to {}", world.name(),
                             status.hostName(), System.currentTimeMillis() - started, status.address());

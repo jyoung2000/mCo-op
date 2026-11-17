@@ -43,6 +43,10 @@ public class CoopWorldsScreen extends Screen {
     private Button modsButton;
     private Button removeButton;
     private Button exportButton;
+    private Button savePointsButton;
+    private Button backupsButton;
+    private Button datapacksButton;
+    private Button modsFolderButton;
     private Component notice = Component.empty();
     private int ticks;
 
@@ -92,7 +96,7 @@ public class CoopWorldsScreen extends Screen {
         reload();
         int listWidth = Math.min(320, this.width - 20);
         int left = (this.width - listWidth) / 2;
-        int perPage = Math.max(1, (this.height - LIST_TOP - 96) / ROW_HEIGHT);
+        int perPage = Math.max(1, (this.height - LIST_TOP - 132) / ROW_HEIGHT);
         int pages = Math.max(1, (worlds.size() + perPage - 1) / perPage);
         page = Math.min(page, pages - 1);
 
@@ -113,8 +117,30 @@ public class CoopWorldsScreen extends Screen {
 
         int gap = 4;
         int buttonWidth = (listWidth - 3 * gap) / 4;
+        int row0 = this.height - 98;
         int row1 = this.height - 74;
         int row2 = this.height - 50;
+        // DESIGN 4.16: save points (owner) and the folders of the selected world; the mods folder for the owner only.
+        savePointsButton = footer(K + "button.savepoints", left, row0, buttonWidth, 0, gap, () -> selectedWorld().ifPresent(world -> {
+            Path folder = selectedFolder();
+            if (folder != null) {
+                this.minecraft.gui.setScreen(new SavePointsScreen(this, world, folder));
+            }
+        }));
+        backupsButton = footer(K + "button.backups", left, row0, buttonWidth, 1, gap, () -> {
+            Path folder = selectedFolder();
+            if (folder != null) {
+                openFolder(dropin.mc.savepoint.SavePointActions.backupsDir(folder));
+            }
+        });
+        datapacksButton = footer(K + "button.datapacks", left, row0, buttonWidth, 2, gap, () -> {
+            Path folder = selectedFolder();
+            if (folder != null) {
+                openFolder(folder.resolve("datapacks"));
+            }
+        });
+        modsFolderButton = footer(K + "button.mods_folder", left, row0, buttonWidth, 3, gap,
+                () -> openFolder(dropin.mc.policy.WorldPolicy.modsDir()));
         playButton = footer(K + "button.play", left, row1, buttonWidth, 0, gap, this::play);
         footer(K + "button.new", left, row1, buttonWidth, 1, gap, this::createNew);
         footer(K + "button.import", left, row1, buttonWidth, 2, gap, () -> this.minecraft.gui.setScreen(new ImportScreen(this)));
@@ -132,6 +158,21 @@ public class CoopWorldsScreen extends Screen {
         this.addRenderableWidget(Button.builder(CommonComponents.GUI_BACK, button -> onClose())
                 .bounds(this.width / 2 - 100, this.height - 26, 200, 20).build());
         refreshRows();
+    }
+
+    /** The selected world's folder under saves/, or null if this PC has no copy of it. */
+    private Path selectedFolder() {
+        String name = selected == null ? null : folders.get(selected);
+        return name == null ? null : this.minecraft.getLevelSource().getLevelPath(name);
+    }
+
+    private void openFolder(Path dir) {
+        try {
+            java.nio.file.Files.createDirectories(dir);
+            com.mojang.blaze3d.Blaze3D.openPath(dir);
+        } catch (java.io.IOException | RuntimeException e) {
+            notice = Component.literal(String.valueOf(e.getMessage()));
+        }
     }
 
     private Button footer(String key, int left, int y, int width, int column, int gap, Runnable action) {
@@ -172,7 +213,13 @@ public class CoopWorldsScreen extends Screen {
             playersButton.active = any;
             modsButton.active = any;
             removeButton.active = any;
-            exportButton.active = any && CoopWorlds.store().isOwner(selected);
+            boolean owner = any && CoopWorlds.store().isOwner(selected);
+            boolean copy = any && folders.containsKey(selected);
+            exportButton.active = owner;
+            savePointsButton.active = owner && copy;
+            backupsButton.active = copy;
+            datapacksButton.active = copy;
+            modsFolderButton.visible = owner;
         }
     }
 
@@ -262,6 +309,6 @@ public class CoopWorldsScreen extends Screen {
             graphics.centeredText(this.font, Component.translatable(K + "empty"), this.width / 2, LIST_TOP + 20, -6250336);
             graphics.centeredText(this.font, Component.translatable(K + "drop_hint"), this.width / 2, LIST_TOP + 34, -6250336);
         }
-        graphics.centeredText(this.font, notice, this.width / 2, this.height - 88, -9216);
+        graphics.centeredText(this.font, notice, this.width / 2, this.height - 112, -9216);
     }
 }

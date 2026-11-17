@@ -64,7 +64,9 @@ public final class MemberHandoff {
             });
         } else {
             lastRole = Role.FOLLOWER;
-            onClient(mc, () -> leave(mc, new HostChangingScreen(world, finalEntry.host())));
+            // DESIGN 4.16: a handoff to the host itself means it closes the world for a restore and comes back.
+            String endedSess = successorUuid.equals(finalEntry.host()) ? finalEntry.sess() : null;
+            onClient(mc, () -> leave(mc, new HostChangingScreen(world, finalEntry.host(), endedSess)));
         }
     }
 

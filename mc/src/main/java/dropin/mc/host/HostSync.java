@@ -124,6 +124,7 @@ public final class HostSync implements SyncServerSession.Host {
     private volatile String membersShared = "";
     private final Object announceLock = new Object();
     private final Object perfLock = new Object();
+    private volatile boolean returning;
     private int perfCheckpoints;
     private long perfSaveSum;
     private long perfSaveMax;
@@ -152,7 +153,8 @@ public final class HostSync implements SyncServerSession.Host {
         this.hostName = hostName;
         this.sess = sess;
         this.held = WorldPolicy.load(world, root);
-        this.needFullScan = ledger.size() == 0 || manifest.isEmpty() || !manifest.root().equals(ledger.last().root());
+        this.needFullScan = takeRescan(root) || ledger.size() == 0 || manifest.isEmpty()
+                || !manifest.root().equals(ledger.last().root());
         long seconds = DropIn.switches().read("dropin.dev.checkpointSeconds").map(Long::parseLong)
                 .orElseGet(() -> (long) CoopWorlds.configInt("checkpointSeconds", 60));
         this.intervalMs = Math.max(5, seconds) * 1000;
@@ -313,6 +315,39 @@ public final class HostSync implements SyncServerSession.Host {
         }
     }
 
+    /**
+     * DESIGN 4.16: a restore changed the files of the closed world and left {@code dropin/rescan}. The first
+     * checkpoint then compares every record with the manifest, so the members get exactly what changed.
+     */
+    private static boolean takeRescan(Path root) {
+        try {
+            return Files.deleteIfExists(root.resolve(CoopWorldStore.MARKER_DIR).resolve("rescan"));
+        } catch (IOException e) {
+            return true;
+        }
+    }
+
+    /** DESIGN 4.16: this host is about to close the world, restore a save point and host again. */
+    public void returning() {
+        returning = true;
+    }
+
+    /** The world folder. */
+    public Path folder() {
+        return root;
+    }
+
+    /** A copy of the record hashes as of the last checkpoint. */
+    public Manifest manifestSnapshot() {
+        synchronized (lock) {
+            Manifest copy = new Manifest();
+            for (String key : manifest.keys()) {
+                copy.put(key, manifest.get(key));
+            }
+            return copy;
+        }
+    }
+
     private void notePerf(long saveMs, long workMs, int changed) {
         synchronized (perfLock) {
             perfCheckpoints++;
@@ -454,8 +489,8 @@ public final class HostSync implements SyncServerSession.Host {
             // DESIGN 4.9 step 1: 30 s for a handoff. A host that already heard "nobody has a full copy" and quits
             // anyway waits only the short time of a plain quit.
             boolean hopeless = sync.quitDecided && sync.expectedSuccessor == null;
-            sync.awaitPeers(seq, handoffDisabled() || hopeless ? QUIT_WAIT_MS : HANDOFF_WAIT_MS);
-            if (!handoffDisabled()) {
+            sync.awaitPeers(seq, sync.returning || handoffDisabled() || hopeless ? QUIT_WAIT_MS : HANDOFF_WAIT_MS);
+            if (sync.returning || !handoffDisabled()) {
                 sync.handOver(seq);
             }
         } catch (InterruptedException e) {
@@ -476,8 +511,22 @@ public final class HostSync implements SyncServerSession.Host {
 
     /** DESIGN 4.9 steps 2 and 3: choose the successor among the peers that have the final checkpoint and tell everyone. */
     private void handOver(long seq) {
-        Standing standing = standing(seq);
         LedgerEntry last = ledger.last();
+        if (returning) {
+            // DESIGN 4.16: the successor is this host itself. The members wait for its next session.
+            if (last == null) {
+                return;
+            }
+            synchronized (lock) {
+                for (Peer peer : peers) {
+                    peer.session().handoff(hostUuid, last);
+                }
+            }
+            handedTo = hostUuid;
+            DropIn.LOGGER.info("'{}' closes for a restore at checkpoint {}; the members wait for this host", world.name(), last.seq());
+            return;
+        }
+        Standing standing = standing(seq);
         if (standing.successorUuid() == null || last == null) {
             if (standing.peers() > 0) {
                 DropIn.LOGGER.warn("Nobody else has a full copy of '{}' ({} {}%): the session ends here", world.name(),

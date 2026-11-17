@@ -103,6 +103,17 @@ public final class HostHandoff {
         });
     }
 
+    /** DESIGN 4.16: closes the hosted world with no questions; the members are told this host comes back. Client thread. */
+    public static void quitToReturn(Minecraft mc, HostSync sync) {
+        sync.returning();
+        passThrough = true;
+        try {
+            mc.disconnectFromWorld(net.minecraft.client.multiplayer.ClientLevel.DEFAULT_QUIT_MESSAGE);
+        } finally {
+            passThrough = false;
+        }
+    }
+
     private static void quit(Minecraft mc, HostSync sync, String successorUuid, Component message) {
         state = State.IDLE;
         if (mc.getSingleplayerServer() == null) {

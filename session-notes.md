@@ -485,3 +485,7 @@ Asked by the owner in chat ("make it seamless and performance test"). Numbers an
 
 Decided by the owner on 2026-11-17: owner only; smallest storage; ten per world, the eleventh replaces the oldest; export, import and "make single-player world"; player data included; commands `/dropin savepoint create|list|restore <name>` plus menu buttons; folder buttons Backups, Datapacks and (owner only) Mods; members rejoin by themselves after a restore (HANDOFF naming the host itself).
 Mine, told to the owner: storage layout, `.dropinsave` file, automatic `before-restore` save point, import only from the same world, save points only on the owner's PC and commands only while the owner hosts.
+
+State when the session stopped (usage limit, 2026-11-17):
+- Done and committed: `core/savepoint/SavePoints` + `SavePointsTest` (unit tests pass); `mc/savepoint/SavePointActions`, `SavePointCommands`, `CommandsMixin`, `menu/SavePointsScreen`, the four new buttons in `CoopWorldsScreen`, the return-to-same-host path (`HostSync.returning`, `HostHandoff.quitToReturn`, `HostChangingScreen` with `endedSess`), `dropin/rescan` marker. This mc code COMPILES ONLY: nothing of it was run in the game.
+- Not done: self-test scenarios `savepoint-rollback` and `savepoint-files` (MILESTONES M3b), suite entry in `scripts/selftest.ps1`, the `menu` scenario re-run (the Co-op Worlds layout changed: a new button row), the gate, docs/VERIFICATION.md entry, DESIGN 4.2 line for `dropin/rescan` and the note that restoring `before-restore` makes no new automatic save point.
