@@ -85,6 +85,30 @@ connect, disconnect and take over as host while the world keeps knowing its owne
 is a later milestone in MILESTONES; M2b's `owner-known-to-members` and `owner-rights` cover "still knows the admin when B hosts".
 Start M2 by confirming DESIGN §8 items 4–8 in the sources. The M1 manual checklist is still the owner's to run.
 
+## M3 — IN PROGRESS (started 2026-11-17)
+
+Graceful handoff (MILESTONES M3, DESIGN §4.9 graceful, §4.3). Done so far: `core/sync/Successor` (+ test).
+
+26.3 signatures read for M3 (NeoForm `vanilla-26.3-1-sources.jar`; DESIGN §8 has no handoff item of its own, items 1 and 2
+were confirmed in M1; none of this contradicts the design):
+- The host's quit: `PauseScreen.createPauseMenu()` (private, line 101) builds the disconnect button with
+  `CommonComponents.disconnectButtonLabel(this.minecraft.isLocalServer())` and the action
+  `this.minecraft.getReportingContext().draftReportHandled(this.minecraft, this, () -> this.minecraft.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE), true)`.
+- `Minecraft.java:2093` `public void disconnectFromWorld(Component message)`: `level.disconnect(message)`, then
+  `disconnectWithSavingScreen()` for a local server (else `disconnectWithProgressScreen()`), then the title screen.
+- `Minecraft.java:2132` `public void disconnect(Screen screen, boolean keepResourcePacks, boolean stopSound)`: closes the
+  `ClientPacketListener`, sets `singleplayerServer = null`, `level = null`, and for a local server calls `server.halt(false)` and
+  renders frames until `server.isShutdown()`, then `setScreenAndShow(screen)`.
+- `IntegratedServer.java:399` `public void halt(boolean wait)`: on the server thread removes every player whose UUID is not the
+  host's (`getPlayerList().remove(player)`, which saves them), then `super.halt(wait)`. So the members' player files are written
+  before `stopServer` runs.
+- `IntegratedServer.java:393` `public void stopServer()` = `teardownPublishedState(); super.stopServer();`
+  `MinecraftServer.java:622` `protected void stopServer()`: `getConnection().stop()` (this is where the members' game
+  connections are closed), `playerList.saveAll()`, `playerList.removeAll()`, then the levels are saved and closed.
+- A member losing the host: `ClientCommonPacketListenerImpl.java:365` `public void onDisconnect(DisconnectionDetails details)`
+  calls `this.minecraft.disconnect(this.createDisconnectScreen(details), this.isTransferring)`;
+  `protected Screen createDisconnectScreen(DisconnectionDetails details)` builds a `DisconnectedScreen`.
+
 ## M2b — DONE (2026-11-17), gate passed on `f277e1c` (see `docs/VERIFICATION.md`)
 
 State: `./gradlew build`, `scripts/jarcheck.ps1`, `scripts/selftest.ps1 -Suite all` (37 of 37) and the online smoke
