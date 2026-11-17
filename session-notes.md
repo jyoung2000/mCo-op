@@ -85,6 +85,19 @@ connect, disconnect and take over as host while the world keeps knowing its owne
 is a later milestone in MILESTONES; M2b's `owner-known-to-members` and `owner-rights` cover "still knows the admin when B hosts".
 Start M2 by confirming DESIGN §8 items 4–8 in the sources. The M1 manual checklist is still the owner's to run.
 
+M2 source confirmation started (2026-11-17), not finished:
+- Item 4 confirmed: `IOWorker.store(ChunkPos pos, CompoundTag value)` and `store(ChunkPos, Supplier<CompoundTag>)` (the first calls the
+  second: hook the Supplier overload); `loadAsync(ChunkPos)` → `CompletableFuture<Optional<CompoundTag>>`; `storageInfo()` returns
+  `RegionStorageInfo(String level, ResourceKey<Level> dimension, String type)` with type `"chunk"` (ChunkMap:169), `"poi"` (ChunkMap:198),
+  `"entities"` (ServerLevel:249). So `(dimension, kind)` comes from `storageInfo()`.
+- Item 5 confirmed: `public RegionFileStorage(RegionStorageInfo info, Path folder, boolean sync)` with `read(ChunkPos)`,
+  `write(ChunkPos, @Nullable CompoundTag)`, `flush()`, `close()`; `public RegionFile(RegionStorageInfo, Path path, Path externalFileDir, boolean sync)`.
+  Neither needs a server.
+- Item 7, half: `Connection.channelActive(ctx)` only calls super and stores `ctx.channel()` / `remoteAddress()`, so a late, re-fired
+  `channelActive` is harmless there. Still to read: the vanilla `ChannelInitializer` in `ServerConnectionListener` and the tunnel's use of it.
+- Items 6 and 8 not looked at yet (`e4mc$connInfo` is in `tunnel/.../ConnectionMixin.java:41`).
+- Found in M1: upstream `DialtoneAmbientSession.start()` is not thread-safe. `SyncClient` must not start it concurrently with a ping or a game connect.
+
 Files added since the core half:
 - `core/world/ImportCheck`, `WorldArchive` (+ tests); `CoopWorldStore.exportOwnerKey`.
 - `mc/coop/`: `CoopWorlds` (store, `isCoopServer`, `rendezvous`, `coop.json`: `pkarrRelays`, `titleButton`), `StatusPing`, `CoopLauncher`, `HostSession`.
