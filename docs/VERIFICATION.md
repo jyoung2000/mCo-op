@@ -52,6 +52,18 @@ No code or build file changed after `b5c639a`, so only the failed check was re-r
 - `powershell -File scripts/jarcheck.ps1` → exit 0, 9/9 items PASS (log: `build-logs/m0-gate-jarcheck2.log`), including
   PASS `unrelocated io.netty.incubator.codec.quic` (155 classes, 0 relocated copies) and PASS `unrelocated link.e4mc.iroh` (10 classes, 0 relocated copies).
 
+### Manual checklist run by the agent, 2026-11-17
+
+Production jar `dropin-0.1.0+mc26.3.jar` (built from `b5c639a`) in two new Prism Launcher 11.1.0 instances, signed-in account,
+world = a copy of the self-test world, LAN opened by typing `/publish` in the game:
+
+- PASS Fabric 26.3 (Loader 0.20.1, Fabric API 0.166.2+26.3): game started, mod listed, `Domain assigned: undamaged-moneybags.na.e4mc.link`.
+- PASS NeoForge 26.3.0.103: game started, mod listed, `Domain assigned: macarena-flatbed.na.e4mc.link`.
+- PASS (extra) a status ping from outside the game through each domain answered `26.3`, 1/8 players, the world's MOTD.
+- PASS (extra) neither production log has a self-test, dev-mixin or offline-LAN line.
+- **NOT DONE** one instance joining the other through the domain, in either direction: there is one account on this machine
+  (a second login with the same account is refused by the server) and too little free memory to run two games safely.
+
 Still unverified:
 
 - The production jar in a real Fabric 26.3 or NeoForge 26.3 instance (all runs above are dev clients from Gradle; the merged jar
