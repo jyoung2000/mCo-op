@@ -39,6 +39,37 @@ Decisions made in M1 so far (not spelled out in the design; tell the owner):
   of hosting next to it; and if our own claim took > 1.5 s to publish, the claim starts over.
 - `core` compiles against Gson (`compileOnly`, 2.11.0); Minecraft ships Gson, so nothing is bundled.
 
+DESIGN §8 items confirmed in the 26.3 sources for M1 (2026-11-17):
+
+- **Item 1** `WorldOpenFlows.openWorld`: `public void openWorld(String levelId, Runnable onCancel)` (`WorldOpenFlows.java:306`). Three
+  callers: `WorldSelectionList.WorldListEntry.joinWorld()` (`this.minecraft.createWorldOpenFlows().openWorld(this.summary.getLevelId(), this.list::returnToScreen)`),
+  `QuickPlay.java:92`, `TitleScreen.java:234` (demo). Matches the design: one entry point to hook.
+- **Item 2** (from M0): `IntegratedServer.publishServer(MinecraftServer.MultiplayerScope scope, boolean allowCommands, int port)`, false when
+  already published or on `IOException`.
+- **Item 3** `singleplayer_uuid`: read in `PrimaryLevelData` (`input.get("singleplayer_uuid")`, getter `public @Nullable UUID getSinglePlayerUUID()`,
+  also on `WorldData`); written by `MinecraftServer.java:595`
+  `this.storageSource.saveDataTag(this.worldData, singleplayerProfile == null ? null : singleplayerProfile.id())`. **The design's worry is real:**
+  `PlayerList.loadPlayerData(NameAndId nameAndId)` does `if (this.server.isSingleplayerOwner(nameAndId) && lastSingleplayerOwnerUUID != null) return this.playerIo.load(new NameAndId(lastSingleplayerOwnerUUID, "<singleplayer owner>"))`,
+  so a new host would load the previous host's player. `IntegratedServer.selectLevelLoadFocusPos()` uses the same UUID for the spawn-chunk focus.
+  **Choice: a mixin at the two read sites** (redirect `getSinglePlayerUUID()` to the local player's UUID for co-op worlds), not a `level.dat`
+  rewrite: the only public writer is `LevelStorageAccess.renameAndDropPlayer(String)`, which also renames the world.
+- **Item 9** (from M0): `ServerStatusPinger.pingServer(ServerData, Runnable, Runnable, EventLoopGroupHolder)`.
+- **Item 10** `TitleScreen`: `protected void init()` calls `private int createNormalMenuOptions(int topPos, int spacing)` (spacing 24), which adds
+  Singleplayer, Multiplayer and Realms with `this.addRenderableWidget(Button.builder(...).bounds(this.width / 2 - 100, topPos, 200, 20).build())`.
+- **Item 11** `LevelStorageSource`: `findLevelCandidates()`, `loadLevelSummaries(LevelCandidates)` → `CompletableFuture<List<LevelSummary>>`,
+  `levelExists(String)`, `isNewLevelIdAcceptable(String)`, `getLevelPath(String)`, `getBaseDir()`, `validateAndCreateAccess(String)`, `createAccess(String)`;
+  `LevelStorageAccess.makeWorldBackup()` → `long`; `LevelSummary.getLevelId()`, `levelVersion()`, `isDowngrade()`, `requiresManualConversion()`, `isLocked()`.
+- **Item 12** `Screen.onFilesDrop(List<Path> files)` (`Screen.java:467`; `PackSelectionScreen` overrides it). A native file dialog is **not confirmed**
+  for 26.3: only `lwjgl-tinyfd-3.3.2` jars from older versions are in the Gradle cache. Browse is therefore left out unless it is found on the classpath.
+- **Item 15** `CreateWorldScreen`: `private void onCreate()` → `private boolean createNewWorld(LayeredRegistryAccess<RegistryLayer>, LevelDataAndDimensions.WorldDataAndGenSettings, Optional<GameRules>)`,
+  which takes the folder from `this.uiState.getTargetFolder()` and calls `WorldOpenFlows.createLevelFromExistingSettings(newWorldAccess.get(), ...)`.
+- **Item 18** skins: `ProfileResolver.fetchById(UUID)` → `Optional<GameProfile>`; `Minecraft.playerSkinRenderCache`
+  (`PlayerSkinRenderCache.getOrDefault(ResolvableProfile)`, `createLookup(ResolvableProfile)`);
+  `PlayerFaceExtractor.extractRenderState(GuiGraphicsExtractor graphics, ResolvableProfile skinProfile, int x, int y, int size)`;
+  `SkinManager.get(GameProfile)` → `CompletableFuture<Optional<PlayerSkin>>`. Unknown profiles fall back to the default skin.
+
+None of these contradicts the design.
+
 Not started: work items 3–8 (everything in `mc/`: menu, import, launch flow, `singleplayer_uuid`, owner key file, Players tab),
 the §8 source confirmations for them (items 1, 2, 3, 9, 10, 11, 12, 15, 18), the `m1` self-test scenarios and the gate.
 
