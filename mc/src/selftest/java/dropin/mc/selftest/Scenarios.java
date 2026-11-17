@@ -87,13 +87,17 @@ final class Scenarios {
     static StepRunner build(SelfTestSpec spec, Context ctx) {
         String key = spec.scenario() + ":" + spec.role();
         boolean expectOnline = spec.scenario().equals("tunnel-join");
-        boolean eitherWay = spec.scenario().equals("drop-in");
+        boolean eitherWay = spec.scenario().equals("drop-in") || spec.scenario().equals("first-download-root-match");
         if (!eitherWay && expectOnline != ctx.online()) {
             throw new IllegalStateException(key + " needs dropin.dev.online=" + expectOnline);
         }
         StepRunner m1 = M1Scenarios.build(key, ctx);
         if (m1 != null) {
             return m1;
+        }
+        StepRunner m2 = M2Scenarios.build(key, ctx);
+        if (m2 != null) {
+            return m2;
         }
         return switch (key) {
             case "lan-join:host", "tunnel-join:host" -> joinHost(ctx);

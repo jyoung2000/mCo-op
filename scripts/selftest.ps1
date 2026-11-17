@@ -62,6 +62,20 @@ $suites = [ordered]@{
         @{ Id = 'players-tab'; Scenario = 'players-tab'
            Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
     )
+    m2 = @(
+        @{ Id = 'vanilla-through-sniffer'; Scenario = 'vanilla-through-sniffer'
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'neoforge' 'b')) },
+        @{ Id = 'first-download-root-match'; Scenario = 'first-download-root-match'
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'neoforge' 'b')) },
+        @{ Id = 'live-checkpoint'; Scenario = 'live-checkpoint'
+           Roles = @((New-Role 'a' 'neoforge' 'a'), (New-Role 'b' 'fabric' 'b')) },
+        # B's game is killed when it writes run/shared/kill-b, then started again as role b2 on the same game folder.
+        @{ Id = 'resume'; Scenario = 'resume'; TimeoutSec = 900
+           Relaunch = @{ Marker = 'kill-b'; Index = 1; Role = 'b2' }
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+        @{ Id = 'path-policy'; Scenario = 'path-policy'
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
+    )
 }
 
 # Opt-in scenarios that touch public infrastructure (the real e4mc relay). Only run with -Online.
@@ -72,6 +86,10 @@ $onlineSuites = @{
     )
     m1 = @(
         @{ Id = 'drop-in.online'; Scenario = 'drop-in'; Online = $true
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
+    )
+    m2 = @(
+        @{ Id = 'first-download-root-match.online'; Scenario = 'first-download-root-match'; Online = $true
            Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
     )
 }
@@ -175,22 +193,50 @@ function Stop-Stragglers($procs, $roles) {
     }
 }
 
+# Kills one role's game the hard way (no shutdown hooks, nothing flushed) and waits for its Gradle wrapper to go.
+function Stop-Game($proc, $role) {
+    $pidFile = Join-Path (Get-GameDir $role.Slot) 'dropin-selftest\pid'
+    $gamePid = 0
+    if ((Test-Path $pidFile) -and [int]::TryParse((Get-Content -Raw $pidFile).Trim(), [ref]$gamePid)) {
+        $game = Get-Process -Id $gamePid -ErrorAction SilentlyContinue
+        if ($game -and $game.ProcessName -like 'java*') { Stop-Process -Id $gamePid -Force -ErrorAction SilentlyContinue }
+    }
+    $waitUntil = (Get-Date).AddSeconds(20)
+    while (-not $proc.HasExited -and (Get-Date) -lt $waitUntil) { Start-Sleep -Milliseconds 250 }
+    if (-not $proc.HasExited) { & cmd.exe /c "taskkill.exe /T /F /PID $($proc.Id) >nul 2>&1" }
+    foreach ($leftover in @('pid', 'result.json')) {
+        $path = Join-Path (Get-GameDir $role.Slot) "dropin-selftest\$leftover"
+        if (Test-Path $path) { Remove-Item -Force $path }
+    }
+}
+
 function Invoke-ClientScenario($scenario) {
     foreach ($role in $scenario.Roles) { Initialize-GameDir $role.Slot }
     if (Test-Path $sharedDir) { Remove-Item -Recurse -Force $sharedDir }
     New-Item -ItemType Directory -Force $sharedDir | Out-Null
 
     $port = Get-FreePort
+    $roles = @($scenario.Roles)
     $procs = @()
-    foreach ($role in $scenario.Roles) {
+    foreach ($role in $roles) {
         $procs += Start-Client $scenario $role $port
         Start-Sleep -Seconds 3   # let the first Gradle invocation get past configuration
     }
 
-    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    $limit = $TimeoutSec
+    if ($scenario.TimeoutSec -and $scenario.TimeoutSec -gt $limit) { $limit = $scenario.TimeoutSec }
+    $deadline = (Get-Date).AddSeconds($limit)
     $settleUntil = $null
+    $relaunched = $false
     while ((Get-Date) -lt $deadline) {
-        $results = @($scenario.Roles | ForEach-Object { Read-Result $_ })
+        if ($scenario.Relaunch -and -not $relaunched -and (Test-Path (Join-Path $sharedDir $scenario.Relaunch.Marker))) {
+            $relaunched = $true
+            $index = $scenario.Relaunch.Index
+            Stop-Game $procs[$index] $roles[$index]
+            $roles[$index] = New-Role $scenario.Relaunch.Role $roles[$index].Loader $roles[$index].Slot
+            $procs[$index] = Start-Client $scenario $roles[$index] $port
+        }
+        $results = @($roles | ForEach-Object { Read-Result $_ })
         $missing = @($results | Where-Object { $null -eq $_ }).Count
         $failed = @($results | Where-Object { $null -ne $_ -and -not $_.passed }).Count
         $running = @($procs | Where-Object { -not $_.HasExited }).Count
@@ -207,10 +253,13 @@ function Invoke-ClientScenario($scenario) {
         }
         Start-Sleep -Milliseconds 500
     }
-    Stop-Stragglers $procs $scenario.Roles
+    Stop-Stragglers $procs $roles
 
     $problems = @()
-    foreach ($role in $scenario.Roles) {
+    if ($scenario.Relaunch -and -not $relaunched) {
+        $problems += ('{0} was never written, so the process was not killed' -f $scenario.Relaunch.Marker)
+    }
+    foreach ($role in $roles) {
         $result = Read-Result $role
         if ($null -eq $result) {
             $problems += ('{0}: no result (timeout or crash)' -f $role.Role)

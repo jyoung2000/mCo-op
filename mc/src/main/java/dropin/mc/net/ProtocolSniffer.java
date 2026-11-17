@@ -28,6 +28,8 @@ import java.util.concurrent.TimeUnit;
  */
 public final class ProtocolSniffer extends ChannelInboundHandlerAdapter {
     private static final int DECIDE_TIMEOUT_SECONDS = 30;
+    private static final java.util.concurrent.atomic.AtomicInteger VANILLA = new java.util.concurrent.atomic.AtomicInteger();
+    private static final java.util.concurrent.atomic.AtomicInteger SYNC = new java.util.concurrent.atomic.AtomicInteger();
 
     private final ChannelHandler vanilla;
     private final byte[] first = new byte[Wire.MAGIC_LENGTH];
@@ -126,8 +128,18 @@ public final class ProtocolSniffer extends ChannelInboundHandlerAdapter {
         held = Unpooled.EMPTY_BUFFER;
     }
 
+    /** How many connections were handed to the game, and how many to world sync (shown by the self-tests). */
+    public static int vanillaConnections() {
+        return VANILLA.get();
+    }
+
+    public static int syncConnections() {
+        return SYNC.get();
+    }
+
     private void vanilla(ChannelHandlerContext ctx) {
         decided = true;
+        VANILLA.incrementAndGet();
         ByteBuf bytes = held;
         held = Unpooled.EMPTY_BUFFER;
         ChannelPipeline pipeline = ctx.pipeline();
@@ -156,6 +168,7 @@ public final class ProtocolSniffer extends ChannelInboundHandlerAdapter {
         release();
         ChannelPipeline pipeline = ctx.pipeline();
         pipeline.addLast("dropin_sync", pipe);
+        SYNC.incrementAndGet();
         if (rest.length > 0) {
             pipe.feed(rest);
         }

@@ -44,12 +44,14 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
     private volatile boolean stop;
     private volatile SyncClientSession.Status status = new SyncClientSession.Status(Phase.CONNECTING, 0, 0, "");
     private boolean waitingTold;
+    private volatile boolean waitingShown;
+    private final java.util.concurrent.atomic.AtomicLong applied = new java.util.concurrent.atomic.AtomicLong();
 
     private Path dropin;
     private Ledger ledger;
     private Manifest manifest;
     private SyncState state;
-    private RecordApplier applier;
+    private volatile RecordApplier applier;
 
     private SyncClient(Minecraft mc, CoopWorld world, String address) {
         this.mc = mc;
@@ -163,9 +165,14 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
                 manifest = new Manifest();
             }
             Path stateFile = dropin.resolve("state.json");
-            state = SyncState.load(stateFile);
-            if (!hasWorld && !Files.isRegularFile(stateFile)) {
+            if (Files.isRegularFile(stateFile)) {
+                state = SyncState.load(stateFile);
+            } else if (hasWorld) {
+                // A whole world that was brought over by hand: it stays usable while it is being updated.
+                state = new SyncState("", 0, true, 0, 0);
+            } else {
                 // A first download: the folder is not a usable world until one checkpoint is complete.
+                state = SyncState.EMPTY;
                 state.save(stateFile);
             }
             applier = new RecordApplier(folder);
@@ -308,6 +315,7 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
     @Override
     public void apply(String key, byte[] bytes) throws IOException {
         applier.apply(key, bytes);
+        applied.incrementAndGet();
     }
 
     @Override
@@ -341,11 +349,31 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
             mc.execute(() -> {
                 if (mc.player != null) {
                     mc.gui.hud.getChat().addClientSystemMessage(Component.translatable(K + "sync.waiting_direct"));
+                    waitingShown = true;
                 }
             });
         } else if (now.phase() == Phase.FAILED) {
             DropIn.LOGGER.warn("World sync of '{}' failed: {}", world.name(), now.detail());
         }
+    }
+
+    /** How many records the running sync of a world has written into the local copy so far. */
+    public static long appliedRecords(String worldId) {
+        SyncClient client = ACTIVE.get(worldId);
+        return client == null ? 0 : client.applied.get();
+    }
+
+    /** True once the "waiting for a direct connection" line was put into this player's chat. */
+    public static boolean waitingShown(String worldId) {
+        SyncClient client = ACTIVE.get(worldId);
+        return client != null && client.waitingShown;
+    }
+
+    /** A chunk record as it is in the local copy right now, read through the running sync's own storage. */
+    public static byte[] localChunk(String worldId, String key) throws IOException {
+        SyncClient client = ACTIVE.get(worldId);
+        RecordApplier open = client == null ? null : client.applier;
+        return open == null ? null : open.readChunk(key);
     }
 
     /** For the self-tests: the root hash of the local copy as recorded, and its checkpoint. */

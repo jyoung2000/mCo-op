@@ -72,6 +72,13 @@ public final class RecordApplier implements AutoCloseable {
         }
     }
 
+    /** The canonical bytes of a chunk record in this copy, or null if the copy has no such chunk. */
+    public synchronized byte[] readChunk(String key) throws IOException {
+        RecordKey.Chunk chunk = RecordKey.parseChunk(key);
+        CompoundTag tag = storage(chunk.dim(), chunk.kind()).read(new ChunkPos(chunk.cx(), chunk.cz()));
+        return tag == null ? null : ChunkBytes.canonical(tag);
+    }
+
     public synchronized void flush() throws IOException {
         for (RegionFileStorage storage : storages.values()) {
             storage.flush();

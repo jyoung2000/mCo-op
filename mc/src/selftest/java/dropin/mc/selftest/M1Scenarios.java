@@ -71,15 +71,15 @@ import static dropin.mc.selftest.Scenarios.inWorld;
  */
 final class M1Scenarios {
     private static final String K = "text.dropin_coop.";
-    private static final String WORLD_READY = "world-ready";
-    private static final String INVITE_FILE = "invite.txt";
+    static final String WORLD_READY = "world-ready";
+    static final String INVITE_FILE = "invite.txt";
     private static final String WORLD_COPY = "world-copy";
-    private static final String A_HOSTING = "a-hosting";
+    static final String A_HOSTING = "a-hosting";
 
     private M1Scenarios() {}
 
     /** What a scenario learns as it runs. */
-    private static final class State {
+    static final class State {
         CoopWorld world;
         String otherName;
         long goAt;
@@ -107,7 +107,7 @@ final class M1Scenarios {
 
     // ---- building blocks --------------------------------------------------------------------------
 
-    private static StepRunner base(Context ctx) {
+    static StepRunner base(Context ctx) {
         return new StepRunner()
                 .action("configure tunnel", () -> {
                     if (!ctx.online()) {
@@ -118,7 +118,7 @@ final class M1Scenarios {
                 .step("main menu", STARTUP_TICKS, () -> atMainMenu(ctx.mc()));
     }
 
-    private static StepRunner createWorld(StepRunner runner, Context ctx) {
+    static StepRunner createWorld(StepRunner runner, Context ctx) {
         Minecraft mc = ctx.mc();
         return runner
                 .action("create world", () -> {
@@ -133,7 +133,7 @@ final class M1Scenarios {
                 .step("world loaded", WORLD_TICKS, () -> inWorld(mc) && mc.getSingleplayerServer() != null);
     }
 
-    private static StepRunner quitToTitle(StepRunner runner, Context ctx) {
+    static StepRunner quitToTitle(StepRunner runner, Context ctx) {
         Minecraft mc = ctx.mc();
         return runner
                 .action("save and quit", () -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE))
@@ -142,7 +142,7 @@ final class M1Scenarios {
                 .step("back at the main menu", SHORT_TICKS, () -> atMainMenu(mc));
     }
 
-    private static StepRunner importWorld(StepRunner runner, Context ctx, State state) {
+    static StepRunner importWorld(StepRunner runner, Context ctx, State state) {
         return runner.action("import from saves", () -> {
             CoopActions.Outcome outcome = CoopActions.importFromSaves(ctx.mc(), WORLD_ID, true);
             require(outcome.ok(), "import failed: " + outcome.message().getString());
@@ -152,7 +152,7 @@ final class M1Scenarios {
     }
 
     /** Opens the Co-op Worlds screen, selects the world and presses Play: the real launch flow. */
-    private static void pressPlay(Minecraft mc, State state) {
+    static void pressPlay(Minecraft mc, State state) {
         CoopWorldsScreen screen = new CoopWorldsScreen(new TitleScreen());
         mc.gui.setScreen(screen);
         require(screen.worlds().stream().anyMatch(world -> world.worldId().equals(state.world.worldId())),
@@ -161,7 +161,7 @@ final class M1Scenarios {
         screen.play();
     }
 
-    private static boolean hosting(Context ctx) {
+    static boolean hosting(Context ctx) {
         Minecraft mc = ctx.mc();
         IntegratedServer server = mc.getSingleplayerServer();
         HostSession session = HostSession.current();
@@ -170,7 +170,7 @@ final class M1Scenarios {
                 && (!ctx.online() || !session.announcedAddr().isEmpty());
     }
 
-    private static boolean joinedRemote(Minecraft mc) {
+    static boolean joinedRemote(Minecraft mc) {
         failIfDisconnected(mc);
         return inWorld(mc) && mc.getSingleplayerServer() == null;
     }
@@ -624,7 +624,7 @@ final class M1Scenarios {
         return new Invite(seed, fingerprint);
     }
 
-    private static void require(boolean condition, String message) {
+    static void require(boolean condition, String message) {
         if (!condition) {
             throw new IllegalStateException(message);
         }
