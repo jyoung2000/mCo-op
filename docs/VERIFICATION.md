@@ -75,3 +75,49 @@ Still unverified:
 - The Dialtone direct path: the joiner's ticket lookup returned 404 and the join went through the relay.
 - Dedicated server, macOS, Linux.
 - The baseline "build as is" on upstream's commit only succeeded with placeholder `-PcurseforgeApiToken=none -PmodrinthApiToken=none`.
+
+## M1 — gate run 2026-11-17 (NOT PASSED: one check open)
+
+Commit `dfbf7ba` (branch `dropin`, local only). Windows 11, JDK 25.0.5, Gradle 9.7.1, loopback only.
+
+Commands:
+
+```
+./gradlew build                                   # exit 0; 73 unit tests (core + mc), 0 failures
+scripts/jarcheck.ps1                              # 9 PASS, 0 FAIL
+scripts/selftest.ps1 -Suite all                   # log: build-logs/m1-gate-selftest.log
+scripts/selftest.ps1 -Suite m1 -Only import-rejects   # re-run after its fix
+scripts/selftest.ps1 -Suite m1 -Online            # online smoke, run twice (fail, fix, pass)
+```
+
+Suite `m0` (re-run as part of `all`): PASS `lan-join.fabric-fabric` 35.3s, PASS `lan-join.fabric-neoforge` 30.2s,
+PASS `lan-join.neoforge-fabric` 29.3s, PASS `status-ping` 29.2s, PASS `prod-guard` 8.1s.
+
+Suite `m1`:
+
+- PASS `menu` 20.4s (Fabric): title button present, inside the screen, overlapping no other widget at the default window; opens the screen; lists a known world.
+- PASS `import-saves` 26.6s (Fabric): `dropin/world.json`, key file, backup zip, invite decodes to the same world id; the Singleplayer list opens with the world marked co-op and has the Co-op Worlds button.
+- PASS `import-zip` 22.0s (NeoForge): zip dropped on the screen, extracted to `saves/zipped-world`, imported; original untouched.
+- PASS `import-rejects` 22.7s (Fabric), **after one fix**. First run FAILED: an open world was reported "could not be read" instead of "is open right now" (the summary of a world this game has open cannot be read). Fix: the open-here check now runs before the summary is read. Re-run alone: PASS. Covers open world, already co-op, path-escaping zip, folder without `level.dat`.
+- PASS `remove` 23.1s (NeoForge): `dropin/` and both key files gone; world opens as plain singleplayer, not on LAN.
+- PASS `drop-in.fabric-neoforge` 32.8s and PASS `drop-in.neoforge-fabric` 35.0s: A presses Play and hosts; B presses Play and lands in A's session with no address typed; B places a block A reads.
+- PASS `host-swap-own-inventory` 37.9s (Fabric/Fabric): after the swap B hosts with B's item at B's position and without A's; A joins with A's item at A's position and without B's.
+- PASS `race` 36.4s (Fabric/Fabric): start time agreed through a shared file; exactly one hosted, both ended in one session.
+- PASS `owner-invite` 21.5s and PASS `owner-invite.unit` 7.1s.
+- **FAIL `players-tab` 61.6s.** A's side passed its checks (both names, A owner) and then timed out waiting for B. B lists both names but fails "A is marked as owner": `Players tab: DevA owner=false`. Not a bug in the code: in M1 nothing carries the owner's identity to a member (member records travel in the M2 sync handshake, the policy in M2b, and DESIGN 4.3 fixes the rendezvous fields). The gate line asks for more than M1's design can deliver. Waiting for the owner's decision; the test was not changed.
+
+Online smoke `drop-in.online` (real e4mc relay, real pkarr relays, Fabric/Fabric, both clients on this PC):
+
+- First run FAILED after 366s: B found A through pkarr and the status ping answered, then the connect hung. Cause (thread dump in `build/selftest-logs`, first run's log since overwritten): two of DropIn's threads pinged the e4mc domain at once, upstream's `DialtoneAmbientSession.start()` ran twice, and the connect blocked on the first endpoint. Fix in `mc` only: `StatusPing.answers` is one-at-a-time. `tunnel/` untouched.
+- Second run PASS 64.2s: A announced `starting`, then `host` with `attractor-large.na.e4mc.link`; B joined that domain; one Dialtone session started on B.
+
+Not verified in this run:
+
+- The full suite was not re-run after the two fixes; only the failed checks were (as the build prompt says).
+- GUI scale 2 and 4, Mod Menu, any window size other than the default; the look of every screen (no screenshots were taken).
+- The `[Co-op]` badge text in the Singleplayer list (only that the list opens with the mixin applied).
+- New (Create World from the Co-op Worlds screen), "Make co-op" in the pause menu, Invite/Join/Players/Import screens as clicked by a person, `titleButton` and `pkarrRelays` in `config/dropin/coop.json`, skins of real accounts.
+- A world locked by another game process, an older or newer world version (unit tests only).
+- First join without a local copy (connects as a plain client): not run.
+- Real accounts, two machines, NAT. The online smoke ran host and joiner on one PC.
+- The five-minute heartbeat and the `idle` record on quit were not asserted directly (host-swap relies on B being able to host after A quit).

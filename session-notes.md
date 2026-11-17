@@ -73,6 +73,48 @@ None of these contradicts the design.
 Not started: work items 3–8 (everything in `mc/`: menu, import, launch flow, `singleplayer_uuid`, owner key file, Players tab),
 the §8 source confirmations for them (items 1, 2, 3, 9, 10, 11, 12, 15, 18), the `m1` self-test scenarios and the gate.
 
+### M1 state after the first gate run (2026-11-17)
+
+**Not DONE.** Gate at commit `dfbf7ba`: everything passes except `players-tab` (see docs/VERIFICATION.md). Work items 1–8 are all written.
+
+Open question for the owner (blocks the gate): `players-tab` wants B to show A as owner. Nothing in M1 carries that to a member.
+Options: (a) move that half of the check to M2/M2b, where MEMBERS / the signed policy carry it; (b) add owner uuid and name to the
+rendezvous payload now (a DESIGN 4.3 change, unsigned until M2b). Do not change the test or invent a field without the answer.
+After the answer: implement, then `scripts/selftest.ps1 -Suite m1 -Only players-tab`, update VERIFICATION, mark M1 DONE.
+
+Files added since the core half:
+- `core/world/ImportCheck`, `WorldArchive` (+ tests); `CoopWorldStore.exportOwnerKey`.
+- `mc/coop/`: `CoopWorlds` (store, `isCoopServer`, `rendezvous`, `coop.json`: `pkarrRelays`, `titleButton`), `StatusPing`, `CoopLauncher`, `HostSession`.
+- `mc/menu/`: `CoopActions` (all menu logic, also used by the self-tests), `CoopStatus`, `CoopWorldsScreen`, `ImportScreen`, `InviteScreen`, `JoinInviteScreen`, `PlayersScreen`.
+- `dropin/mixin/mc/`: `WorldOpenFlowsMixin`, `PlayerListOwnDataMixin`, `IntegratedServerFocusMixin`, `IntegratedServerNewCoopMixin`, `TitleScreenMixin`, `SelectWorldScreenMixin`, `PauseScreenMixin`, `WorldListEntryMixin`.
+- `assets/dropin_coop/lang/en_us.json` (own namespace, so `tunnel/` resources stay untouched).
+- `mc/src/selftest/.../M1Scenarios.java`; suite `m1` and online `drop-in.online` in `scripts/selftest.ps1` (which now also wipes `backups` and `config/dropin` per slot).
+
+Decisions made while building (tell the owner; none changes a file format in DESIGN):
+- §4.8 is a mixin at the two read sites of `singleplayer_uuid` (`PlayerList.loadPlayerData`, `IntegratedServer.selectLevelLoadFocusPos`), not a `level.dat` rewrite: no file of the world is touched and Remove needs no undo.
+- The world list is rows of buttons with paging, not the vanilla list widget (less 26.x API surface).
+- Title button: right of Singleplayer, shrinks to a 20px "Co" button with a tooltip when the window is too narrow.
+- "Make co-op" imports in place without a backup (the world is open) and starts hosting at once.
+- "New" sets a flag; `IntegratedServer.initServer` HEAD registers the world before its level loads.
+- Export owner key writes `<game dir>/dropin-owner-key-<8 chars>.key` (no native file dialog; Browse is likewise left out).
+- A dropped folder/zip that is a copy of a world this PC has the invite for is listed as is ("copy attached").
+- A joined world is named "Co-op world <6 chars>": the invite carries no name.
+- Host publishes `starting` (not `host`) until the e4mc domain arrives, for at most 30 s, so a remote friend waits instead of starting a second session. With the tunnel disabled it publishes `host` at once.
+- `dropin.dev.online` (dev only) drops the LAN hint so the online smoke must use the relay.
+- LAN is opened with commands on only in self-tests.
+- `StatusPing.answers` is synchronized: upstream's `DialtoneAmbientSession.start()` is not thread-safe. A vanilla connect racing our first ping could still hit it; a guard there would be a `tunnel/` change outside the named hooks, so it was not made.
+
+More 26.3 signatures used (all read in the sources):
+`TitleScreen.createNormalMenuOptions(int topPos, int spacing)` (private, returns int); `SelectWorldScreen.init()` / `repositionElements()`;
+`PauseScreen.init()`, field `private final boolean showPauseMenu`; `WorldSelectionList.WorldListEntry.<init>` calls `summary.getLevelName()`;
+`IntegratedServer.initServer()`; `Screen.extractRenderState(GuiGraphicsExtractor, int, int, float)`, `onFilesDrop(List<Path>)`, `rebuildWidgets()`;
+`GuiGraphicsExtractor.text/centeredText(Font, Component, int, int, int)`; `Checkbox.builder(Component, Font).pos().selected().onValueChange()`;
+`LevelStorageSource.loadLevelSummaries(LevelCandidates)` (background executor), `LevelCandidates(List<LevelDirectory>)`, `LevelDirectory(Path)`, `getBackupPath()`;
+`LevelSummary.levelVersion().minecraftVersion().version()`, `isLocked()`; `SharedConstants.getCurrentVersion().dataVersion().version()`;
+`Minecraft.disconnectFromWorld(Component)`, `gameDirectory`, `keyboardHandler.setClipboard(String)`; `Button.onPress(InputWithModifiers)`, `KeyEvent(int, int, int)`;
+`AlertScreen(Runnable, Component, Component)`, `ConfirmScreen(BooleanConsumer, Component, Component)`; `CreateWorldScreen.openFresh(Minecraft, Runnable)`.
+Vanilla opens Create World by itself when the Singleplayer list is empty (found by the `menu` self-test).
+
 ### Design change after M0 (2026-11-17, docs only, no code)
 
 The owner asked for: world owner as admin of mods and datapacks, automatic mod download for members, a mod list and a player list
