@@ -466,8 +466,12 @@ final class M1Scenarios {
                     return rows.stream().anyMatch(row -> row.name().equals(me))
                             && rows.stream().anyMatch(row -> row.name().equals(otherName));
                 })
-                .action("A is marked as owner", () -> {
-                    String nameOfA = iAmA ? mc.getUser().getName() : state.otherName;
+                .action("A is marked as owner on the owner's PC", () -> {
+                    if (!iAmA) {
+                        // MILESTONES m1 players-tab: B showing A as owner is gate m2b `owner-known-to-members`.
+                        return;
+                    }
+                    String nameOfA = mc.getUser().getName();
                     List<PlayersScreen.Row> rows = PlayersScreen.rowsOf(state.world.worldId());
                     for (PlayersScreen.Row row : rows) {
                         if (row.owner() != row.name().equals(nameOfA)) {

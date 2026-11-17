@@ -75,12 +75,15 @@ the §8 source confirmations for them (items 1, 2, 3, 9, 10, 11, 12, 15, 18), th
 
 ### M1 state after the first gate run (2026-11-17)
 
-**Not DONE.** Gate at commit `dfbf7ba`: everything passes except `players-tab` (see docs/VERIFICATION.md). Work items 1–8 are all written.
+**M1 DONE (2026-11-17).** Gate passed, see docs/VERIFICATION.md. Work items 1–8 are all written.
 
-Open question for the owner (blocks the gate): `players-tab` wants B to show A as owner. Nothing in M1 carries that to a member.
-Options: (a) move that half of the check to M2/M2b, where MEMBERS / the signed policy carry it; (b) add owner uuid and name to the
-rendezvous payload now (a DESIGN 4.3 change, unsigned until M2b). Do not change the test or invent a field without the answer.
-After the answer: implement, then `scripts/selftest.ps1 -Suite m1 -Only players-tab`, update VERIFICATION, mark M1 DONE.
+`players-tab`: the owner chose "Move check to M2b". B showing A as owner is now gate m2b `owner-known-to-members`; M2b must carry the
+owner's uuid and name to members in the signed policy and make the Players tab use it.
+
+**Next: M2** (sync channel, full download, live checkpoints). The owner then wants M2b, and asked (2026-11-17) that any player can
+connect, disconnect and take over as host while the world keeps knowing its owner (admin of mods and datapacks). Host handoff itself
+is a later milestone in MILESTONES; M2b's `owner-known-to-members` and `owner-rights` cover "still knows the admin when B hosts".
+Start M2 by confirming DESIGN §8 items 4–8 in the sources. The M1 manual checklist is still the owner's to run.
 
 Files added since the core half:
 - `core/world/ImportCheck`, `WorldArchive` (+ tests); `CoopWorldStore.exportOwnerKey`.

@@ -76,7 +76,7 @@ Still unverified:
 - Dedicated server, macOS, Linux.
 - The baseline "build as is" on upstream's commit only succeeded with placeholder `-PcurseforgeApiToken=none -PmodrinthApiToken=none`.
 
-## M1 — gate run 2026-11-17 (NOT PASSED: one check open)
+## M1 — gate run 2026-11-17 (passed after the follow-up below)
 
 Commit `dfbf7ba` (branch `dropin`, local only). Windows 11, JDK 25.0.5, Gradle 9.7.1, loopback only.
 
@@ -110,6 +110,10 @@ Online smoke `drop-in.online` (real e4mc relay, real pkarr relays, Fabric/Fabric
 
 - First run FAILED after 366s: B found A through pkarr and the status ping answered, then the connect hung. Cause (thread dump in `build/selftest-logs`, first run's log since overwritten): two of DropIn's threads pinged the e4mc domain at once, upstream's `DialtoneAmbientSession.start()` ran twice, and the connect blocked on the first endpoint. Fix in `mc` only: `StatusPing.answers` is one-at-a-time. `tunnel/` untouched.
 - Second run PASS 64.2s: A announced `starting`, then `host` with `attractor-large.na.e4mc.link`; B joined that domain; one Dialtone session started on B.
+
+**Follow-up, same day: M1 GATE PASSED.** The owner decided "Move check to M2b": B showing A as owner is now gate `m2b`
+`owner-known-to-members` (MILESTONES changed), and the B-side assertion left the M1 scenario for that reason only.
+`scripts/selftest.ps1 -Suite m1 -Only players-tab` → PASS `players-tab` 36.7s (both sides list both names; A is owner on A's PC).
 
 Not verified in this run:
 

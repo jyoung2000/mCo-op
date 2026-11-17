@@ -74,7 +74,7 @@ Self-test scenarios run on Fabric dev clients unless marked *cross-loader*, whic
 - `host-swap-own-inventory`: A and B each `/give` themselves a different item and `/tp` to different coordinates; A quits; the world folder is copied to B; B presses Play and hosts with B's item at B's position; A joins and has A's item at A's position.
 - `race`: A and B press Play within one second of each other; exactly one ends up hosting and the other joins it.
 - `owner-invite`: the invite of an imported world decodes to the world id and the fingerprint of the owner key on disk; a world joined by invite has no owner key file. Unit-level too: an invite with a wrong-length payload is refused.
-- `players-tab`: after `drop-in`, both A's and B's Players tab list both names, with A marked as owner.
+- `players-tab`: after `drop-in`, both A's and B's Players tab list both names; on A's PC (the owner's) A is marked as owner. That B also shows A as owner is checked in `m2b` (`owner-known-to-members`), because the owner's identity reaches members with the signed policy (owner's decision, 2026-11-17).
 
 **Online smoke (once):** `drop-in` with the real e4mc relay and real pkarr relays.
 
@@ -141,6 +141,7 @@ Added 2026-11-17. **Read:** DESIGN §4.13–4.15, §2 limits 5–7, §4.6. **Con
 - `mod-change-live`: with B connected, the owner's policy gains test mod Y (owner restarts with Y and re-opens); B is disconnected with the "mods changed" screen and gets back in only after updating.
 - `mod-tamper`: a peer serves a jar whose hash differs from the manifest; it is rejected and never reaches `mods/`. A policy signed by a different key is rejected.
 - `mod-keep-extra`: B marks a client-only test jar "keep"; B can join; B is refused as host.
+- `owner-known-to-members`: after B has joined A's world (A is the owner), B's Players tab marks A as owner, and still does after A quits and B hosts (moved here from M1's `players-tab`).
 - `owner-rights`: with B hosting and the owner joined, the owner can run an operator command and B cannot (with `membersMayUseCommands` off); a banned UUID is refused.
 - `datapack-mismatch`: B's `datapacks/` differs from the policy; B is refused as host with the right message.
 - `mods-tab`: the Mods tab lists X and marks it "missing here" on a client without it.
