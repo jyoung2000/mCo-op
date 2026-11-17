@@ -125,3 +125,36 @@ Not verified in this run:
 - First join without a local copy (connects as a plain client): not run.
 - Real accounts, two machines, NAT. The online smoke ran host and joiner on one PC.
 - The five-minute heartbeat and the `idle` record on quit were not asserted directly (host-swap relies on B being able to host after A quit).
+
+## M2 — 2026-11-17 — commit `c3f94a3` — GATE PASSED
+
+Machine: this PC (Windows 11, JDK 25.0.5, 8 GB RAM), both clients on it. Commands, in this order, each run once on `c3f94a3`:
+
+- `./gradlew build` → `BUILD SUCCESSFUL` (unit tests included; M2 added `ManifestTest` 10, `LedgerTest` 7, `SyncTest` 13). Log: `build/logs/gate-build.log`.
+- `powershell -ExecutionPolicy Bypass -File scripts/jarcheck.ps1` → exit 0, all six lines PASS (one mixin config, no self-test classes, the two relocations, the two unrelocated JNI packages). Log: `build/logs/gate-jarcheck.log`.
+- `powershell -ExecutionPolicy Bypass -File scripts/selftest.ps1 -Suite all` → exit 0, 22 of 22:
+  - m0: PASS `lan-join.fabric-fabric` 30.6s, PASS `lan-join.fabric-neoforge` 30.2s, PASS `lan-join.neoforge-fabric` 33.0s, PASS `status-ping` 28.7s, PASS `prod-guard` 7.1s.
+  - m1: PASS `menu` 17.9s, PASS `import-saves` 25.1s, PASS `import-zip` 19.9s, PASS `import-rejects` 20.5s, PASS `remove` 21.5s, PASS `drop-in.fabric-neoforge` 28.6s, PASS `drop-in.neoforge-fabric` 29.2s, PASS `host-swap-own-inventory` 34.3s, PASS `race` 33.7s, PASS `owner-invite` 20.4s, PASS `owner-invite.unit` 7.1s, PASS `players-tab` 32.2s.
+  - m2:
+    - PASS `vanilla-through-sniffer` 28.8s (A Fabric, B NeoForge): a status ping and an ordinary login by address both work; A counted at least two game connections through the sniffer and none taken for sync.
+    - PASS `first-download-root-match` 38.0s (A Fabric, B NeoForge): B has only the invite, is in A's world while the copy downloads; after A quits, B's saved state is at A's last checkpoint, B's files re-read from the closed folder hash to the root A reported, and B hosts the copy alone and finds the block A placed.
+    - PASS `live-checkpoint` 36.4s (A NeoForge, B Fabric), 5 s interval: a block A places is in the chunk in B's copy within 10 s.
+    - PASS `resume` 129.9s (Fabric/Fabric): B's game process is killed by the script mid-download (60 ms per record on the host); started again, B's sync begins with the kept records counted as present and ends with the root A reported, proven from B's files. In the trial run before the gate the log line was "after the restart the sync starts at 192 of 1227 records; 192 were kept".
+    - PASS `path-policy` 38.9s (Fabric/Fabric): path forced to "relayed", `bulkSyncOverRelay` absent: the host sent 0 record frames to its one sync peer; B stays in "waiting", wrote nothing, and the waiting line was put into chat and is the status line.
+- Online smoke, once: `powershell -ExecutionPolicy Bypass -File scripts/selftest.ps1 -Suite m2 -Online` → PASS `first-download-root-match.online` 71.2s. Real e4mc relay and pkarr relays; A announced `spoon-customary.na.e4mc.link`; B joined it, downloaded 952 records over Dialtone connections and matched A's root `d298a62e06e6884250d685333da82a48`; B then hosted alone.
+
+Failures before the gate run, and what was done (trial runs of single scenarios, not counted as the gate):
+
+- `first-download-root-match` failed its last step: the block was not in B's copy although the roots matched. Cause: region workers are created with storage type `"chunk"`, and `ChunkStores` only accepted `region`/`entities`/`poi`, so no chunk was ever hashed or sent (the manifest held files only). Fix: the kind is the folder name. One fix, re-run passed.
+- `resume` failed on an assertion of the test itself (written this session): it compared all record writes after the restart with the world size, but those writes include chunks the host changed again during the 70 s download. The assertion now reads what the reconnecting sync reports as already present. The gate line (continues, finishes, root matches) was not relaxed.
+
+Not verified in this run:
+
+- That the online path was direct is **inferred**: bulk records are only sent when the host's `PathInfo.direct(debugInfo)` is true, and they were sent. The raw `debugInfo` line was not logged, so its format is still unconfirmed against the iroh-java version in the jar. Both clients were on one PC, so this says nothing about NAT.
+- A relayed real path (only the forced one), `bulkSyncOverRelay: true`, the relay rate cap, the TPS pause.
+- A large world (the biggest here was about 1,200 records), other dimensions with data, a world with entities and POI of note.
+- The 60 s default interval; the test interval was 5 s. A chunk the game saved less than 10 s ago is not re-saved by a periodic checkpoint (vanilla's own save cooldown), so a change can take one interval longer.
+- A hand-copied folder being diffed instead of downloaded (it runs in the M1 scenarios, but nothing asserts on it).
+- The "Downloading N%" and "Copy N% downloaded" status lines and the "nobody online, N% downloaded" screen as seen by a person.
+- A diverged copy (unit tests only; it is left untouched until M5).
+- Both online runs (`drop-in.online` in M1 and this one) end with vanilla's "Client shutdown from post-main" watchdog report in B's log after the result was written: a client that used a Dialtone connection takes more than 10 s to exit. Not looked into.

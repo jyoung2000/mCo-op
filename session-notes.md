@@ -85,6 +85,44 @@ connect, disconnect and take over as host while the world keeps knowing its owne
 is a later milestone in MILESTONES; M2b's `owner-known-to-members` and `owner-rights` cover "still knows the admin when B hosts".
 Start M2 by confirming DESIGN §8 items 4–8 in the sources. The M1 manual checklist is still the owner's to run.
 
+## M2 — DONE (2026-11-17), gate passed on `c3f94a3` (see `docs/VERIFICATION.md`)
+
+**Next step: M2b** (owner policy and mod sync), in its own session. Start with the swap-helper spike (MILESTONES M2b step 1) and
+confirm DESIGN §8 items 16, 17, 19, 20. The M2 manual checklist (two PCs over the internet) is the owner's to run.
+
+What M2 built:
+- `core/manifest` (`RecordKey`, `Manifest`), `core/ledger` (`LedgerEntry`, `Ledger`, `Deltas`), `core/sync` (`Wire`, `SecureChannel`,
+  `SyncServerSession`, `SyncClientSession`, `SyncState`, `Transport`, `PathInfo`) with unit tests.
+- `mc/net`: `ProtocolSniffer` (wraps the captured child handler through the new tunnel hook `E4mcClient.childHandlerWrapper`, the only
+  `tunnel/` change: one field and helper in `E4mcClient`, one line in `ServerConnectionListenerMixin`), `SyncPipe`, `SyncConnector`, `PathPolicy`.
+- `mc/host`: `ChunkStores` + `IOWorkerMixin` (dirty tracking), `ChunkBytes`, `HostSync` (checkpoints, serving), `MinecraftServerStopMixin`.
+- `mc/member`: `SyncClient`, `RecordApplier`. Wiring in `DropIn.init`, `HostSession`, `CoopLauncher`, `CoopWorlds`, `CoopWorldsScreen`, lang.
+- Self-tests: `M2Scenarios`, suite `m2` and kill-and-relaunch (`Relaunch`) in `scripts/selftest.ps1`. The sniffer was reliable; the
+  second-session fallback was not needed.
+
+Decisions the design did not spell out (for the owner to confirm or change):
+- Chunk bytes are hashed as binary NBT with compound keys sorted (`CompoundTag` order differs between machines).
+- The root hash covers keys as well as hashes. The manifest is one file, `dropin/manifest/current.tsv`; `deltas/<seq>.bin` is text.
+- `state.json` also holds `have` and `total` (for the percentage). A copy is "unfinished" iff `state.json` says `complete: false`; a whole
+  world brought over by hand counts as complete while it is being updated, so it can still be hosted if the host leaves mid-update
+  (it is then a mix of two checkpoints until the next sync).
+- An unfinished download cannot be opened or hosted: Play joins a live host or shows "Nobody is online and your copy is N% downloaded".
+- A first join creates the save folder named after the world, with the marker, before any data arrives.
+- A `CHECKPOINT` lists changed keys only on a bulk-allowed path and up to 2,000 keys; otherwise the member runs a diff.
+- The host waits up to 10 s at quit for members to confirm the last checkpoint (M3 raises this for handoff). No checkpoint on pause.
+- Leftover dirty keys at server stop go to `dropin/dirty.txt` and are folded into the next host session's first checkpoint.
+- Rendezvous `head`/`seq` are not published yet; `PEERS`, `HANDOFF`, `BRANCH_PUSH` message numbers are reserved, not used.
+- `config/dropin/coop.json` keys: `bulkSyncOverRelay` (false), `relayRateKBps` (128), `checkpointSeconds` (60, minimum 5).
+- Development switches: `dropin.dev.forcePath=relayed|direct`, `dropin.dev.syncDelayMs`, `dropin.dev.checkpointSeconds`.
+- LAN counts as direct when the connection is a plain TCP socket channel.
+
+Open points found:
+- A periodic checkpoint uses `saveEverything(true, false, false)`, which skips chunks saved in the last 10 s (vanilla cooldown); the quit
+  checkpoint flushes everything.
+- Online runs end with the "Client shutdown from post-main" watchdog report in B's log (also in M1's `drop-in.online`): slow exit after
+  a Dialtone connection. Not investigated.
+- The iroh `debugInfo` line was never logged in a real run; "direct" online is inferred from bulk records flowing.
+
 M2 source confirmation (2026-11-17), finished:
 - Item 4 confirmed: `IOWorker.store(ChunkPos pos, CompoundTag value)` and `store(ChunkPos, Supplier<CompoundTag>)` (the first calls the
   second: hook the Supplier overload); `loadAsync(ChunkPos)` → `CompletableFuture<Optional<CompoundTag>>`; `storageInfo()` returns
