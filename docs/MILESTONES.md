@@ -179,6 +179,22 @@ Added 2026-11-17. **Read:** DESIGN §4.13–4.15, §2 limits 5–7, §4.6. **Con
 
 ---
 
+## M3b — save points (DESIGN §4.16)
+
+Added by the owner on 2026-11-17.
+
+Work list:
+1. `core/savepoint`: object store, save point index, limit of ten, garbage collection, export and import file. Unit tests for each.
+2. `mc/savepoint`: create from a hosted world, restore into a closed world, make a single-player world.
+3. Commands `/dropin savepoint create|list|restore`, owner who is hosting only.
+4. Menu: Save points screen; Backups, Datapacks and (owner) Mods folder buttons.
+
+Gate:
+- Unit tests of `core/savepoint` pass.
+- `savepoint-rollback`: A hosts, B joins. A makes a save point, both change the world and their inventories, A restores it from the command; after A is hosting again and B has rejoined with no input, the block changes are gone and both inventories and positions are as at the save point, on the server and in B's local copy.
+- `savepoint-files`: the eleventh save point removes the oldest; an exported file imports back with the same root; a single-player world made from a save point opens and has the save point's blocks.
+- `./gradlew build`, `scripts/jarcheck.ps1` and `scripts/selftest.ps1 -Suite all` pass.
+
 ## M4 — crash failover, stale-copy warning, status HUD
 
 **Read:** DESIGN §4.9 (crash), §4.4 launch flow step 3, §4.3.

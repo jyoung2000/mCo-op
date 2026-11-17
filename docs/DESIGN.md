@@ -99,6 +99,7 @@ saves/<folder>/dropin/manifest/...                 current hashes (§4.7)
 saves/<folder>/dropin/deltas/<seq>.bin             keys changed at that checkpoint
 saves/<folder>/dropin/branches/<head>/...          preserved divergent records (§4.10)
 saves/<folder>/dropin/backups/...                  pre-merge copies of overwritten records
+saves/<folder>/dropin/backups/savepoints/...       the owner's save points (§4.16)
 ```
 
 `dropin/` is never replicated as files. The ledger travels through the protocol.
@@ -288,6 +289,26 @@ Own implementation (MIT), modelled on how AutoModpack works; no AutoModpack code
 - **Other mods and the title screen.** The button is added by a mixin and laid out relative to the vanilla buttons. Mods that replace the title screen can hide it, so the screen is also reachable from a "Co-op Worlds" button on the Singleplayer world list. Config `titleButton` (default on) turns the title-screen button off.
 
 ---
+
+### 4.16 Save points (owner only)
+
+Decided by the owner on 2026-11-17.
+
+- **What.** A save point is the whole world at one checkpoint: every record of §4.7, so chunks, world files and all player data (inventory, position, status). The owner can roll the world back to one.
+- **Who and where.** Only the owner, and only on the owner's PC: creating and restoring need the owner key file on this PC, and the commands also need the owner to be the host. Save points are kept on that PC only. `dropin/` is never replicated, so they are not sent to members.
+- **Storage.** `dropin/backups/savepoints/`:
+  - `objects/<first 2 hex>/<hash>`: one deflate-compressed record per file, named by the record hash of §4.7. A record that is the same in several save points is stored once.
+  - `points/<id>.json`: `{id, name, created (seconds), seq, root, records, auto}`; `points/<id>.tsv`: one `key<TAB>hash` line per record.
+  - `id` is the creation time in milliseconds, in decimal. Names are 1 to 32 characters of `a-z A-Z 0-9 _ -`, unique without regard to case.
+- **Limit.** Ten per world. Making an eleventh deletes the oldest. Objects no save point names any more are deleted.
+- **Create.** Take a checkpoint, then store every record the object store does not have yet. Hashing and writing run off the server thread; records are read through the game's storage objects (§4.5).
+- **Restore.** Only with the world closed on this PC. First an automatic save point named `before-restore` is made of the current world (it replaces the previous automatic one and does not count toward the ten). Then every record that differs is written or deleted. The ledger is not rewritten: the next host start takes a full-scan checkpoint, and members receive the rolled-back records as an ordinary checkpoint.
+  From the command, the host's world is closed, restored and opened again, and members rejoin by themselves: the host sends `HANDOFF` (§4.9) naming **itself** as the successor and publishes `st:"handoff"` with `next` = itself. A member that receives a handoff to the current host shows "Host is changing…" and reconnects as soon as that host announces a session with a different `sess` than the one that ended. Nobody else takes over.
+- **Commands** (owner who is hosting): `/dropin savepoint create <name>`, `/dropin savepoint list`, `/dropin savepoint restore <name>`.
+- **Menu.** Co-op Worlds has a **Save points** button for the owner: the list with Create, Restore, Delete, Export, Import and **Make single-player world**.
+- **Export / import.** One file `<world name>-<save point name>.dropinsave`: a zip with `point.json`, `point.tsv` and the `objects/` it names, plus `world.txt` holding the worldId. Import accepts only a file of the same world and stores it as a save point (the limit applies).
+- **Make single-player world.** Writes the save point as a new folder under `saves/` with no `dropin/` folder: an ordinary world, not linked to the co-op world.
+- **Folder buttons** in Co-op Worlds: **Backups** opens `saves/<folder>/dropin/backups/`, **Datapacks** opens `saves/<folder>/datapacks/`, and, for the owner only, **Mods folder** opens the game's `mods/` folder (the mod list of §4.14 is made from it).
 
 ## 5. Build retarget and fork hygiene (M0)
 
