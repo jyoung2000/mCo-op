@@ -48,7 +48,7 @@ Self-test scenarios run on Fabric dev clients unless marked *cross-loader*, whic
 
 ## M1 — identity, rendezvous, menu, import, launch flow, player data
 
-**Read:** DESIGN §4.1–4.4, §4.8, §6. **Confirm in sources:** §8 items 1, 2, 3, 9, 10, 11, 12, 15.
+**Read:** DESIGN §4.1–4.4, §4.8, §6, §4.13 (owner key and invite), §4.15. **Confirm in sources:** §8 items 1, 2, 3, 9, 10, 11, 12, 15, 18.
 
 **Work:**
 
@@ -58,6 +58,8 @@ Self-test scenarios run on Fabric dev clients unless marked *cross-loader*, whic
 4. Import (§4.4): from saves, from folder, from .zip (drag-and-drop, Browse if available); the three checks in order; backup option; safe extraction.
 5. `mc/launch`: the open-world hook, `CoopLauncher`, automatic LAN publish, rendezvous publish from the domain-assigned hook (DESIGN §3 row 8).
 6. The `singleplayer_uuid` fix (§4.8). Choose rewrite-before-open or a mixin from what the sources show; note which and why.
+7. Owner identity (§4.13, key and invite only): generate the owner key at import/create, store it, put its fingerprint in the invite, "Export owner key". No policy, no enforcement yet.
+8. Players tab (§4.15) from the locally known members: names, skins, owner badge. A "Co-op Worlds" button on the Singleplayer world list, and the `titleButton` config. Confirm §8 item 18 first.
 
 **Out of scope:** side-channel, manifest, ledger, handoff, merge. A first join with no local copy connects as a normal client and says world sync arrives in the next version.
 
@@ -71,6 +73,8 @@ Self-test scenarios run on Fabric dev clients unless marked *cross-loader*, whic
 - `drop-in` *(cross-loader)*: A presses Play and hosts; B presses Play on the same world and lands in A's session without typing an address.
 - `host-swap-own-inventory`: A and B each `/give` themselves a different item and `/tp` to different coordinates; A quits; the world folder is copied to B; B presses Play and hosts with B's item at B's position; A joins and has A's item at A's position.
 - `race`: A and B press Play within one second of each other; exactly one ends up hosting and the other joins it.
+- `owner-invite`: the invite of an imported world decodes to the world id and the fingerprint of the owner key on disk; a world joined by invite has no owner key file. Unit-level too: an invite with a wrong-length payload is refused.
+- `players-tab`: after `drop-in`, both A's and B's Players tab list both names, with A marked as owner.
 
 **Online smoke (once):** `drop-in` with the real e4mc relay and real pkarr relays.
 
@@ -110,6 +114,46 @@ Self-test scenarios run on Fabric dev clients unless marked *cross-loader*, whic
 
 - [ ] Two PCs over the internet: the HUD or status line shows whether the path is direct; a real world of a few hundred MB downloads and matches.
 - [ ] If the path is relayed, confirm bulk sync stays off by default.
+
+---
+
+## M2b — owner policy and mod sync
+
+Added 2026-11-17. **Read:** DESIGN §4.13–4.15, §2 limits 5–7, §4.6. **Confirm in sources:** §8 items 16, 17, 19, 20.
+
+**Work:**
+
+1. **Spike first: the swap helper** (§4.14). A dev client writes a plan, starts the detached helper and quits; the helper changes a `mods/` folder after the game process has exited; the next start loads the new set. Prove it on Fabric and on NeoForge, on Windows. If it cannot work, stop and report before trying loader-specific injection.
+2. `core/policy`: owner-signed policy, canonical bytes, version compare. Unit tests: a valid policy; a wrong signature; a key that does not match the invite fingerprint; an older version never replaces a newer one.
+3. `core/mods`: manifest build and hash, diff (to download, to remove, kept extras), file-name sanitising, size caps, swap plan, Modrinth lookup client against a fake server. Unit tests for each, including a path-escaping name and an over-cap manifest.
+4. Sync messages `POLICY`, `POLICY_REQ`, `MEMBERS`, `MOD_GET`, `MOD_DATA`; policy version and manifest hash in the rendezvous payload. Peer mod transfer obeys the path policy.
+5. `mc/mods`: scan the mods folder; the owner's "Update this world's mod list?" screen; the member's consent screen; download with hash check into the store; helper launch.
+6. `mc/policy`: the check before the integrated server boots (mods, datapacks); refuse to host with kept extras; bans; owner operator rights; `membersMayUseCommands`; checkpoint-then-disconnect when a newer policy arrives mid-session.
+7. Mods tab (§4.15); Players tab now fed by `MEMBERS`, so offline members are listed.
+
+**Out of scope:** syncing `config/`, resource packs or shader packs; CurseForge lookups; installing a loader or Java; relaunching the game.
+
+**Gate suite `m2b`** (test mods are tiny jars built by the test build, one per loader, each adding one item):
+
+- `policy-unit`, `mods-unit`: the unit tests of steps 2 and 3.
+- `mod-join`: the owner hosts with test mod X; B, without X, presses Play, sees the consent screen with X listed, approves; B's game exits; the helper puts X in B's `mods/`; B is started again, presses Play and lands in the session holding the item from X.
+- `mod-decline`: B cancels the consent screen; nothing is downloaded, B's `mods/` is unchanged, B is not connected.
+- `mod-change-live`: with B connected, the owner's policy gains test mod Y (owner restarts with Y and re-opens); B is disconnected with the "mods changed" screen and gets back in only after updating.
+- `mod-tamper`: a peer serves a jar whose hash differs from the manifest; it is rejected and never reaches `mods/`. A policy signed by a different key is rejected.
+- `mod-keep-extra`: B marks a client-only test jar "keep"; B can join; B is refused as host.
+- `owner-rights`: with B hosting and the owner joined, the owner can run an operator command and B cannot (with `membersMayUseCommands` off); a banned UUID is refused.
+- `datapack-mismatch`: B's `datapacks/` differs from the policy; B is refused as host with the right message.
+- `mods-tab`: the Mods tab lists X and marks it "missing here" on a client without it.
+- `swap-restores`: the member's own jars that were moved are all present under `mods/.dropin-disabled/`; nothing was deleted.
+
+**Online smoke (once):** `mod-join` with a real, small mod that Modrinth's hash lookup knows, downloaded from Modrinth.
+
+**Manual checklist:**
+
+- [ ] A real modpack of 50+ mods on the owner's PC, one loader: a friend with an empty `mods/` folder joins after one approve-and-restart, in the launcher they normally use.
+- [ ] The owner adds a mod and removes one; the friend is kept out, updates, and gets back in.
+- [ ] The title-screen button and the Co-op Worlds screen still work inside that modpack; note any mod that hides or breaks them.
+- [ ] The friend's own mods are all in `mods/.dropin-disabled/`.
 
 ---
 

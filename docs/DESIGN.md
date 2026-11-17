@@ -18,6 +18,9 @@ One mod jar per player, nothing else to run.
 - While people are connected, the host **streams every world change** to each member's local copy, hash-checked.
 - When the host quits, hosting **hands off** to another connected member and everyone reconnects.
 - Each player's inventory, position, health, ender chest, advancements and stats follow their account, whoever is hosting.
+- The player who imported or created the world is its **owner**: the admin of the world, in control of its mods and datapacks (§4.13).
+- The owner's mod list is **downloaded automatically** by members, after they approve it, and anyone whose mods are out of date is kept out until they have updated and restarted (§4.14).
+- Each co-op world shows its **players (names and skins)** and its **mod list** (§4.15).
 
 ### What it is not
 
@@ -31,7 +34,10 @@ This is not a blockchain and has no consensus. Minecraft can only be simulated b
 2. **No fixed server address on the public e4mc relay.** The relay picks a random two-word domain per session (§3, row 3). The mod makes this irrelevant: members never type an address, the world list entry finds the current host by itself. A literal fixed address needs your own relay (§7).
 3. **Bulk world data should not ride e4mc's free relay.** World sync can be gigabytes. By default it only flows over a direct path (LAN or a direct Dialtone/iroh connection). If two players can't get a direct path, gameplay still works through the relay but their copies won't sync until you opt in (throttled) or run your own relay.
 4. **An invite is full trust.** Anyone holding it can join, host, and therefore change anything. Share it like a password.
-5. **Nothing here has been compiled.** The spec was written from reading the source. The sandbox it was written in cannot reach the Fabric, NeoForge or Mojang Maven hosts. M0 is where the build gets proven.
+5. **Owner control binds honest clients only.** The owner's mod list, datapack set, bans and command setting (§4.13) are enforced by each member's own copy of the mod. Someone with the invite and a modified client can ignore them. Only re-keying removes a person.
+6. **Mod sync runs code the owner chose.** Members download and run the jars on the owner's list. The list can only be changed with the owner's key and every change needs the member's click, but a member has to trust the owner the way they would trust any modpack author.
+7. **Changing mods always means a restart.** For the owner, and for every member, before they can join again. A modded co-op world is tied to one loader.
+8. **Nothing here has been compiled.** The spec was written from reading the source. The sandbox it was written in cannot reach the Fabric, NeoForge or Mojang Maven hosts. M0 is where the build gets proven.
 
 ---
 
@@ -72,7 +78,7 @@ From outside the repo:
   - `sig`: Ed25519 key pair, info `dropin/sig`. `worldId` = z-base32 of the public key (52 chars). This is the pkarr address.
   - `auth`: 32 bytes, info `dropin/auth`. HMAC key for the sync handshake and ledger entries.
   - `enc`: 32 bytes, info `dropin/enc`. AEAD key (ChaCha20-Poly1305 from the JDK) for the rendezvous payload and sync frames.
-- Invite code: `dropin1-` + base32(seed), grouped in fives. It is the only thing a friend needs.
+- Invite code: `dropin1-` + base32(seed ‖ 16-byte owner-key fingerprint, §4.13), grouped in fives. It is the only thing a friend needs.
 - Re-keying (kicking someone) = new seed, new invite for everyone who stays.
 
 ### 4.2 Files on disk
@@ -81,7 +87,12 @@ Secrets stay out of the world folder so zipping a world does not leak the invite
 
 ```
 .minecraft/config/dropin/worlds/<worldId>.json     seed, display name, known members
+.minecraft/config/dropin/worlds/<worldId>.owner.key  owner's private key, on the owner's PC only (§4.13)
+.minecraft/config/dropin/modstore/<sha512>.jar     downloaded mods, verified (§4.14)
+.minecraft/config/dropin/modswap.json              pending mods-folder change for the helper (§4.14)
 saves/<folder>/dropin/world.json                   worldId, format version
+saves/<folder>/dropin/policy.json                  newest owner-signed policy (§4.13)
+saves/<folder>/dropin/mods.json                    mod manifest that policy names (§4.14)
 saves/<folder>/dropin/state.json                   head, syncedThrough, complete
 saves/<folder>/dropin/ledger.jsonl                 one checkpoint per line
 saves/<folder>/dropin/manifest/...                 current hashes (§4.7)
@@ -130,6 +141,7 @@ Verify the wire format against the pkarr spec and at least one known-good vector
 | Import | Import flow below. |
 | Join with invite | Paste an invite code. |
 | Invite | Show and copy this world's invite code. |
+| Players / Mods | World details: who has joined (names, skins) and the world's mod list (§4.15). |
 | Remove | Stop treating the world as co-op on this PC: after a confirm, delete `dropin/` and the local key. The world stays as an ordinary singleplayer world. |
 
 Co-op worlds also stay in the normal Singleplayer list with a badge, and opening one from there goes through the same launch flow. The pause menu of a non-co-op singleplayer world gets "Make co-op", which is Import in place.
@@ -241,6 +253,40 @@ Purpose: let an agent prove behaviour on one PC, with no accounts and no public 
 - **Online smoke (opt-in, `-Online`).** The `drop-in` scenario through the real e4mc relay and real pkarr relays. Run once at the end of M0, M1 and M2. Not part of the default suites, to stay off public infrastructure.
 - **What it cannot prove:** stable UUIDs with real accounts, NAT traversal between two homes, the production jar inside real launchers. Those stay on the manual checklists.
 
+### 4.13 Owner and world policy
+
+Added 2026-11-17 at the owner's request. The player who imports or creates a co-op world is its **owner**. Everyone else is a member.
+
+- **Owner key.** An Ed25519 key pair generated on the owner's PC at import/create. It is *not* derived from the invite seed, so holding the invite does not make you the owner. The private key never leaves `config/dropin/worlds/<worldId>.owner.key`. If that file is lost, nobody can change the policy again; the Co-op Worlds screen offers "Export owner key" for backup.
+- **Invite carries the owner's fingerprint.** Invite payload = seed (32 bytes) ‖ first 16 bytes of SHA-256(owner public key). A member gets the full public key in the sync handshake and checks it against the fingerprint, so a host cannot substitute its own key. This changes §4.1: the code is base32 of 48 bytes, still prefixed `dropin1-`.
+- **Policy.** One owner-signed record: `{version, ownerKey, ownerUuid, ownerName, loader, minecraftVersion, modManifestHash, datapackHashes, banned[], membersMayUseCommands, ts, sig}`. `version` only goes up. Every member stores the newest valid one in `dropin/policy.json` with the mod manifest beside it (§4.14). Because it is signed, any peer can carry it: it is exchanged in the sync handshake (`POLICY`, `POLICY_REQ`), and `{policy version, modManifestHash}` is added to the rendezvous payload so a member can see a change before connecting.
+- **What the owner controls.** The mod list (§4.14); the datapack set (`datapackHashes` = path and hash of every file under `datapacks/**`, plus the enabled list); who is banned; whether members may use commands. The owner has operator rights in every session, whoever is hosting.
+- **What a non-owner host does.** Before the integrated server boots it checks its mods and `datapacks/**` against the policy and refuses to host on a mismatch ("Your copy does not match the owner's mod list / datapacks"). While hosting it refuses banned UUIDs, gives the owner operator rights, and applies `membersMayUseCommands` to itself and everyone else.
+- **Removing someone for real** is still re-keying (§4.1). A ban only binds honest clients.
+- **Limit.** All of this is enforced by the members' own copies of the mod. A member with a modified client and a full copy of the world can ignore it. See §2 limit 5.
+
+### 4.14 Mod sync
+
+Own implementation (MIT), modelled on how AutoModpack works; no AutoModpack code is used (it is LGPL-3.0). Decided by the owner 2026-11-17.
+
+- **Mod manifest.** Built on the owner's PC from the `mods/` folder (top level, `*.jar`): `{path, size, sha512, sha1, modId, version, source}` per file, sorted by path. `source` is `modrinth{versionId, url}` when Modrinth's hash lookup (`POST /v2/version_files`) knows the file, otherwise `peer`. `modManifestHash` = SHA-256 of the canonical bytes. The DropIn jar itself is not listed; DropIn versions are matched by the sync protocol version.
+- **One loader per modded world.** Mods are loader-specific, so the policy names the loader. A world whose manifest is empty stays cross-loader.
+- **Owner changes mods.** When the owner opens the world and the `mods/` folder differs from the policy, a screen lists what was added and removed and asks "Update this world's mod list?". Yes signs a new policy version. No means the owner cannot host until the folder matches again. Removing a mod that added blocks or items gets the usual "this can break the world" warning.
+- **Member is behind.** Checked in the launch flow before connecting or hosting, and again in the sync handshake. A mismatch shows: "This world needs 42 mods. 3 to download (18 MB), 1 to remove. [Show list] [Download and restart] [Cancel]". Nothing is downloaded without that click, and the click is asked again for every policy version.
+- **Mods changed while people are connected.** A new policy can arrive mid-session (the owner joins, or the rendezvous shows a newer version). The host takes a checkpoint and then disconnects every member whose mod set does not match, with the screen above. If the host itself is behind, it ends the session after the checkpoint and gets the same screen, so the next host is someone who is up to date.
+- **Download.** Modrinth URL first, else from a peer over the sync channel (`MOD_GET`, `MOD_DATA`), under the same path policy as world data (§4.6). Every file is checked against the `sha512` in the owner-signed manifest before it is used. Files go to a content-addressed store, `config/dropin/modstore/<sha512>.jar`.
+- **Applying needs a restart, and happens while the game is closed.** A mod cannot be loaded into a running game, and on Windows a loaded jar cannot be replaced. On "Download and restart" the mod downloads, writes a plan (`config/dropin/modswap.json`), starts a small detached helper (the same Java binary, a class from the DropIn jar copied to a temp folder) and quits the game. The helper waits for the game process to exit, then makes `mods/` match the manifest: files not in the manifest move to `mods/.dropin-disabled/<timestamp>/` (never deleted), manifest files are copied in from the store. The player starts the game again. The game cannot relaunch itself reliably across launchers, so it does not try. **This mechanism is unproven; the milestone's first step is a spike that proves it on both loaders, and stops to report if it cannot work** (the fallback would be loader-specific mod injection at discovery time).
+- **Member's own client mods.** Jars in `mods/` that the member wants to keep (minimap, shaders) can be marked "keep" on the mod screen. A member with kept extras can join but cannot host, because extra content mods on a host would change the world for everyone.
+- **Safety.** Only `*.jar` directly under `mods/`; names are sanitised (no separators, no `..`); a size cap per file and per manifest (config); only the owner's signature can change the list; a peer can never push a file that is not in the signed manifest. This still means running code the owner chose: the consent screen says so in plain words.
+- **Not synced:** `config/`, resource packs outside the world, shader packs, the loader itself, Java. The policy states the loader and Minecraft version; if they do not match, the screen says what to install and stops.
+
+### 4.15 Members, mod list and skins in the menu
+
+- **Member record.** `{uuid, name, firstSeen, lastSeen, role}` for everyone who has joined with the mod, kept in the world's config file and exchanged in the sync handshake (`MEMBERS`), so members who are offline are still listed.
+- **World details.** Selecting a world on the Co-op Worlds screen shows two tabs. **Players:** head from the skin, name, owner badge, "playing now" / "last seen". **Mods:** the manifest's mod names and versions, with "missing here" / "extra here" marks against the local `mods/` folder.
+- **Skins** come from the game's own skin lookup by UUID. Offline or unknown profiles show the default skin; no skin files are stored or sent by DropIn.
+- **Other mods and the title screen.** The button is added by a mixin and laid out relative to the vanilla buttons. Mods that replace the title screen can hide it, so the screen is also reachable from a "Co-op Worlds" button on the Singleplayer world list. Config `titleButton` (default on) turns the title-screen button off.
+
 ---
 
 ## 5. Build retarget and fork hygiene (M0)
@@ -279,7 +325,11 @@ core/          pure Java, no Minecraft imports, fully unit-tested
   manifest/    hashes, two-level Merkle, diff
   merge/       three-way planner (inputs: two delta sets + ancestor; output: actions)
   sync/        frame codec, handshake, client/server state machines over an abstract transport
+  policy/      owner key, signed policy, version compare (§4.13)
+  mods/        mod manifest, diff, Modrinth lookup client, swap plan, the swap helper's logic (§4.14)
 mc/            Minecraft-facing code
+  mods/        mods-folder scan, consent and "mods changed" screens, download, helper launch
+  policy/      host-side enforcement: mod/datapack check before boot, bans, operator rights
   menu/        title-screen button, Co-op Worlds screen, import, join-by-invite
   launch/      CoopLauncher, openWorld hook
   host/        HostSession, dirty tracking mixin, checkpointing
@@ -304,6 +354,7 @@ Each one is a separate session and ends with a working jar. Work lists, automate
 | **M0** | Retarget to 26.3, single jar, rename, hygiene, self-test harness skeleton. No co-op features. | Jar loads on Fabric 26.3 and NeoForge 26.3; Open to LAN prints a domain; a second client joins through it. |
 | **M1** | `core/crypto`, `invite`, `pkarr`, `Rendezvous`; Co-op Worlds menu; import; join-by-invite; launch flow; `singleplayer_uuid` fix. No sync yet (tests copy the world folder between phases). | A plays → B clicks the world and lands in A's session. A quits → B clicks and hosts. Each keeps their own inventory and position. |
 | **M2** | Side-channel, manifest, ledger, full download, live checkpoints, resume, path policy. | New member plays while the world downloads; after A quits, B's copy opens alone and matches (same root hash). Kill the transfer mid-way and it resumes. |
+| **M2b** | Owner policy, mod manifest, mod download and swap helper, enforcement, Players and Mods tabs. | B joins a modded world with the wrong mods, approves, restarts, and is in. The owner adds a mod; B is kept out until B has updated. |
 | **M3** | Graceful handoff. | A quits with B and C connected; B becomes host; C reconnects without touching anything. |
 | **M4** | Crash failover, stale-copy warning, status HUD (host name, sync %, path direct/relayed). | Kill A's game process; B takes over from the last checkpoint. |
 | **M5** | Branch preservation, cold merge, backups. | Two copies edited separately in different chunks merge with nothing lost; same-chunk edits keep main and back up the other. |
@@ -330,3 +381,8 @@ Names below are from memory of earlier versions; 26.x is unobfuscated, so read t
 13. Where the integrated server turns authentication on, for the dev-only offline-LAN switch.
 14. How to create a world from code with a fixed seed and preset, for scripted tests.
 15. How the Create World screen hands off to world loading, so a new world can be registered as co-op before its first load.
+16. How each loader reports the game's `mods/` folder and the loaded mods (id, version, file), and whether a jar in a subfolder of `mods/` such as `.dropin-disabled/` is ignored on Fabric and on NeoForge.
+17. Where operator rights of the integrated server's host are decided (the singleplayer-owner check in `PlayerList`), so they can follow the world's owner instead of the host.
+18. How the game looks up a skin from a UUID for a player who is not in the current session, and what it shows when the lookup fails.
+19. Where a world's enabled datapack list is stored and applied, and whether it can be checked before the integrated server boots.
+20. Modrinth's hash lookup (`POST /v2/version_files`): request, response and rate limit, read from the current API docs, not from memory.
