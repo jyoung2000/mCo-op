@@ -92,6 +92,10 @@ public final class CoopActions {
         if (!Files.isRegularFile(folder.resolve("level.dat"))) {
             return Outcome.fail("import.no_level_dat", levelId);
         }
+        // Check 1 first: the summary of a world this game has open cannot always be read.
+        if (isOpenHere(mc, folder)) {
+            return Outcome.fail("import.open", levelId);
+        }
         LevelSummary summary;
         try {
             List<LevelSummary> summaries = source.loadLevelSummaries(

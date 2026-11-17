@@ -12,7 +12,11 @@ public final class StatusPing {
     private StatusPing() {
     }
 
-    public static boolean answers(String address, long timeoutMillis) {
+    /**
+     * One ping at a time: the first connection to an e4mc domain starts upstream's Dialtone session, and that
+     * start is not safe to run from two threads at once (two endpoints are created and later connects hang).
+     */
+    public static synchronized boolean answers(String address, long timeoutMillis) {
         ServerData data = new ServerData("dropin", address, ServerData.Type.OTHER);
         ServerStatusPinger pinger = new ServerStatusPinger();
         try {
