@@ -130,6 +130,37 @@ public final class CoopLauncher {
     }
 
     /**
+     * DESIGN 4.9 step 4: this player was named the next host. Opens the local copy (which is the old host's
+     * last checkpoint) and hosts it; the host session publishes the record. Not on the client thread.
+     *
+     * @return false if this PC may not host the world (a screen says why)
+     */
+    public static boolean hostAfterHandoff(Minecraft mc, CoopWorld world, java.nio.file.Path folder) {
+        String uuid = mc.getUser().getProfileId().toString();
+        String name = mc.getUser().getName();
+        Runnable onCancel = () -> mc.gui.setScreen(new TitleScreen());
+        remember(world, uuid, name);
+        net.minecraft.client.gui.screens.Screen problem = dropin.mc.policy.HostGate.memberProblem(mc, world, folder, onCancel);
+        if (problem != null) {
+            DropIn.LOGGER.info("Co-op world '{}': this PC may not take over as host ({})", world.name(), problem.getClass().getSimpleName());
+            mc.execute(() -> mc.gui.setScreen(problem));
+            return false;
+        }
+        String sess = new Env().newSession();
+        String levelId = folder.getFileName().toString();
+        mc.execute(() -> {
+            HostSession.start(mc, world, CoopWorlds.rendezvous(world), sess, uuid, name);
+            passThrough = true;
+            try {
+                mc.createWorldOpenFlows().openWorld(levelId, onCancel);
+            } finally {
+                passThrough = false;
+            }
+        });
+        return true;
+    }
+
+    /**
      * Joins a live host: first the mod check of DESIGN 4.14, then the connection, with the local copy kept in
      * step meanwhile (DESIGN 4.4, 4.7).
      */

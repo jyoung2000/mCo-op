@@ -111,5 +111,10 @@
   "text.dropin_coop.players.commands_off": "Members may use commands: OFF",
   "text.dropin_coop.players.ban": "Ban",
   "text.dropin_coop.players.unban": "Unban",
-  "text.dropin_coop.players.banned": "(banned)"
+  "text.dropin_coop.players.banned": "(banned)",
+  "text.dropin_coop.handoff.preparing": "Handing the world over to your friends…",
+  "text.dropin_coop.handoff.nobody": "Nobody else has a full copy yet (%s %s%%). Quit anyway?",
+  "text.dropin_coop.handoff.a_friend": "a friend",
+  "text.dropin_coop.handoff.changing": "Host is changing…",
+  "text.dropin_coop.handoff.taking_over": "Host is changing… you are the new host"
 }

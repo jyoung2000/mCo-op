@@ -9,6 +9,7 @@ import dropin.core.sync.SyncState;
 import dropin.core.world.CoopWorld;
 import dropin.core.world.CoopWorldStore;
 import dropin.mc.DropIn;
+import dropin.mc.handoff.MemberHandoff;
 import dropin.mc.coop.CoopWorlds;
 import dropin.mc.menu.CoopActions;
 import dropin.mc.net.SyncConnector;
@@ -392,6 +393,13 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
         } catch (IOException | RuntimeException e) {
             DropIn.LOGGER.warn("Could not merge the member list of '{}'", world.name(), e);
         }
+    }
+
+    /** DESIGN 4.9: the host is leaving. This sync ends; the handoff code takes the game from here. */
+    @Override
+    public void handoff(String successorUuid, LedgerEntry finalEntry, boolean applied) {
+        stop = true;
+        MemberHandoff.received(mc, world, successorUuid, finalEntry, applied);
     }
 
     @Override

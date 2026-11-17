@@ -26,6 +26,7 @@
     "mc.IntegratedServerFocusMixin",
     "mc.IntegratedServerNewCoopMixin",
     "mc.IntegratedServerPermissionsMixin",
+    "mc.MinecraftDisconnectMixin",
     "mc.PauseScreenMixin",
     "mc.SelectWorldScreenMixin",
     "mc.TitleScreenMixin",

@@ -99,6 +99,21 @@ class PkarrTest {
     // ---- record and rendezvous ---------------------------------------------------------------
 
     @Test
+    void handoffRecordNamesTheSuccessorAndHasNoAddress() {
+        RendezvousRecord handoff = hostRecord().handoffTo("11111111-2222-3333-4444-555555555555", 1794900400L);
+        assertTrue(handoff.isState(RendezvousRecord.HANDOFF));
+        assertEquals("", handoff.addr());
+        assertEquals("", handoff.lan());
+        assertEquals(hostRecord().host(), handoff.host());
+        assertEquals(hostRecord().sess(), handoff.sess());
+        assertEquals(1794900400L, handoff.ts());
+        RendezvousRecord back = RendezvousRecord.fromJson(handoff.toJson());
+        assertEquals(handoff, back);
+        assertEquals("11111111-2222-3333-4444-555555555555", back.next());
+        assertTrue(handoff.toJson().contains("\"st\":\"handoff\""));
+    }
+
+    @Test
     void recordJsonRoundTripsAndOmitsEmptyOptionalFields() {
         RendezvousRecord record = hostRecord();
         assertEquals(record, RendezvousRecord.fromJson(record.toJson()));

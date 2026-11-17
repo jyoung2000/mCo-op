@@ -42,6 +42,11 @@ public record RendezvousRecord(int v, String st, String addr, String lan, String
         return new RendezvousRecord(v, st, addr, lan, host, name, sess, head, seq, ts, next, pv, mh);
     }
 
+    /** The "handoff" form of this record (DESIGN 4.9): the quitting host names who hosts next. No address. */
+    public RendezvousRecord handoffTo(String successorUuid, long ts) {
+        return new RendezvousRecord(v, HANDOFF, "", "", host, name, sess, head, seq, ts, successorUuid, pv, mh);
+    }
+
     public boolean isState(String state) {
         return state.equals(st);
     }

@@ -6,7 +6,10 @@ import dropin.core.ledger.Ledger;
 import dropin.core.ledger.LedgerEntry;
 import dropin.core.manifest.Manifest;
 import dropin.core.manifest.RecordKey;
+import dropin.core.pkarr.RendezvousRecord;
+import dropin.core.sync.Successor;
 import dropin.core.sync.SyncServerSession;
+import dropin.core.world.Member;
 import dropin.core.sync.SyncState;
 import dropin.core.world.CoopWorld;
 import dropin.core.world.CoopWorldStore;
@@ -65,6 +68,24 @@ public final class HostSync implements SyncServerSession.Host {
     private static final long READ_TIMEOUT_S = 60;
     /** How long a quitting host waits for the members to take its last checkpoint. */
     private static final long QUIT_WAIT_MS = 10_000;
+    /** DESIGN 4.9: how long a host that hands the world over waits for the members to confirm its last checkpoint. */
+    private static final long HANDOFF_WAIT_MS = 30_000;
+
+    /** Publishes the session's last rendezvous record: "handoff" with the successor, or "idle". */
+    public interface Announcer {
+        void announce(String state, String successorUuid);
+    }
+
+    /**
+     * Who could take over right now (DESIGN 4.9).
+     *
+     * @param successorUuid the fully synced peer that would host next, or null if nobody has a full copy
+     * @param peers         connected members (sync connections that finished the handshake)
+     * @param bestName      the member whose copy is furthest along, "" if unknown
+     * @param bestPercent   how far that copy is, 0 to 99
+     */
+    public record Standing(String successorUuid, int peers, String bestName, int bestPercent) {
+    }
 
     private static volatile HostSync current;
 
@@ -94,6 +115,15 @@ public final class HostSync implements SyncServerSession.Host {
     private final Object policyLock = new Object();
     private volatile WorldPolicy.Held held;
     private volatile String membersShared = "";
+    private final Object announceLock = new Object();
+    private volatile Announcer announcer;
+    private boolean finalAnnounceTaken;
+    /** The quit flow ran and the player decided to leave; {@link #expectedSuccessor} is who should take over (or null). */
+    private volatile boolean quitDecided;
+    private volatile String expectedSuccessor;
+    private volatile String handedTo;
+    private static volatile String lastHandedTo;
+    private static volatile String lastFinalRoot;
 
     private HostSync(MinecraftServer server, CoopWorld world, Path root, Ledger ledger, Manifest manifest,
                      String hostUuid, String hostName, String sess) {
@@ -122,6 +152,12 @@ public final class HostSync implements SyncServerSession.Host {
 
     /** Called once the hosted world is up, before it is opened to LAN. */
     public static void start(MinecraftServer server, CoopWorld world, String hostUuid, String hostName, String sess) {
+        start(server, world, hostUuid, hostName, sess, null);
+    }
+
+    /** @param announcer publishes this session's last rendezvous record when the server stops (null: none) */
+    public static void start(MinecraftServer server, CoopWorld world, String hostUuid, String hostName, String sess,
+                             Announcer announcer) {
         Path root = server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize();
         Path dropin = root.resolve(CoopWorldStore.MARKER_DIR);
         ChunkStores.track(root);
@@ -135,6 +171,7 @@ public final class HostSync implements SyncServerSession.Host {
                 Files.delete(leftover);
             }
             HostSync sync = new HostSync(server, world, root, ledger, manifest, hostUuid, hostName, sess);
+            sync.announcer = announcer;
             current = sync;
             Thread thread = new Thread(sync::run, "dropin-coop-sync");
             thread.setDaemon(true);
@@ -356,23 +393,148 @@ public final class HostSync implements SyncServerSession.Host {
             return;
         }
         sync.stopping = true;
+        synchronized (sync.announceLock) {
+            // From here on this class publishes the last rendezvous record ("handoff" or "idle"), not HostSession.
+            sync.finalAnnounceTaken = true;
+        }
         try {
             if (server.getPlayerList() != null) {
                 server.saveEverything(true, true, false);
             }
             sync.checkpoint(false);
-            sync.awaitPeers(sync.ledger.headSeq());
+            long seq = sync.ledger.headSeq();
+            // DESIGN 4.9 step 1: 30 s for a handoff. A host that already heard "nobody has a full copy" and quits
+            // anyway waits only the short time of a plain quit.
+            boolean hopeless = sync.quitDecided && sync.expectedSuccessor == null;
+            sync.awaitPeers(seq, handoffDisabled() || hopeless ? QUIT_WAIT_MS : HANDOFF_WAIT_MS);
+            if (!handoffDisabled()) {
+                sync.handOver(seq);
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
             DropIn.LOGGER.error("Final checkpoint of '{}' failed", sync.world.name(), e);
         }
+        LedgerEntry last = sync.ledger.last();
+        lastFinalRoot = last == null ? "" : last.root();
+        lastHandedTo = sync.handedTo == null ? "" : sync.handedTo;
+        Announcer announcer = sync.announcer;
+        if (announcer != null) {
+            announcer.announce(sync.handedTo == null ? RendezvousRecord.IDLE : RendezvousRecord.HANDOFF,
+                    sync.handedTo == null ? "" : sync.handedTo);
+        }
         sync.finished = true;
     }
 
-    /** Waits, for a short while, until every member that may receive bulk data has the checkpoint. */
-    private void awaitPeers(long seq) throws InterruptedException {
-        long deadline = System.currentTimeMillis() + QUIT_WAIT_MS;
+    /** DESIGN 4.9 steps 2 and 3: choose the successor among the peers that have the final checkpoint and tell everyone. */
+    private void handOver(long seq) {
+        Standing standing = standing(seq);
+        LedgerEntry last = ledger.last();
+        if (standing.successorUuid() == null || last == null) {
+            if (standing.peers() > 0) {
+                DropIn.LOGGER.warn("Nobody else has a full copy of '{}' ({} {}%): the session ends here", world.name(),
+                        standing.bestName(), standing.bestPercent());
+            }
+            return;
+        }
+        synchronized (lock) {
+            for (Peer peer : peers) {
+                peer.session().handoff(standing.successorUuid(), last);
+            }
+        }
+        handedTo = standing.successorUuid();
+        DropIn.LOGGER.info("Handing '{}' over to {} at checkpoint {} (root {})", world.name(), standing.successorUuid(),
+                last.seq(), last.root());
+    }
+
+    /** Development only (DESIGN 4.12): a host with this switch quits without handing the world over. */
+    public static boolean handoffDisabled() {
+        return DropIn.switches().flag("dropin.dev.noHandoff");
+    }
+
+    /**
+     * The first half of a graceful quit (DESIGN 4.9 steps 1 and 2), while the world is still running, so the
+     * player can still cancel: a checkpoint, the wait for the members, and who would take over. Not on the
+     * server thread.
+     */
+    public Standing prepareHandoff() throws IOException, InterruptedException {
+        checkpoint(true);
+        long seq = ledger.headSeq();
+        awaitPeers(seq, HANDOFF_WAIT_MS);
+        return standing(seq);
+    }
+
+    /** The player decided to quit after {@link #prepareHandoff}; {@code successorUuid} is null for "quit anyway". */
+    public void quitDecided(String successorUuid) {
+        expectedSuccessor = successorUuid;
+        quitDecided = true;
+    }
+
+    /** Who could take over at this checkpoint, and how far the best other copy is. */
+    public Standing standing(long seq) {
+        List<Successor.Candidate> candidates = new ArrayList<>();
+        int connected = 0;
+        String bestUuid = "";
+        int bestPercent = -1;
+        for (Peer peer : peers) {
+            SyncServerSession session = peer.session();
+            if (!session.ready() || session.playerUuid().isEmpty() || session.playerUuid().equals(hostUuid)) {
+                continue;
+            }
+            connected++;
+            candidates.add(new Successor.Candidate(session.playerUuid(), session.syncedSeq(), session.connectedAt()));
+            if (session.peerPercent() > bestPercent) {
+                bestPercent = session.peerPercent();
+                bestUuid = session.playerUuid();
+            }
+        }
+        String successor = Successor.choose(candidates, seq, hostUuid).orElse(null);
+        return new Standing(successor, connected, memberName(bestUuid), Math.max(0, Math.min(99, bestPercent)));
+    }
+
+    private String memberName(String uuid) {
+        if (uuid.isEmpty()) {
+            return "";
+        }
+        try {
+            for (Member member : CoopWorlds.store().get(world.worldId()).orElse(world).members()) {
+                if (member.uuid().equals(uuid)) {
+                    return member.name();
+                }
+            }
+        } catch (IOException | RuntimeException e) {
+            // The name is only for the message.
+        }
+        return "";
+    }
+
+    /**
+     * Called by the host session when it ends, to publish "idle". Returns false if the server is already
+     * stopping: then {@link #serverStopping} publishes the last record itself.
+     */
+    public boolean announceIfNotStopping(Runnable publishIdle) {
+        synchronized (announceLock) {
+            if (finalAnnounceTaken) {
+                return false;
+            }
+            publishIdle.run();
+            return true;
+        }
+    }
+
+    /** For the self-tests: who the last host session of this game handed its world to ("" if nobody). */
+    public static String lastHandedTo() {
+        return lastHandedTo;
+    }
+
+    /** For the self-tests: the root of the last checkpoint of the last host session of this game. */
+    public static String lastFinalRoot() {
+        return lastFinalRoot;
+    }
+
+    /** Waits until every member that may receive bulk data has the checkpoint, or the time is up. */
+    private void awaitPeers(long seq, long waitMs) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + waitMs;
         while (System.currentTimeMillis() < deadline) {
             boolean waiting = false;
             for (Peer peer : peers) {

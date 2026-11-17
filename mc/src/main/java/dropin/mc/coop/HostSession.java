@@ -96,7 +96,8 @@ public final class HostSession implements Runnable {
             if (server == null) {
                 return;
             }
-            dropin.mc.host.HostSync.start(server, world, base.host(), base.name(), base.sess());
+            dropin.mc.host.HostSync.start(server, world, base.host(), base.name(), base.sess(), this::announceLast);
+            hostSync = dropin.mc.host.HostSync.current();
             String lan = openToLan(server);
             if (DropIn.switches().flag("dropin.dev.online")) {
                 // Development only: the online smoke test must go through the relay, not the LAN shortcut.
@@ -143,11 +144,34 @@ public final class HostSession implements Runnable {
         } catch (RuntimeException e) {
             DropIn.LOGGER.error("Co-op host session of '{}' failed", world.name(), e);
         } finally {
-            publish(RendezvousRecord.IDLE, "", "");
+            // DESIGN 4.9: when the server is stopping, the world sync publishes the last record ("handoff" or "idle").
+            dropin.mc.host.HostSync sync = hostSync;
+            if (sync == null || !sync.announceIfNotStopping(() -> publish(RendezvousRecord.IDLE, "", ""))) {
+                if (sync == null) {
+                    publish(RendezvousRecord.IDLE, "", "");
+                }
+            }
             E4mcClient.domainListener = previousListener;
             if (current == this) {
                 current = null;
             }
+        }
+    }
+
+    private volatile dropin.mc.host.HostSync hostSync;
+
+    /** The session's last record, published from the stopping server (DESIGN 4.3 clean exit, 4.9 step 3). */
+    private void announceLast(String state, String successorUuid) {
+        try {
+            long now = System.currentTimeMillis() / 1000;
+            rendezvous.publish(RendezvousRecord.HANDOFF.equals(state) ? base.handoffTo(successorUuid, now)
+                    : base.with(RendezvousRecord.IDLE, "", "", now));
+            announcedState = state;
+            announcedAddr = "";
+            DropIn.LOGGER.info("Co-op world '{}' announced as {}{}", world.name(), state,
+                    successorUuid.isEmpty() ? "" : ", next host " + successorUuid);
+        } catch (Exception e) {
+            DropIn.LOGGER.warn("Could not announce co-op world '{}' ({}): {}", world.name(), state, e.toString());
         }
     }
 
