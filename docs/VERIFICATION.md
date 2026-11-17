@@ -158,3 +158,43 @@ Not verified in this run:
 - The "Downloading N%" and "Copy N% downloaded" status lines and the "nobody online, N% downloaded" screen as seen by a person.
 - A diverged copy (unit tests only; it is left untouched until M5).
 - Both online runs (`drop-in.online` in M1 and this one) end with vanilla's "Client shutdown from post-main" watchdog report in B's log after the result was written: a client that used a Dialtone connection takes more than 10 s to exit. Not looked into.
+
+## M2b — 2026-11-17 — commit `f277e1c` — GATE PASSED
+
+Machine: this PC (Windows 11, JDK 25.0.5, 8 GB RAM), both clients on it. Commands, in this order, each run once on `f277e1c`:
+
+- `./gradlew build` → `BUILD SUCCESSFUL`. Log: `build/logs/gate-m2b-build.log`. The unit tests were up to date in that run, so they were run again uncached: `./gradlew :core:test --rerun :mc:test --rerun` → 133 tests, 0 failed, 1 skipped (the opt-in `RealRelayOnlineTest`). M2b added `PolicyTest` 7, `ModsTest` 9, `SwapHelperTest` 5, `PolicySyncTest` 6, `MembersMergeTest` 3. Log: `build/logs/gate-m2b-unit.log`.
+- `powershell -ExecutionPolicy Bypass -File scripts/jarcheck.ps1` → exit 0, every line PASS (both loaders' metadata, one mixin config, no self-test classes, the two relocations, the two unrelocated JNI packages). Log: `build/logs/gate-m2b-jarcheck.log`.
+- `powershell -ExecutionPolicy Bypass -File scripts/selftest.ps1 -Suite all` → exit 0, 37 of 37. Log: `build/logs/gate-m2b-selftest-all.log`.
+  - m0: PASS `lan-join.fabric-fabric` 29.0s, PASS `lan-join.fabric-neoforge` 27.2s, PASS `lan-join.neoforge-fabric` 29.2s, PASS `status-ping` 27.1s, PASS `prod-guard` 7.1s.
+  - m1: PASS `menu` 18.4s, PASS `import-saves` 26.0s, PASS `import-zip` 20.4s, PASS `import-rejects` 20.4s, PASS `remove` 21.9s, PASS `drop-in.fabric-neoforge` 30.8s, PASS `drop-in.neoforge-fabric` 29.7s, PASS `host-swap-own-inventory` 35.9s, PASS `race` 37.3s, PASS `owner-invite` 20.9s, PASS `owner-invite.unit` 7.1s, PASS `players-tab` 29.8s.
+  - m2: PASS `vanilla-through-sniffer` 29.7s, PASS `first-download-root-match` 38.9s, PASS `live-checkpoint` 40.1s, PASS `resume` 139.7s, PASS `path-policy` 39.0s.
+  - m2b (A is always the owner; test mods X and Y each add one item, Z only sets a system property):
+    - PASS `policy-unit` 8.1s (`dropin.core.policy.*`), PASS `mods-unit` 10.1s (`dropin.core.mods.*`).
+    - PASS `swap-spike.fabric` 36.6s, PASS `swap-spike.neoforge` 35.8s: the step-1 spike, kept in the suite.
+    - PASS `mod-join.fabric` 51.4s, PASS `mod-join.neoforge` 49.2s: A hosts with X. B, with an empty `mods/`, presses Play and gets the consent screen listing X instead of a connection; nothing is in the store before the click. B approves; the file is fetched from A and verified, the swap is planned, B's game exits, the helper installs X. B is started again by the script, the loader has X's item registered, Play leads into A's session, and B holds the X item A gave it.
+    - PASS `mod-decline` 39.5s: B cancels; five seconds later B has no connection, `mods/` and the mod store are empty, no swap is planned, and A never had a second player.
+    - PASS `mod-change-live` 97.3s (two restarts): A (X) hosts, B (X) joins and gets a complete copy, A quits, B hosts. A's game is restarted with X and Y; Play shows "Update this world's mod list?" with Y as added; A says yes (policy version 2). A's join attempt hands version 2 to B's session: B stores it, its session ends and B sees the consent screen in its "mods changed" form listing Y. A then hosts with version 2. B presses Play without updating and gets the consent screen again, not a connection. B approves, is restarted, joins and holds the Y item.
+    - PASS `mod-tamper` 36.9s: A first answers with a policy signed by another key: B shows "not signed by its owner", does not connect and stores no policy. A then serves X with one byte changed: B's download ends with "did not match the owner's mod list", `mods/` and the store stay empty, no swap is planned.
+    - PASS `mod-keep-extra` 42.6s: B has X and Z and marks Z "keep": it joins without being asked to remove Z. After A quits, B's Play is refused with the kept-extras message and the world stays closed.
+    - PASS `owner-known-to-members` 41.6s (A Fabric, B NeoForge): B's Players tab marks A, and only A, as owner while B is in A's session and still when B hosts after A quit. B has no owner key.
+    - PASS `owner-rights` 44.6s (A NeoForge, B Fabric): while hosting, A turns member commands off and bans a UUID (versions 2 and 3 reach B over the sync connection). B then hosts and A joins: A's `/give` works, B's own `/give` does nothing, B's server reports `OWNER` for A and `ALL` for B, and `PlayerList.canPlayerLogin` refuses the banned UUID with the ban message.
+    - PASS `datapack-mismatch` 42.1s: a pack folder the owner does not have is put into B's closed copy; B's Play is refused with the datapack message and the world stays closed.
+    - PASS `mods-tab` 31.8s: before first contact B knows no mod list. With the consent screen up, "Show list" opens the Mods tab: X with its mod id and version, marked missing here; B's Z marked extra here; after "keep" Z is shown as kept and is no longer to be removed. On A the tab lists X without a mark.
+    - PASS `swap-restores` 58.4s (NeoForge): B starts with its own Y and Z. After approve and restart, neither is loaded, neither is directly in `mods/`, and each is under `mods/.dropin-disabled/<time>/` with the same SHA-512 as the file B started with.
+- Online smoke, once: `powershell -ExecutionPolicy Bypass -File scripts/selftest.ps1 -Suite m2b -Online` → exit 0, PASS `mod-join.online` 107.6s. Log: `build/logs/gate-m2b-online.log`. Real e4mc relay and Modrinth. A's only mod was FerriteCore 9.0.0 for Fabric (`ferritecore-9.0.0-fabric.jar`, 72,677 bytes, fetched by the script from Modrinth's CDN and checked against the published SHA-512). Modrinth's hash lookup knew it, so A's signed list names Modrinth as its source. A announced `spotted-unfair.na.e4mc.link`. B's log: "Mod file ferritecore-9.0.0-fabric.jar downloaded from Modrinth and verified"; the helper reported `{"ok":true,"moved":[],"installed":["ferritecore-9.0.0-fabric.jar"]}`; B was restarted and joined A through the relay address. The scenario asserts that every file B needed came from Modrinth.
+
+Failures before the gate run, and what was done (trial runs of single scenarios, not counted as the gate):
+
+- `mod-join.fabric` failed once: "the host stopped sending dropin-testmod-x.jar" after a two-minute wait. Cause: the installer opens its own connection to the host and asked for the file before the handshake was finished; a request sent before that is dropped. Fix: it now waits for the host's policy answer before asking, and sends the request on the connection's own thread. One fix, re-run passed. Every other m2b scenario passed on its first run.
+
+Not verified in this run:
+
+- A member that is connected to someone else's session when a newer policy with other mods arrives. The code path exists (the member stores the policy, leaves and shows the consent screen), but in `mod-change-live` the session that ends is B's own host session, because the owner has to restart to change mods and only two clients were run. What was seen on a connected member is the policy arriving and being stored (`owner-rights`), with matching mods.
+- Reading `pv`/`mh` from the rendezvous record: the host publishes them, but nothing reads them yet. A changed policy is found by the request every join makes to the host.
+- A banned player who is connected at the moment of the ban being kicked (the code is there; the scenario checks the login refusal).
+- Mod files being refused over a relayed path with a real relay: covered by the unit test of the sync channel only. In the online smoke the file came from Modrinth, as intended.
+- The buttons as clicked by a person (the scenarios call what the buttons call): Mods button, "keep", ban/unban, the commands toggle, Yes/No on the update screen. No screen was looked at for layout.
+- Wrong loader, wrong Minecraft version, a different enabled-datapack list (only a different pack folder was tested), the mod size and count limits in the game (unit tests only), a mod list with many or large files, Modrinth's rate limit.
+- The helper under a real launcher (the dev clients are started by Gradle) and with a production jar; the online smoke on NeoForge.
+- Everything on the manual checklist (a real 50+ mod pack, a friend's own launcher).

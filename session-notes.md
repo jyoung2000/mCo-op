@@ -85,7 +85,37 @@ connect, disconnect and take over as host while the world keeps knowing its owne
 is a later milestone in MILESTONES; M2b's `owner-known-to-members` and `owner-rights` cover "still knows the admin when B hosts".
 Start M2 by confirming DESIGN §8 items 4–8 in the sources. The M1 manual checklist is still the owner's to run.
 
-## M2b — IN PROGRESS (started 2026-11-17)
+## M2b — DONE (2026-11-17), gate passed on `f277e1c` (see `docs/VERIFICATION.md`)
+
+State: `./gradlew build`, `scripts/jarcheck.ps1`, `scripts/selftest.ps1 -Suite all` (37 of 37) and the online smoke
+(`-Suite m2b -Online`, FerriteCore 9.0.0 downloaded from Modrinth) all passed in this session. Nothing is pushed.
+
+**Next step: M3** (not started; one milestone per session). Before M3, the owner should read "decisions ... FOR THE OWNER TO
+CONFIRM" below: fifteen protocol and file-format choices were made without asking, against the brief's rule.
+
+Open items carried forward (details under "Not verified" in `docs/VERIFICATION.md`):
+- Nothing reads `pv`/`mh` from the rendezvous record yet; a policy change is found when a join asks the host.
+- A connected *member* being sent away by a newer policy is coded but has no scenario (needs a third client, or an owner who can
+  change the list without restarting).
+- The helper has only run from Gradle-started dev clients, never under a real launcher or with the production jar.
+- The manual checklist of M2b (below) is for a person with a real modpack and a friend.
+
+Manual checklist (MILESTONES M2b), not done:
+- [ ] A real modpack of 50+ mods on the owner's PC, one loader: a friend with an empty `mods/` folder joins after one
+      approve-and-restart, in the launcher they normally use.
+- [ ] The owner adds a mod and removes one; the friend is kept out, updates, and gets back in.
+- [ ] The title-screen button and the Co-op Worlds screen still work inside that modpack; note any mod that hides or breaks them.
+- [ ] The friend's own mods are all in `mods/.dropin-disabled/`.
+
+Files touched in M2b: `core/.../policy/Policy`, `core/.../mods/*`, `core/.../sync/{Wire,SyncServerSession,SyncClientSession,PolicyClientSession}`,
+`core/.../pkarr/RendezvousRecord`, `core/.../world/CoopWorldStore` and their tests; `mc/.../policy/*`, `mc/.../mods/*`,
+`mc/.../menu/{ModConsentScreen,PolicyUpdateScreen,ModsScreen,PlayersScreen,CoopWorldsScreen}`, `mc/.../host/HostSync`,
+`mc/.../member/SyncClient`, `mc/.../coop/{CoopLauncher,HostSession}`, the two new mixins, `dropin.mixins.json`, `en_us.json`;
+`mc/src/selftest/.../{M2bScenarios,M2Scenarios,Scenarios}`; `build-logic/.../multiloader-loader.gradle` (test mods, watchdog
+property); `scripts/selftest.ps1`; `docs/VERIFICATION.md`; `CLAUDE.md` (commands).
+
+Found on the way (one failure, fixed): the mod installer asked the host for a file before its connection had finished the
+handshake, and such a request is dropped silently. It now waits for the host's policy answer first.
 
 DESIGN §8 items confirmed for M2b (none contradicts the design):
 - Item 16, Fabric (loader 0.20.1, `DirectoryModCandidateFinder`, read at tag 0.20.1 on GitHub): `findCandidates` walks the mods
@@ -116,6 +146,56 @@ DESIGN §8 items confirmed for M2b (none contradicts the design):
   `version_number`, `loaders`, `game_versions`, `files[]` with `hashes{sha512, sha1}`, `url`, `filename`, `primary`, `size`); unknown hashes
   are simply absent. A uniquely identifying `User-Agent` is required. Rate limit 300 requests/minute per IP
   (`X-Ratelimit-Limit/-Remaining/-Reset`).
+
+### M2b: what was built
+
+Commits on `dropin`, local only: `b2dfb27` (swap-helper spike), `3b0264b` (core), `f5ab219` (mc side), `f277e1c` (scenarios, script).
+
+- `core/policy/Policy`: the owner-signed record, canonical bytes, `sign`, `rejection(ownerFingerprint)`, `replaces` (version wins, then timestamp).
+- `core/mods`: `ModManifest` (+ `Limits`, `safeName`), `ModScan`, `ModDiff`, `ModStore` (temp file, hash check, then atomic move),
+  `ModrinthClient` (hash lookup, download), `SwapPlan`, `SwapHelper`, `HelperLauncher`.
+- `core/sync`: messages `POLICY`, `POLICY_REQ`, `MEMBERS`, `MOD_GET`, `MOD_DATA`; `PolicyClientSession` (the short connection a member
+  makes before joining). Mod bytes are only served where records may go (`bulkAllowed`), so they obey the path policy.
+- `core/pkarr/RendezvousRecord`: `pv` (policy version) and `mh` (mod manifest hash), written only when `pv > 0`.
+- `core/world/CoopWorldStore`: `membersJson`, `parseMembers` (roles from peers are ignored), `mergeMembers`, `learnOwnerKey`.
+- `mc/policy`: `WorldPolicy` (stored policy, keep list, datapack reading, signing), `PolicyActions` (owner's changes), `HostGate`
+  (checks before the integrated server boots), `DevHooks` (faults for the self-tests, development only).
+- `mc/mods`: `PolicyLink`, `JoinGate` (policy and mod check before every join), `ModInstall` (download, verify, plan, start the helper).
+- Screens: `ModConsentScreen`, `PolicyUpdateScreen`, `ModsScreen` (Mods tab, "keep" marks), owner controls on `PlayersScreen`
+  (members' commands on/off, ban/unban), a "Mods" button on the Co-op Worlds screen.
+- Mixins: `IntegratedServerPermissionsMixin` (`getProfilePermissions`: owner → `OWNER`; others `GAMEMASTER` or `ALL` by
+  `membersMayUseCommands`), `PlayerListBanMixin` (`canPlayerLogin` refuses banned UUIDs).
+- `HostSync`: holds the policy, serves it and the mod files, adopts a newer one mid-session (checkpoint, send to members, kick banned
+  players, end its own session if this PC's mods are behind). `SyncClient`: stores a newer policy and leaves if its mods no longer match.
+- Self-tests: `M2bScenarios` (suite `m2b`), relaunch lists and `Mods` per slot in `scripts/selftest.ps1`, the game's watchdog follows a
+  scenario's `TimeoutSec` (`-Pdropin.selftestTimeoutSec`).
+
+### M2b: decisions made where the design gives no detail — FOR THE OWNER TO CONFIRM
+
+The brief says to ask instead of inventing protocol or file-format details. These were chosen to keep working and are listed so
+they can be changed before anyone depends on them (nothing is published, no world outside the self-tests has these files):
+
+1. Wire numbers: `POLICY=22 {policyJson, manifestJson}`, `POLICY_REQ=23 {i64 myVersion}`, `MEMBERS=24 {json}`, `MOD_GET=25 {sha512}`,
+   `MOD_DATA=26 {sha512, u8 flags, bytes}` with flags `LAST=1, ABSENT=2, REFUSED=4`, 256 KB pieces. Sync protocol number is now 2.
+2. Policy canonical bytes: text lines starting `dropin-policy 1`, fields in a fixed order. Policy JSON carries
+   `datapackHashes: {files: {path: sha256}, enabled: [...]}`; "enabled" is only the `file/` entries of `level.dat`.
+3. Files: `<world>/dropin/policy.json` and `<world>/dropin/modmanifest.json`. Manifest canonical bytes: `dropin-mods 1` plus
+   tab-separated lines; `modManifestHash` is SHA-256 hex of them.
+4. Limits (config keys in `config/dropin/coop.json`): `modMaxFileMB` 512, `modMaxTotalMB` 8192, `modMaxFiles` 1000.
+5. Keep list: `config/dropin/keepmods.json` = `{"keep": ["file.jar", ...]}`. Mod store: `config/dropin/modstore/<sha512>.jar`.
+6. Rendezvous fields `pv` and `mh` (see above).
+7. The loader is enforced only when the mod list is not empty (a vanilla-only world can be joined from either loader).
+8. The owner's first policy (version 1) is signed without asking at the first open; a later difference shows
+   "Update this world's mod list?".
+9. `membersMayUseCommands` starts as **false**; in self-tests it starts as true because the scenarios drive the game with commands.
+10. A member's role comes from the policy's `ownerUuid`, never from what a peer says.
+11. If the policy request to a host fails (network), the join goes on with the policy stored here; if the host's policy is
+    invalid (wrong key, bad signature), the join is refused.
+12. The first-join policy probe creates the save folder (marked as an unfinished download) to store the policy in.
+13. Modrinth is asked only in a normal game or with `dropin.dev.online`; offline self-tests never contact it. User-Agent `dropin-coop/<version>`.
+14. After "Download and restart" the game closes itself 60 ticks after the helper started. It does not restart the game.
+15. A host whose own mods are behind a newer policy ends its session after a checkpoint and shows the consent screen. A member in
+    that position disconnects itself (honest-client enforcement; a modified client is not stopped by this).
 
 ## M2 — DONE (2026-11-17), gate passed on `c3f94a3` (see `docs/VERIFICATION.md`)
 
