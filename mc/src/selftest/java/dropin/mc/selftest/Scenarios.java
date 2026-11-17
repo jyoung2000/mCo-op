@@ -104,6 +104,10 @@ final class Scenarios {
         if (m2b != null) {
             return m2b;
         }
+        StepRunner m3 = M3Scenarios.build(key, ctx);
+        if (m3 != null) {
+            return m3;
+        }
         return switch (key) {
             case "lan-join:host", "tunnel-join:host" -> joinHost(ctx);
             case "lan-join:joiner", "tunnel-join:joiner" -> joiner(ctx);

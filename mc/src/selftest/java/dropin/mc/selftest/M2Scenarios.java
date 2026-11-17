@@ -90,7 +90,7 @@ final class M2Scenarios {
     // ---- building blocks --------------------------------------------------------------------------
 
     /** Development switches of this scenario. They are read when the sync code starts, after this action. */
-    private static StepRunner dev(StepRunner runner, Map<String, String> switches) {
+    static StepRunner dev(StepRunner runner, Map<String, String> switches) {
         return runner.action("set development switches", () -> {
             System.setProperty("dropin.dev.checkpointSeconds", Integer.toString(INTERVAL_SECONDS));
             switches.forEach(System::setProperty);
@@ -108,7 +108,7 @@ final class M2Scenarios {
      * @param minRecords if above zero, a few hundred more chunks are loaded and the world must have at least
      *                   this many records before B is told to come
      */
-    private static StepRunner hostA(Context ctx, State state, Map<String, String> switches, int minRecords) {
+    static StepRunner hostA(Context ctx, State state, Map<String, String> switches, int minRecords) {
         Minecraft mc = ctx.mc();
         StepRunner runner = importWorld(quitToTitle(createWorld(dev(base(ctx), switches), ctx), ctx), ctx, state)
                 .action("share invite", () -> {
@@ -139,7 +139,7 @@ final class M2Scenarios {
     }
 
     /** B: joins with the invite only and presses Play once A hosts. Nothing of the world is on B's disk. */
-    private static StepRunner joinB(Context ctx, State state, Map<String, String> switches) {
+    static StepRunner joinB(Context ctx, State state, Map<String, String> switches) {
         Minecraft mc = ctx.mc();
         return dev(base(ctx), switches)
                 .step("A shared the invite", STARTUP_TICKS + WORLD_TICKS, () -> ctx.sharedExists(WORLD_READY))
@@ -155,7 +155,7 @@ final class M2Scenarios {
     }
 
     /** B's folder of the world under saves/, or null while there is none. */
-    private static Path folder(Minecraft mc, State state) {
+    static Path folder(Minecraft mc, State state) {
         String name = CoopActions.folders(mc).get(state.world.worldId());
         return name == null ? null : mc.getLevelSource().getLevelPath(name);
     }

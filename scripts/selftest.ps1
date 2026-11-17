@@ -119,6 +119,14 @@ $suites = [ordered]@{
            Relaunch = @{ GameFile = 'config\dropin\modswap.result.json'; Index = 1; Role = 'b2' }
            Roles = @((New-Role 'a' 'neoforge' 'a'), (New-Role 'b' 'neoforge' 'b')) }
     )
+    m3 = @(
+        # A hosts, B and C are fully synced; A quits; B takes over; C is back with no input; A rejoins B.
+        @{ Id = 'handoff-3'; Scenario = 'handoff-3'; TimeoutSec = 900
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'fabric' 'c')) },
+        # A quits while B is mid-download: A is asked first, and cancelling keeps the session alive.
+        @{ Id = 'handoff-no-full-copy'; Scenario = 'handoff-no-full-copy'; TimeoutSec = 900
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
+    )
 }
 
 # Opt-in scenarios that touch public infrastructure (the real e4mc relay). Only run with -Online.
