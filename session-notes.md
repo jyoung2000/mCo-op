@@ -90,8 +90,8 @@ Start M2 by confirming DESIGN §8 items 4–8 in the sources. The M1 manual chec
 State: `./gradlew build`, `scripts/jarcheck.ps1`, `scripts/selftest.ps1 -Suite all` (37 of 37) and the online smoke
 (`-Suite m2b -Online`, FerriteCore 9.0.0 downloaded from Modrinth) all passed in this session. Nothing is pushed.
 
-**Next step: M3** (not started; one milestone per session). Before M3, the owner should read "decisions ... FOR THE OWNER TO
-CONFIRM" below: fifteen protocol and file-format choices were made without asking, against the brief's rule.
+**Next step: M3** (not started; one milestone per session). The fifteen protocol and file-format choices listed below were made
+without asking, against the brief's rule; the owner confirmed them on 2026-11-17.
 
 Open items carried forward (details under "Not verified" in `docs/VERIFICATION.md`):
 - Nothing reads `pv`/`mh` from the rendezvous record yet; a policy change is found when a join asks the host.
@@ -170,10 +170,10 @@ Commits on `dropin`, local only: `b2dfb27` (swap-helper spike), `3b0264b` (core)
 - Self-tests: `M2bScenarios` (suite `m2b`), relaunch lists and `Mods` per slot in `scripts/selftest.ps1`, the game's watchdog follows a
   scenario's `TimeoutSec` (`-Pdropin.selftestTimeoutSec`).
 
-### M2b: decisions made where the design gives no detail — FOR THE OWNER TO CONFIRM
+### M2b: decisions made where the design gives no detail — CONFIRMED BY THE OWNER (2026-11-17, "They stand")
 
-The brief says to ask instead of inventing protocol or file-format details. These were chosen to keep working and are listed so
-they can be changed before anyone depends on them (nothing is published, no world outside the self-tests has these files):
+The brief says to ask instead of inventing protocol or file-format details. These were chosen without asking during M2b; the owner
+confirmed all fifteen after the gate. They are now fixed parts of the protocol and file formats:
 
 1. Wire numbers: `POLICY=22 {policyJson, manifestJson}`, `POLICY_REQ=23 {i64 myVersion}`, `MEMBERS=24 {json}`, `MOD_GET=25 {sha512}`,
    `MOD_DATA=26 {sha512, u8 flags, bytes}` with flags `LAST=1, ABSENT=2, REFUSED=4`, 256 KB pieces. Sync protocol number is now 2.
