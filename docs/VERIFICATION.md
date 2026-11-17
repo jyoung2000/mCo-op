@@ -198,3 +198,37 @@ Not verified in this run:
 - Wrong loader, wrong Minecraft version, a different enabled-datapack list (only a different pack folder was tested), the mod size and count limits in the game (unit tests only), a mod list with many or large files, Modrinth's rate limit.
 - The helper under a real launcher (the dev clients are started by Gradle) and with a production jar; the online smoke on NeoForge.
 - Everything on the manual checklist (a real 50+ mod pack, a friend's own launcher).
+
+## M3 — 2026-11-17 — commit `19ea3fc` — GATE PASSED
+
+Machine: this PC (Windows 11, JDK 25.0.5), all clients on it (three for `handoff-3`). Commands, in this order, each run once on `19ea3fc`:
+
+- `./gradlew build` → `BUILD SUCCESSFUL`. Log: `build/logs/m3-gate-build.log`. Unit test reports of `core` and `mc`: 146 tests, 0 failed, 1 skipped (13 new: `SuccessorTest` 8, four handoff/progress tests in `SyncTest`, one handoff-record test in `PkarrTest`).
+- `powershell -ExecutionPolicy Bypass -File scripts/jarcheck.ps1` → exit 0, every line PASS. Log: `build/logs/m3-gate-jarcheck.log`.
+- `powershell -ExecutionPolicy Bypass -File scripts/selftest.ps1 -Suite all` → exit 0, 39 of 39. Log: `build/logs/m3-gate-selftest-all.log`.
+  - m0: PASS `lan-join.fabric-fabric` 52.6s, PASS `lan-join.fabric-neoforge` 44.4s, PASS `lan-join.neoforge-fabric` 29.2s, PASS `status-ping` 29.3s, PASS `prod-guard` 8.1s.
+  - m1: PASS `menu` 19.9s, PASS `import-saves` 28.3s, PASS `import-zip` 22.6s, PASS `import-rejects` 22.0s, PASS `remove` 22.0s, PASS `drop-in.fabric-neoforge` 31.8s, PASS `drop-in.neoforge-fabric` 29.8s, PASS `host-swap-own-inventory` 36.9s, PASS `race` 34.3s, PASS `owner-invite` 20.5s, PASS `owner-invite.unit` 8.1s, PASS `players-tab` 30.3s.
+  - m2: PASS `vanilla-through-sniffer` 35.4s, PASS `first-download-root-match` 38.8s, PASS `live-checkpoint` 38.0s, PASS `resume` 136.3s, PASS `path-policy` 40.9s.
+  - m2b: PASS `policy-unit` 8.1s, PASS `mods-unit` 9.1s, PASS `swap-spike.fabric` 36.6s, PASS `swap-spike.neoforge` 36.1s, PASS `mod-join.fabric` 49.4s, PASS `mod-join.neoforge` 48.8s, PASS `mod-decline` 34.4s, PASS `mod-change-live` 87.6s, PASS `mod-tamper` 32.3s, PASS `mod-keep-extra` 38.4s, PASS `owner-known-to-members` 37.3s, PASS `owner-rights` 40.5s, PASS `datapack-mismatch` 38.9s, PASS `mods-tab` 29.8s, PASS `swap-restores` 48.4s.
+  - m3 (all Fabric):
+    - PASS `handoff-3` 44.7s: A hosts; B and C join by invite and get full copies; each of the three gives itself an item and moves to its own place. A quits through `disconnectFromWorld`. A names B as successor before quitting and in the `HANDOFF` it sends; the rendezvous record becomes `handoff` with `next` = B. B, with no input, ends up hosting; the root of its copy at takeover and its checkpoint number equal the last entry of the ledger of A. C, with no input, is back in the world on the session of B. A presses Play and joins B. On the server of B all three players have their item and are at their place, and each client sees the same for itself.
+    - PASS `handoff-no-full-copy` 133.0s: A hosts a world of at least 450 records and serves B slowly (`dropin.dev.syncDelayMs=250`). With B mid-download A quits: after the checkpoint and the 30 s wait A is shown the confirmation (a `ConfirmScreen`); it names DevB with a percentage between 1 and 99, no successor, and the world is still running with B in it. A cancels: A is back in the game, still announced as host, B was never disconnected, received no handoff, and its download goes on. B then leaves by itself.
+- Online smoke: MILESTONES lists none for M3; none was run.
+
+Scenarios that run with the development-only switch `dropin.dev.noHandoff=true` (the decision of the owner, 2026-11-17): every client scenario of m1, m2 and m2b (it is set in `M1Scenarios.base`, which all of them start from). It only has an effect where a host quits with a member connected: `drop-in.*`, `host-swap-own-inventory`, `players-tab`, `first-download-root-match`, `resume`, `live-checkpoint`, `path-policy`, `vanilla-through-sniffer` and the m2b scenarios with two clients. Those keep proving a plain quit (the members are dropped; the copy equals the final root). The m0 scenarios do not host a co-op world. The two m3 scenarios set the switch to `false`.
+
+Trial runs before the gate (single scenarios, not counted as the gate): `-Suite m3 -Only handoff-no-full-copy` PASS 136.9s (confirmation "DevB 19%"), `-Suite m3 -Only handoff-3` PASS 42.0s (C reconnected 2.1 s after the handoff). No scenario failed in this milestone.
+
+Not verified in this run:
+
+- Handoff over the internet: every client was on this PC and used the LAN hint, the e4mc tunnel was off, the rendezvous was the shared-folder one. No pkarr relay, no e4mc domain, no Dialtone connection took part in a handoff. The 10 to 30 s the design expects was not measured (here C was out for about 2 s).
+- The successor being a NeoForge client, or a mixed-loader handoff: both m3 scenarios are Fabric only.
+- The Save and Quit button as clicked by a person, and the Yes and Cancel buttons of the confirmation (the scenarios call what the buttons call). No screen was looked at for layout.
+- "Quit anyway" (answering yes): only cancel is covered by a scenario.
+- A quit by closing the window (handoff at server stop, without the confirmation): coded, no scenario.
+- The Cancel button of "Host is changing…", and what a follower sees when the successor never appears (no time limit in M3; failover is M4).
+- A successor that may not host (mods or datapacks differ from the policy), and a successor whose copy turns out not to be the final checkpoint: coded, no scenario.
+- More than one fully synced member being ranked by connection time in the game: `handoff-3` asserts that B (who joined first) was chosen, and the order itself is unit-tested, but B and C start within seconds of each other.
+- A member on a relayed path during a handoff (it gets `HANDOFF` but is never the successor): unit-tested in the sync channel only.
+- The manual checklist (three real players, timing how long the others are out of the world).
+- The open items of M2b are unchanged (nothing reads `pv`/`mh`; a member sent away by a newer policy has no scenario; the helper under a real launcher).

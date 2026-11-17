@@ -85,9 +85,71 @@ connect, disconnect and take over as host while the world keeps knowing its owne
 is a later milestone in MILESTONES; M2b's `owner-known-to-members` and `owner-rights` cover "still knows the admin when B hosts".
 Start M2 by confirming DESIGN §8 items 4–8 in the sources. The M1 manual checklist is still the owner's to run.
 
-## M3 — IN PROGRESS (started 2026-11-17)
+## M3 — DONE (2026-11-17), gate passed on `19ea3fc` (see `docs/VERIFICATION.md`)
 
-Graceful handoff (MILESTONES M3, DESIGN §4.9 graceful, §4.3). Done so far: `core/sync/Successor` (+ test).
+State: `./gradlew build`, `scripts/jarcheck.ps1` and `scripts/selftest.ps1 -Suite all` (39 of 39) passed in this session.
+MILESTONES lists no online smoke for M3. Nothing is pushed.
+
+**Next step: M4** (crash failover, stale-copy warning, status HUD), in its own session. `PEERS` (number 18) is still reserved and unused.
+
+Manual checklist (MILESTONES M3), not done:
+- [ ] Three real players: the host quits; time how long the others are out of the world.
+
+Files touched in M3: `core/.../sync/{Successor,Wire,SyncServerSession,SyncClientSession}`, `core/.../pkarr/RendezvousRecord` and
+their tests (`SuccessorTest`, `SyncTest`, `PkarrTest`); `mc/.../handoff/{HostHandoff,MemberHandoff,HostChangingScreen}`,
+`mc/.../host/HostSync`, `mc/.../coop/{HostSession,CoopLauncher}`, `mc/.../member/SyncClient`, `dropin/mixin/mc/MinecraftDisconnectMixin`,
+`dropin.mixins.json`, `en_us.json`; `mc/src/selftest/.../{M3Scenarios,M1Scenarios,M2Scenarios,Scenarios}`; `scripts/selftest.ps1`;
+`docs/VERIFICATION.md`; `CLAUDE.md` (suites).
+
+
+Graceful handoff (MILESTONES M3, DESIGN §4.9 graceful, §4.3).
+
+### M3: what was built
+
+- `core/sync/Successor`: `choose(peers, finalSeq, hostUuid)`: a peer that applied the final checkpoint, longest connected first,
+  ties to the lowest UUID; never the host itself.
+- `core/sync/Wire`: `HANDOFF = 19 {str successorUuid, str finalEntryJson}`, `PROGRESS = 27 {i32 have, i32 total}`, `PROTO = 3`.
+  `SyncServerSession`: `handoff(...)`, `connectedAt()`, `peerPercent()`. `SyncClientSession`: sends `PROGRESS` (at most once per
+  percent), checks the handoff entry's MAC and calls `Local.handoff(successorUuid, finalEntry, applied)`.
+- `core/pkarr/RendezvousRecord.handoffTo(successorUuid, ts)`: `st:"handoff"`, `next`, no address.
+- `mc/handoff/HostHandoff` + `MinecraftDisconnectMixin` (HEAD of `Minecraft.disconnectFromWorld`): the host's quit with members
+  connected first runs `HostSync.prepareHandoff()` (checkpoint, wait up to 30 s for acks) behind "Handing the world over to your
+  friends…", then quits, or shows "Nobody else has a full copy yet (Sam 62%). Quit anyway?" (cancel returns to the game).
+- `mc/host/HostSync.serverStopping`: the true final checkpoint, the wait (30 s; 10 s after "quit anyway" or with the dev switch), then
+  `HANDOFF` to every sync peer and the rendezvous record (`handoff` + `next`, else `idle`) through `HostSession.announceLast`.
+- `mc/handoff/MemberHandoff`: the successor leaves the session, checks that its manifest root is the final entry's root, and
+  `CoopLauncher.hostAfterHandoff` opens the local copy and starts a `HostSession` (new `sess`). Everyone else gets
+  `HostChangingScreen` ("Host is changing…", Cancel), which polls the rendezvous once a second until a host other than the old one
+  answers a ping, then joins through the normal join gate.
+- Self-tests: `M3Scenarios` (`handoff-3`, `handoff-no-full-copy`), suite `m3` in `scripts/selftest.ps1` (three clients: slots a, b, c).
+
+### M3: decisions
+
+Confirmed by the owner on 2026-11-17 (asked before the code was written):
+1. `HANDOFF = 19` carries `{text successorUuid, text finalEntryJson}` and is sent only when there is a successor.
+2. New member-to-host message `PROGRESS = 27 {i32 have, i32 total}`; the sync protocol number is now 3 (an M2b build and an M3
+   build refuse each other's sync connection).
+3. "Host is changing…" has a Cancel button and no time limit in M3; the 45 s failover is M4.
+4. The development-only switch `dropin.dev.noHandoff`: a host with it quits without handing over. Every m1, m2 and m2b scenario
+   sets it (`M1Scenarios.base`), so those scenarios keep their steps and assertions (a plain quit drops the members); the m3
+   scenarios set it back to `false`. It is read through `DevSwitches`, so a production jar ignores it.
+
+Made while building, not asked (flow, no wire or file format; tell the owner):
+- The quit is in two halves, because the design's order (final checkpoint, wait, then the confirmation) cannot be followed
+  literally while "cancel keeps the session alive" holds: the checkpoint and wait before the confirmation happen with the world
+  running, and the stopping server takes one more (final) checkpoint and waits again before it sends `HANDOFF`.
+- A quit that does not go through `disconnectFromWorld` (closing the window) still hands over at server stop if someone is fully
+  synced, but shows no confirmation.
+- The successor does not run the claim of DESIGN 4.3 (it was named); it publishes `starting`/`host` like any host session.
+- A follower accepts any live host other than the old one, not only the one named in `next`.
+- If the named successor finds its copy is not the final checkpoint it does not host; it waits on "Host is changing…" like the others.
+- A member's percentage in the confirmation is capped at 99; with no name known the text says "a friend".
+- Lang keys `text.dropin_coop.handoff.{preparing,nobody,a_friend,changing,taking_over}`.
+
+Found on the way:
+- `Minecraft.disconnect` calls `dropAllTasks()`. The old host closes the game connection right after `HANDOFF`, so a task queued
+  with `mc.execute` on a member can be dropped; `MemberHandoff.onClient` queues it again until it has run.
+- A field named `dropin` in `SyncClient` shadows the `dropin.` package in fully qualified names (again).
 
 26.3 signatures read for M3 (NeoForm `vanilla-26.3-1-sources.jar`; DESIGN §8 has no handoff item of its own, items 1 and 2
 were confirmed in M1; none of this contradicts the design):
