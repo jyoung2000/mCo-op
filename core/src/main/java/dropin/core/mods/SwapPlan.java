@@ -34,6 +34,12 @@ public record SwapPlan(long gamePid, Path modsDir, Path storeDir, Path disabledD
         keep = List.copyOf(keep);
     }
 
+    /** The plan that makes {@code modsDir} hold exactly the world's mod list plus the jars to keep. */
+    public static SwapPlan of(ModManifest manifest, List<String> keep, long gamePid, Path modsDir, Path storeDir, Instant now) {
+        List<Install> install = manifest.files().stream().map(f -> new Install(f.path(), f.sha512())).toList();
+        return new SwapPlan(gamePid, modsDir, storeDir, disabledDir(modsDir, now), install, keep);
+    }
+
     /** {@code mods/.dropin-disabled/<UTC timestamp>}. */
     public static Path disabledDir(Path modsDir, Instant now) {
         return modsDir.resolve(DISABLED_DIR).resolve(STAMP.format(now));

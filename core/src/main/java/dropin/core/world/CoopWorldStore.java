@@ -214,6 +214,105 @@ public final class CoopWorldStore {
         return updated;
     }
 
+    // ---- members exchanged with peers (DESIGN 4.15) ------------------------------------------
+
+    private static final int MAX_MEMBERS = 500;
+
+    /** The member list as it travels in a {@code MEMBERS} message. */
+    public static String membersJson(List<Member> members) {
+        JsonArray array = new JsonArray();
+        for (Member member : members) {
+            array.add(memberJson(member));
+        }
+        JsonObject json = new JsonObject();
+        json.add("members", array);
+        return json.toString();
+    }
+
+    /**
+     * Reads a peer's {@code MEMBERS} message. Entries that are not a UUID with a short printable name are
+     * dropped; the role a peer states is not trusted and comes back as {@link Member#MEMBER}.
+     */
+    public static List<Member> parseMembers(String text) {
+        List<Member> members = new ArrayList<>();
+        try {
+            for (JsonElement element : JsonParser.parseString(text).getAsJsonObject().getAsJsonArray("members")) {
+                JsonObject m = element.getAsJsonObject();
+                String uuid = m.get("uuid").getAsString();
+                String name = m.get("name").getAsString();
+                if (members.size() < MAX_MEMBERS && uuid.matches("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")
+                        && !name.isEmpty() && name.length() <= 32 && name.chars().allMatch(c -> c > 0x20 && c < 0x7f)) {
+                    members.add(new Member(uuid, name, m.get("firstSeen").getAsLong(), m.get("lastSeen").getAsLong(),
+                            Member.MEMBER));
+                }
+            }
+        } catch (RuntimeException e) {
+            // A malformed list teaches nothing; what was read so far is still fine.
+        }
+        return members;
+    }
+
+    /**
+     * Merges members a peer knows into this PC's list: earliest first-seen, latest last-seen, the name that
+     * was seen last. Who the owner is comes from the owner-signed policy ({@code ownerUuid}, empty if there
+     * is no policy yet), never from the peer.
+     */
+    public CoopWorld mergeMembers(String worldId, List<Member> incoming, String ownerUuid) throws IOException {
+        CoopWorld world = get(worldId).orElseThrow(() -> new IOException("unknown world " + worldId));
+        java.util.Map<String, Member> merged = new java.util.LinkedHashMap<>();
+        for (Member member : world.members()) {
+            merged.put(member.uuid(), member);
+        }
+        for (Member other : incoming) {
+            Member mine = merged.get(other.uuid());
+            if (mine == null) {
+                merged.put(other.uuid(), new Member(other.uuid(), other.name(), other.firstSeen(), other.lastSeen(), Member.MEMBER));
+            } else {
+                merged.put(mine.uuid(), new Member(mine.uuid(), other.lastSeen() > mine.lastSeen() ? other.name() : mine.name(),
+                        Math.min(mine.firstSeen(), other.firstSeen()), Math.max(mine.lastSeen(), other.lastSeen()), mine.role()));
+            }
+        }
+        List<Member> members = new ArrayList<>();
+        for (Member member : merged.values()) {
+            String role = ownerUuid.isEmpty() ? member.role() : member.uuid().equals(ownerUuid) ? Member.OWNER : Member.MEMBER;
+            members.add(new Member(member.uuid(), member.name(), member.firstSeen(), member.lastSeen(), role));
+        }
+        if (members.equals(world.members())) {
+            return world;
+        }
+        CoopWorld updated = world.withMembers(members);
+        save(updated);
+        return updated;
+    }
+
+    /**
+     * Remembers the owner's public key once a valid policy showed it (DESIGN 4.13). Refused unless it is the
+     * key the invite's fingerprint names.
+     */
+    public CoopWorld learnOwnerKey(String worldId, String ownerKeyHex) throws IOException {
+        CoopWorld world = get(worldId).orElseThrow(() -> new IOException("unknown world " + worldId));
+        if (world.ownerKey().equals(ownerKeyHex)) {
+            return world;
+        }
+        if (!HEX.formatHex(Invite.fingerprint(HEX.parseHex(ownerKeyHex))).equals(world.ownerFingerprint())) {
+            throw new IOException("that is not this world's owner key");
+        }
+        CoopWorld updated = new CoopWorld(world.worldId(), world.seed(), world.name(), world.ownerFingerprint(), ownerKeyHex,
+                world.members());
+        save(updated);
+        return updated;
+    }
+
+    private static JsonObject memberJson(Member member) {
+        JsonObject m = new JsonObject();
+        m.addProperty("uuid", member.uuid());
+        m.addProperty("name", member.name());
+        m.addProperty("firstSeen", member.firstSeen());
+        m.addProperty("lastSeen", member.lastSeen());
+        m.addProperty("role", member.role());
+        return m;
+    }
+
     // ---- files -------------------------------------------------------------------------------
 
     private Path entryFile(String worldId) {

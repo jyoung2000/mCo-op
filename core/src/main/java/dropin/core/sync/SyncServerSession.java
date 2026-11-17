@@ -60,6 +60,29 @@ public final class SyncServerSession {
 
         /** The peer reports that its copy is complete through this checkpoint. */
         void peerSynced(SyncServerSession session, long seq);
+
+        /** The newest valid policy this host holds and its mod manifest, as {policyJson, manifestJson}; null if none. */
+        default String[] policy() {
+            return null;
+        }
+
+        /** A peer offers a policy. The host verifies it and adopts it only if it is newer than its own. */
+        default void policyOffered(SyncServerSession session, String policyJson, String manifestJson) {
+        }
+
+        /** The member list this host knows, as JSON; null if it has none to share. */
+        default String members() {
+            return null;
+        }
+
+        /** A peer shares the member list it knows. */
+        default void membersOffered(SyncServerSession session, String json) {
+        }
+
+        /** The jar of the host's current signed mod list with this SHA-512, or null. */
+        default java.nio.file.Path modFile(String sha512) {
+            return null;
+        }
     }
 
     private final Host host;
@@ -262,10 +285,74 @@ public final class SyncServerSession {
                     sendRecord(key);
                 }
             }
+            case Wire.POLICY_REQ -> {
+                in.i64();
+                // Always answered, also when the peer is not behind: it then knows this host has nothing newer.
+                sendPolicy(true);
+            }
+            case Wire.POLICY -> host.policyOffered(this, in.str(), in.str());
+            case Wire.MEMBERS -> {
+                host.membersOffered(this, in.str());
+                sendMembers();
+            }
+            case Wire.MOD_GET -> sendMod(in.str());
             case Wire.BYE -> close();
             default -> throw new IOException("Unexpected sync message " + in.type);
         }
     }
+
+    /** Pushes the host's policy and mod manifest to the peer (after the host adopted a newer one). */
+    public void sendPolicy() {
+        sendPolicy(false);
+    }
+
+    private void sendPolicy(boolean evenIfNone) {
+        String[] policy = host.policy();
+        if (ready() && (policy != null || evenIfNone)) {
+            sendSealed(new Wire.Out(Wire.POLICY).str(policy == null ? "" : policy[0]).str(policy == null ? "" : policy[1]));
+        }
+    }
+
+    /** Pushes the member list this host knows to the peer. */
+    public void sendMembers() {
+        String members = host.members();
+        if (ready() && members != null) {
+            sendSealed(new Wire.Out(Wire.MEMBERS).str(members));
+        }
+    }
+
+    /** Mod files are bulk data: they only go where records may go, and only files of the signed mod list. */
+    private void sendMod(String sha512) throws IOException, InterruptedException {
+        if (!currentBulk()) {
+            sendSealed(new Wire.Out(Wire.MOD_DATA).str(sha512).u8(Wire.MOD_LAST | Wire.MOD_REFUSED).bytes(new byte[0]));
+            return;
+        }
+        java.nio.file.Path file = host.modFile(sha512);
+        if (file == null || !java.nio.file.Files.isRegularFile(file)) {
+            sendSealed(new Wire.Out(Wire.MOD_DATA).str(sha512).u8(Wire.MOD_LAST | Wire.MOD_ABSENT).bytes(new byte[0]));
+            return;
+        }
+        try (java.io.InputStream in = java.nio.file.Files.newInputStream(file)) {
+            byte[] piece = in.readNBytes(Wire.PIECE);
+            while (!closed) {
+                byte[] next = in.readNBytes(Wire.PIECE);
+                host.throttle(this, piece.length);
+                modBytes += piece.length;
+                sendSealed(new Wire.Out(Wire.MOD_DATA).str(sha512).u8(next.length == 0 ? Wire.MOD_LAST : 0).bytes(piece));
+                if (next.length == 0) {
+                    return;
+                }
+                piece = next;
+            }
+        }
+    }
+
+    /** Mod file bytes sent on this connection. */
+    public long modBytes() {
+        return modBytes;
+    }
+
+    private volatile long modBytes;
 
     private void sendRecord(String key) throws IOException, InterruptedException {
         byte[] bytes = host.read(key);

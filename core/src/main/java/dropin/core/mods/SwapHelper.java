@@ -113,6 +113,10 @@ public final class SwapHelper {
         }
         // Check the store first, so that nothing is moved when a file to install is missing or damaged.
         for (Map.Entry<String, String> file : install.entrySet()) {
+            Path inPlace = modsDir.resolve(file.getKey());
+            if (Files.isRegularFile(inPlace) && sha512(inPlace).equals(file.getValue())) {
+                continue;
+            }
             Path stored = storeDir.resolve(file.getValue() + ".jar");
             if (!Files.isRegularFile(stored) || !sha512(stored).equals(file.getValue())) {
                 throw new IOException("the stored copy of " + file.getKey() + " is missing or damaged");

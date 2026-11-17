@@ -74,6 +74,28 @@ public final class SyncClientSession {
         void committed(LedgerEntry head) throws IOException;
 
         void status(Status status);
+
+        /** Version of the newest valid policy this copy holds; 0 if none. */
+        default long policyVersion() {
+            return 0;
+        }
+
+        /**
+         * The host's policy and mod manifest (empty strings if it has none).
+         *
+         * @return {policyJson, manifestJson} to send back when this copy holds a newer one, else null
+         */
+        default String[] policyReceived(String policyJson, String manifestJson) {
+            return null;
+        }
+
+        /** The member list this copy knows, as JSON; null to share none. */
+        default String membersToOffer() {
+            return null;
+        }
+
+        default void membersReceived(String json) {
+        }
     }
 
     private final Local local;
@@ -209,6 +231,11 @@ public final class SyncClientSession {
                 throw new IOException("The host does not hold the world key");
             }
             channel = new SecureChannel(local.enc(), nonceC, nonceS, true);
+            send(new Wire.Out(Wire.POLICY_REQ).i64(local.policyVersion()));
+            String members = local.membersToOffer();
+            if (members != null) {
+                send(new Wire.Out(Wire.MEMBERS).str(members));
+            }
         } else {
             throw new IOException("Unexpected handshake message " + in.type);
         }
@@ -221,7 +248,14 @@ public final class SyncClientSession {
             case Wire.DIFF_RESP -> onDiff(in.u8() != 0, in.map());
             case Wire.RECORD -> onRecord(in.str(), in.u8(), in.bytes());
             case Wire.CHECKPOINT -> onCheckpoint(LedgerEntry.fromJson(in.str()), in.u8() != 0, in.map());
-            case Wire.PEERS, Wire.HANDOFF, Wire.BRANCH_PUSH -> {
+            case Wire.POLICY -> {
+                String[] newer = local.policyReceived(in.str(), in.str());
+                if (newer != null) {
+                    send(new Wire.Out(Wire.POLICY).str(newer[0]).str(newer[1]));
+                }
+            }
+            case Wire.MEMBERS -> local.membersReceived(in.str());
+            case Wire.PEERS, Wire.HANDOFF, Wire.BRANCH_PUSH, Wire.MOD_DATA -> {
                 // Later milestones.
             }
             case Wire.BYE -> onClosed();
