@@ -205,10 +205,7 @@ final class M1Scenarios {
                             "the known co-op world is not listed");
                     require(buttonContaining(screen, state.world.name()) != null, "no row shows the world's name");
                     require(!CoopWorldsScreen.TITLE.getString().equals("menu.dropin_coop.title"), "the language file is not loaded");
-                })
-                .action("singleplayer list", () -> mc.gui.setScreen(new SelectWorldScreen(new TitleScreen())))
-                .step("singleplayer list has the button too", SHORT_TICKS,
-                        () -> buttonContaining(mc.gui.screen(), CoopWorldsScreen.TITLE.getString()) != null);
+                });
     }
 
     private static Button titleButton(Minecraft mc) {
@@ -257,8 +254,9 @@ final class M1Scenarios {
                 })
                 .action("singleplayer list", () -> mc.gui.setScreen(new SelectWorldScreen(new TitleScreen())))
                 // long enough for the list to load its entries, which is where the badge is added
-                .step("singleplayer list still works", SHORT_TICKS, () -> ++waited[0] >= 100
-                        && mc.gui.screen() instanceof SelectWorldScreen && CoopActions.isCoopLevel(mc, WORLD_ID));
+                .step("singleplayer list still works and has the Co-op Worlds button", SHORT_TICKS, () -> ++waited[0] >= 100
+                        && mc.gui.screen() instanceof SelectWorldScreen && CoopActions.isCoopLevel(mc, WORLD_ID)
+                        && buttonContaining(mc.gui.screen(), CoopWorldsScreen.TITLE.getString()) != null);
     }
 
     private static StepRunner importZip(Context ctx) {
