@@ -85,6 +85,38 @@ connect, disconnect and take over as host while the world keeps knowing its owne
 is a later milestone in MILESTONES; M2b's `owner-known-to-members` and `owner-rights` cover "still knows the admin when B hosts".
 Start M2 by confirming DESIGN §8 items 4–8 in the sources. The M1 manual checklist is still the owner's to run.
 
+## M2b — IN PROGRESS (started 2026-11-17)
+
+DESIGN §8 items confirmed for M2b (none contradicts the design):
+- Item 16, Fabric (loader 0.20.1, `DirectoryModCandidateFinder`, read at tag 0.20.1 on GitHub): `findCandidates` walks the mods
+  folder with `Files.walkFileTree(path, EnumSet.of(FileVisitOption.FOLLOW_LINKS), 1, ...)`, depth 1, and `isValidFile` takes only regular,
+  non-hidden files whose name ends in `.jar` and does not start with `.`. A jar under `mods/.dropin-disabled/<ts>/` is not loaded.
+  API: `FabricLoader.getInstance().getGameDir()`, `getAllMods()` → `ModContainer.getMetadata().getId()/getVersion()`, `getOrigin().getPaths()`.
+- Item 16, NeoForge (FML `loader-12.0.12.jar`, `javap -c` of `net.neoforged.fml.loading.moddiscovery.locators.ModsFolderLocator`):
+  `findCandidates(ILaunchContext, IDiscoveryPipeline)` uses `Files.list(modFolder)` (not recursive), a `.jar` suffix filter, sorted by lower-case
+  name; the folder is `FMLPaths.MODSDIR.get()`. Loaded mods: `ModList.get().getMods()` → `IModInfo.getModId()/getVersion()`.
+  DropIn does not call either loader API: the mods folder is `<game dir>/mods` and mod id/version are read from each jar's
+  `fabric.mod.json` / `META-INF/neoforge.mods.toml`, so `core/mods` stays loader-free.
+  **Proven by the spike** (`swap-spike.fabric`, `swap-spike.neoforge`): a jar the running game had loaded from `mods/` was moved to
+  `mods/.dropin-disabled/<ts>/` by the helper after the game exited, a new jar was installed, and the next start loaded the new set only.
+- Item 17: `PlayerList.java:590` `public boolean isOp(NameAndId nameAndId)` = `ops.contains(...)` or
+  `server.isSingleplayerOwner(nameAndId) ? server.getWorldData().isAllowCommands() : false`. `IntegratedServer.java:443`
+  `public boolean isSingleplayerOwner(NameAndId nameAndId)` compares the name with `getSingleplayerProfile().name()`.
+  `IntegratedServer.java:317` `public LevelBasedPermissionSet getProfilePermissions(NameAndId nameAndId)`: the singleplayer owner gets
+  `LevelBasedPermissionSet.OWNER` if `isOp`, everyone else `getCustomPermissionLevel()` (`GAMEMASTER` when the world allows commands and
+  `guestCommandAccess` is on, else `ALL`), falling back to `MinecraftServer.getProfilePermissions` (`MinecraftServer.java:1802`).
+  So operator rights are decided in `IntegratedServer.getProfilePermissions`; that is where they follow the world's owner.
+- Item 19: the enabled list is in `level.dat` (`PrimaryLevelData.java:149` `tag.store(WorldDataConfiguration.MAP_CODEC, settings.dataConfiguration())`,
+  field `DataPacks` = `DataPackConfig{Enabled, Disabled}`), read without a server by
+  `LevelStorageSource.readDataConfig(Dynamic<?> levelData)` (`LevelStorageSource.java:134`); the packs are the folders/zips under
+  `LevelResource.DATAPACK_DIR` = `"datapacks"` (`ServerPacksSource.createPackRepository(LevelStorageAccess)`, line 79), applied in
+  `WorldOpenFlows.loadWorldStem` through `WorldLoader.PackConfig`. Both can be read before the integrated server boots.
+- Item 20 (docs.modrinth.com, read 2026-11-17): `POST https://api.modrinth.com/v2/version_files`, JSON body
+  `{"hashes": ["<hash>", ...], "algorithm": "sha1" | "sha512"}`; 200 answers a map hash → version object (`id`, `project_id`,
+  `version_number`, `loaders`, `game_versions`, `files[]` with `hashes{sha512, sha1}`, `url`, `filename`, `primary`, `size`); unknown hashes
+  are simply absent. A uniquely identifying `User-Agent` is required. Rate limit 300 requests/minute per IP
+  (`X-Ratelimit-Limit/-Remaining/-Reset`).
+
 ## M2 — DONE (2026-11-17), gate passed on `c3f94a3` (see `docs/VERIFICATION.md`)
 
 **Next step: M2b** (owner policy and mod sync), in its own session. Start with the swap-helper spike (MILESTONES M2b step 1) and

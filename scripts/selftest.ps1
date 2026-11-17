@@ -76,6 +76,16 @@ $suites = [ordered]@{
         @{ Id = 'path-policy'; Scenario = 'path-policy'
            Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
     )
+    m2b = @(
+        # The spike of M2b step 1: the game starts with test mod Z, asks the helper for X instead and quits; the
+        # helper swaps mods/ once the game is gone; the game is started again as a2 and must have loaded X, not Z.
+        @{ Id = 'swap-spike.fabric'; Scenario = 'swap-spike'; Mods = @{ a = @('z') }
+           Relaunch = @{ GameFile = 'config\dropin\modswap.result.json'; Index = 0; Role = 'a2' }
+           Roles = @((New-Role 'a' 'fabric' 'a')) },
+        @{ Id = 'swap-spike.neoforge'; Scenario = 'swap-spike'; Mods = @{ a = @('z') }
+           Relaunch = @{ GameFile = 'config\dropin\modswap.result.json'; Index = 0; Role = 'a2' }
+           Roles = @((New-Role 'a' 'neoforge' 'a')) }
+    )
 }
 
 # Opt-in scenarios that touch public infrastructure (the real e4mc relay). Only run with -Online.
@@ -123,12 +133,22 @@ function Get-GameDir([string]$slot) {
     return Join-Path $root "run\$slot"
 }
 
-function Initialize-GameDir([string]$slot) {
+function Get-TestMod([string]$loader, [string]$name) {
+    return Join-Path $root "build\testmods\$loader\dropin-testmod-$name.jar"
+}
+
+# $mods: names of test mods (x, y, z) that are in the slot's mods folder when the game first starts.
+function Initialize-GameDir([string]$slot, [string]$loader, $mods) {
     $dir = Get-GameDir $slot
     New-Item -ItemType Directory -Force $dir | Out-Null
-    foreach ($sub in @('dropin-selftest', 'saves', 'backups', 'config\dropin')) {
+    foreach ($sub in @('dropin-selftest', 'saves', 'backups', 'config\dropin', 'mods')) {
         $path = Join-Path $dir $sub
         if (Test-Path $path) { Remove-Item -Recurse -Force $path }
+    }
+    foreach ($name in @($mods)) {
+        if (-not $name) { continue }
+        New-Item -ItemType Directory -Force (Join-Path $dir 'mods') | Out-Null
+        Copy-Item (Get-TestMod $loader $name) (Join-Path $dir 'mods')
     }
     $options = @(
         'pauseOnLostFocus:false',
@@ -211,7 +231,11 @@ function Stop-Game($proc, $role) {
 }
 
 function Invoke-ClientScenario($scenario) {
-    foreach ($role in $scenario.Roles) { Initialize-GameDir $role.Slot }
+    foreach ($role in $scenario.Roles) {
+        $mods = @()
+        if ($scenario.Mods -and $scenario.Mods.ContainsKey($role.Slot)) { $mods = $scenario.Mods[$role.Slot] }
+        Initialize-GameDir $role.Slot $role.Loader $mods
+    }
     if (Test-Path $sharedDir) { Remove-Item -Recurse -Force $sharedDir }
     New-Item -ItemType Directory -Force $sharedDir | Out-Null
 
@@ -227,26 +251,65 @@ function Invoke-ClientScenario($scenario) {
     if ($scenario.TimeoutSec -and $scenario.TimeoutSec -gt $limit) { $limit = $scenario.TimeoutSec }
     $deadline = (Get-Date).AddSeconds($limit)
     $settleUntil = $null
-    $relaunched = $false
+    $idleUntil = $null
+    # Relaunches happen in the order listed. A relaunch is triggered by a file: 'Marker' in run/shared (the game is
+    # then killed the hard way), or 'GameFile' in the role's game folder (written after the game quit by itself,
+    # e.g. by the mod-swap helper; the run that quit must have passed).
+    $relaunches = @()
+    if ($scenario.Relaunch) { $relaunches = @($scenario.Relaunch) }
+    $nextRelaunch = 0
+    $relaunchProblems = @()
+    $consumed = @{}
     while ((Get-Date) -lt $deadline) {
-        if ($scenario.Relaunch -and -not $relaunched -and (Test-Path (Join-Path $sharedDir $scenario.Relaunch.Marker))) {
-            $relaunched = $true
-            $index = $scenario.Relaunch.Index
-            Stop-Game $procs[$index] $roles[$index]
-            $roles[$index] = New-Role $scenario.Relaunch.Role $roles[$index].Loader $roles[$index].Slot
-            $procs[$index] = Start-Client $scenario $roles[$index] $port
+        $pending = $nextRelaunch -lt $relaunches.Count
+        if ($pending) {
+            $relaunch = $relaunches[$nextRelaunch]
+            $index = $relaunch.Index
+            if ($relaunch.GameFile) {
+                $trigger = Join-Path (Get-GameDir $roles[$index].Slot) $relaunch.GameFile
+            } else {
+                $trigger = Join-Path $sharedDir $relaunch.Marker
+            }
+            # A game file stays where it is (the next run may read it), so one that was already used does not count.
+            $fresh = (Test-Path $trigger) -and ($consumed[$trigger] -ne (Get-Item $trigger).LastWriteTimeUtc.Ticks)
+            if ($fresh) {
+                $consumed[$trigger] = (Get-Item $trigger).LastWriteTimeUtc.Ticks
+                if ($relaunch.GameFile) {
+                    $waitUntil = (Get-Date).AddSeconds(30)
+                    while (-not $procs[$index].HasExited -and (Get-Date) -lt $waitUntil) { Start-Sleep -Milliseconds 250 }
+                    $before = Read-Result $roles[$index]
+                    if ($null -eq $before) {
+                        $relaunchProblems += ('{0}: no result before the restart' -f $roles[$index].Role)
+                    } elseif (-not $before.passed) {
+                        $relaunchProblems += ('{0}: {1}' -f $roles[$index].Role, $before.failure)
+                    }
+                }
+                $nextRelaunch++
+                $pending = $nextRelaunch -lt $relaunches.Count
+                Stop-Game $procs[$index] $roles[$index]
+                if ($relaunchProblems.Count -gt 0) { break }
+                $roles[$index] = New-Role $relaunch.Role $roles[$index].Loader $roles[$index].Slot
+                $procs[$index] = Start-Client $scenario $roles[$index] $port
+                $settleUntil = $null
+                $idleUntil = $null
+            }
         }
         $results = @($roles | ForEach-Object { Read-Result $_ })
         $missing = @($results | Where-Object { $null -eq $_ }).Count
         $failed = @($results | Where-Object { $null -ne $_ -and -not $_.passed }).Count
         $running = @($procs | Where-Object { -not $_.HasExited }).Count
-        if ($running -eq 0) { break }
+        if ($running -eq 0) {
+            if (-not $pending) { break }
+            # Every game has quit but a restart is still expected: give its trigger file a while to appear.
+            if ($null -eq $idleUntil) { $idleUntil = (Get-Date).AddSeconds(120) }
+            if ((Get-Date) -ge $idleUntil) { break }
+        }
         # A client that is gone without leaving a result (build failure, crash) will never report.
         $dead = 0
         for ($i = 0; $i -lt $procs.Count; $i++) {
             if ($procs[$i].HasExited -and $null -eq $results[$i]) { $dead++ }
         }
-        if ($missing -eq 0 -or $failed -gt 0 -or $dead -gt 0) {
+        if (($missing -eq 0 -and -not $pending) -or $failed -gt 0 -or $dead -gt 0) {
             # Everything reported (or something failed): give the clients a moment to quit by themselves.
             if ($null -eq $settleUntil) { $settleUntil = (Get-Date).AddSeconds(30) }
             if ((Get-Date) -ge $settleUntil) { break }
@@ -255,9 +318,10 @@ function Invoke-ClientScenario($scenario) {
     }
     Stop-Stragglers $procs $roles
 
-    $problems = @()
-    if ($scenario.Relaunch -and -not $relaunched) {
-        $problems += ('{0} was never written, so the process was not killed' -f $scenario.Relaunch.Marker)
+    $problems = @($relaunchProblems)
+    if ($nextRelaunch -lt $relaunches.Count) {
+        $waiting = $relaunches[$nextRelaunch]
+        $problems += ('{0} was never written, so the restart as {1} did not happen' -f $(if ($waiting.GameFile) { $waiting.GameFile } else { $waiting.Marker }), $waiting.Role)
     }
     foreach ($role in $roles) {
         $result = Read-Result $role
@@ -300,7 +364,7 @@ Set-Content -Path $summaryFile -Value ("selftest -Suite {0}{1}  {2}" -f $Suite, 
 # that up to date (two Gradle builds downloading the same assets at once fail).
 $loaders = @($scenarios | Where-Object { $_.Roles } | ForEach-Object { $_.Roles } | ForEach-Object { $_.Loader } | Sort-Object -Unique)
 if ($loaders.Count -gt 0) {
-    $compileArgs = @($loaders | ForEach-Object { ":$($_):classes"; ":$($_):downloadAssets" }) + '--console=plain'
+    $compileArgs = @($loaders | ForEach-Object { ":$($_):classes"; ":$($_):downloadAssets"; ":$($_):testmodJars" }) + '--console=plain'
     $code = Invoke-GradleLogged $compileArgs (Join-Path $logDir 'compile.log')
     if ($code -ne 0) {
         $line = 'FAIL  compile  (see build/selftest-logs/compile.log)'
