@@ -85,7 +85,7 @@ connect, disconnect and take over as host while the world keeps knowing its owne
 is a later milestone in MILESTONES; M2b's `owner-known-to-members` and `owner-rights` cover "still knows the admin when B hosts".
 Start M2 by confirming DESIGN §8 items 4–8 in the sources. The M1 manual checklist is still the owner's to run.
 
-M2 source confirmation started (2026-11-17), not finished:
+M2 source confirmation (2026-11-17), finished:
 - Item 4 confirmed: `IOWorker.store(ChunkPos pos, CompoundTag value)` and `store(ChunkPos, Supplier<CompoundTag>)` (the first calls the
   second: hook the Supplier overload); `loadAsync(ChunkPos)` → `CompletableFuture<Optional<CompoundTag>>`; `storageInfo()` returns
   `RegionStorageInfo(String level, ResourceKey<Level> dimension, String type)` with type `"chunk"` (ChunkMap:169), `"poi"` (ChunkMap:198),
@@ -93,9 +93,36 @@ M2 source confirmation started (2026-11-17), not finished:
 - Item 5 confirmed: `public RegionFileStorage(RegionStorageInfo info, Path folder, boolean sync)` with `read(ChunkPos)`,
   `write(ChunkPos, @Nullable CompoundTag)`, `flush()`, `close()`; `public RegionFile(RegionStorageInfo, Path path, Path externalFileDir, boolean sync)`.
   Neither needs a server.
-- Item 7, half: `Connection.channelActive(ctx)` only calls super and stores `ctx.channel()` / `remoteAddress()`, so a late, re-fired
-  `channelActive` is harmless there. Still to read: the vanilla `ChannelInitializer` in `ServerConnectionListener` and the tunnel's use of it.
-- Items 6 and 8 not looked at yet (`e4mc$connInfo` is in `tunnel/.../ConnectionMixin.java:41`).
+  Also: `protected IOWorker(RegionStorageInfo info, Path dir, boolean sync)`, built only in `SimpleRegionStorage.java:29` and
+  `RecreatingSimpleRegionStorage.java:28`; `store` and `loadAsync` both queue with `Priority.FOREGROUND`, and `loadAsync` returns the
+  pending write's `copyData()` before it falls back to `storage.read(pos)`, so a read after `store` returned always sees that write.
+- Item 6 confirmed: `ChunkMap.java:170` `levelStorage.getDimensionPath(level.dimension()).resolve("region")`; `ChunkMap.java:198-199`
+  `new RegionStorageInfo(levelStorage.getLevelId(), level.dimension(), "poi"), storageFolder.resolve("poi")`; `ServerLevel.java:249-250`
+  `"entities"` at `levelStorage.getDimensionPath(dimension).resolve("entities")`. `LevelStorageAccess.getDimensionPath(ResourceKey<Level> name)`
+  returns `DimensionType.getStorageFolder(name, this.levelDirectory.path())`, and
+  `DimensionType.getStorageFolder(ResourceKey<Level> name, Path baseFolder)` is `name.identifier().resolveAgainst(baseFolder.resolve("dimensions"))`.
+  So every dimension, the overworld included, is `dimensions/<namespace>/<path>/{region,entities,poi}`; per-dimension `data` is beside them
+  (`ServerChunkCache.java:92`). The record kind is taken from the folder name (the `RegionStorageInfo` type for region files is `"chunk"`).
+- Item 7 confirmed: `ServerConnectionListener.startTcpServerListener(@Nullable InetAddress address, int port)` passes
+  `new ChannelInitializer<Channel>() { protected void initChannel(Channel channel) { ... } }` to `ServerBootstrap.childHandler`. It only
+  uses `pipeline.addLast` (`"timeout"` `ReadTimeoutHandler(30)`, `"legacy_query"`, `Connection.configureSerialization(pipeline, PacketFlow.SERVERBOUND, false, null)`,
+  `connection.configurePacketHandler(pipeline)`, `connection.setListenerForServerboundHandshake(...)`), so it works when it is added behind
+  the sniffer after the first bytes. `Connection.channelActive(ctx)` only calls super and stores `ctx.channel()` / `remoteAddress()`, so
+  the late `fireChannelActive` is harmless. The tunnel hands the same captured handler to `QuiclimeSession` (`.streamHandler(handler)`
+  line 270 for relay streams, `.childHandler(handler)` line 361 for `DialtoneServerChannel`), so wrapping it once in
+  `ServerConnectionListenerMixin.interceptHandler` covers LAN, relay and Dialtone.
+- Item 8 confirmed: `e4mc$connInfo()` returns `DialtoneChannel.debugInfo()` = iroh-java `Connection.debugInfo()`, else the channel's class
+  name. Upstream `vgskye/iroh-java` branch `meower`, `rust/src/lib.rs:848-915`: one line per path,
+  `"path {} active {} rtt {} local {local_addr} remote {remote_addr}\n"`, an address being `ip v4 priv|lloc|loop|glob`, `ip v6 priv|lloc|glob`,
+  `ip unk unk`, `relay <url>`, `custom` or `unk`. Direct = the `active true` line whose remote starts with `ip ` (`core/sync/PathInfo`).
+  Read at the branch head; the jar this build uses is 0.1.2, so the format is **unconfirmed against that exact version** until the online
+  smoke shows a real line.
+- None of items 4–8 contradicts the design.
+- Other signatures used: `MinecraftServer.saveEverything(boolean silent, boolean flush, boolean force)`; `protected void stopServer()`
+  (`IntegratedServer` overrides it as `public` and calls super); `getAverageTickTimeNanos()`; `BlockableEventLoop.submit(Runnable)`;
+  `NbtIo.read(DataInput, NbtAccounter)`, `NbtAccounter.unlimitedHeap()`; `record ChunkPos(int x, int z)`;
+  `ResourceKey.create(Registries.DIMENSION, Identifier.parse(...))`; `ServerNameResolver.DEFAULT.resolveAddress(ServerAddress)`;
+  `ChatComponent.addClientSystemMessage(Component)`; `AlertScreen(Runnable, Component, Component)`.
 - Found in M1: upstream `DialtoneAmbientSession.start()` is not thread-safe. `SyncClient` must not start it concurrently with a ping or a game connect.
 
 Files added since the core half:

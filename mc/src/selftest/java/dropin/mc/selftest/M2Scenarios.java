@@ -333,15 +333,24 @@ final class M2Scenarios {
                 })
                 .action("press Play", () -> pressPlay(mc, state))
                 .step("landed in A's session", PEER_TICKS, () -> joinedRemote(mc))
+                // The first thing the new connection reports: how much of the world it found already here.
+                .step("the download picks up where it stopped", PEER_TICKS, () -> {
+                    failIfDisconnected(mc);
+                    SyncClientSession.Status live = SyncClient.status(state.world.worldId());
+                    if (live == null || (live.phase() != Phase.DOWNLOADING && live.phase() != Phase.LIVE)) {
+                        return false;
+                    }
+                    DropIn.LOGGER.info("Self-test: after the restart the sync starts at {} of {} records; {} were kept",
+                            live.have(), live.total(), kept[0]);
+                    // A's world goes on changing while B is away, so some kept records are out of date; most are not.
+                    require(live.have() >= kept[0] / 2, "the download started over: only " + live.have() + " of the "
+                            + kept[0] + " kept records counted as present");
+                    require(live.have() < live.total(), "nothing was left to download");
+                    return true;
+                })
                 .step("copy complete", 2 * PEER_TICKS, copyComplete(mc, state))
-                .action("the download continued", () -> {
-                    long applied = SyncClient.appliedRecords(state.world.worldId());
-                    int total = Manifest.load(folder(mc, state).resolve(CoopWorldStore.MARKER_DIR).resolve("manifest")
-                            .resolve("current.tsv")).size();
-                    DropIn.LOGGER.info("Self-test: {} of {} records fetched after the restart, {} were kept", applied, total, kept[0]);
-                    require(applied <= total - kept[0] / 2, "the download started over: " + applied + " of " + total
-                            + " records fetched again although " + kept[0] + " were kept");
-                });
+                .action("fetched after the restart", () -> DropIn.LOGGER.info("Self-test: {} record writes after the restart",
+                        SyncClient.appliedRecords(state.world.worldId())));
         return verifyRoot(runner, ctx, state)
                 .action("tell A", () -> ctx.writeShared("b-verified", "ok"));
     }

@@ -39,15 +39,17 @@ public final class ChunkStores {
 
     /** Called when the game creates a chunk storage worker. */
     public static void register(IOWorker worker, RegionStorageInfo info, Path dir) {
-        if (!RecordKey.KINDS.contains(info.type())) {
+        Path folder = dir.toAbsolutePath().normalize();
+        // The kind is the folder name: the storage type of region files is "chunk", not "region".
+        String kind = folder.getFileName() == null ? "" : folder.getFileName().toString();
+        if (!RecordKey.KINDS.contains(kind)) {
             return;
         }
-        Path folder = dir.toAbsolutePath().normalize();
         Path root = worldRoot(folder);
         if (root == null) {
             return;
         }
-        STORES.put(worker, new Store(worker, info.dimension().identifier().toString(), info.type(), folder, root));
+        STORES.put(worker, new Store(worker, info.dimension().identifier().toString(), kind, folder, root));
         if (CoopWorldStore.readMarker(root).isPresent()) {
             TRACKED.add(root);
         }
