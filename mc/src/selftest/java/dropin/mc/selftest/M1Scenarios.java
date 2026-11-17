@@ -110,6 +110,10 @@ final class M1Scenarios {
     static StepRunner base(Context ctx) {
         return new StepRunner()
                 .action("configure tunnel", () -> {
+                    // The m1, m2 and m2b scenarios were written for a plain quit: the host leaves and the members
+                    // are dropped. They keep proving that (owner's decision, 2026-11-17); the m3 scenarios turn
+                    // this development-only switch off again and cover the handoff.
+                    System.setProperty("dropin.dev.noHandoff", "true");
                     if (!ctx.online()) {
                         // DESIGN 4.12: self-tests run with the e4mc tunnel disabled. Not written to the config file.
                         Config.INSTANCE.hostEnabled.setOverride(false);

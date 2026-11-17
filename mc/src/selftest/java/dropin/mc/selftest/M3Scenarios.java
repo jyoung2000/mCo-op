@@ -58,6 +58,9 @@ final class M3Scenarios {
     private static final Mark MARK_B = new Mark("DevB", Items.EMERALD, "minecraft:emerald", -100, 60);
     private static final Mark MARK_C = new Mark("DevC", Items.GOLD_INGOT, "minecraft:gold_ingot", 60, -100);
 
+    /** The older scenarios run with the handoff switched off (see {@code M1Scenarios.base}); these do not. */
+    private static final Map<String, String> HANDOFF_ON = Map.of("dropin.dev.noHandoff", "false");
+
     private M3Scenarios() {
     }
 
@@ -106,7 +109,7 @@ final class M3Scenarios {
     private static StepRunner handoffA(Context ctx) {
         Minecraft mc = ctx.mc();
         State state = new State();
-        StepRunner runner = hostA(ctx, state, Map.of(), 0)
+        StepRunner runner = hostA(ctx, state, HANDOFF_ON, 0)
                 .step("B and C dropped in", 2 * PEER_TICKS, () -> players(mc) == 3)
                 .step("B and C have full copies and their marks", 2 * PEER_TICKS,
                         () -> ctx.sharedExists("b-marked") && ctx.sharedExists("c-marked"));
@@ -148,7 +151,7 @@ final class M3Scenarios {
     private static StepRunner handoffB(Context ctx) {
         Minecraft mc = ctx.mc();
         State state = new State();
-        StepRunner runner = joinB(ctx, state, Map.of())
+        StepRunner runner = joinB(ctx, state, HANDOFF_ON)
                 .step("copy complete", 2 * PEER_TICKS, copyComplete(mc, state));
         return mark(runner, mc, MARK_B)
                 .action("tell A", () -> {
@@ -179,7 +182,7 @@ final class M3Scenarios {
     private static StepRunner handoffC(Context ctx) {
         Minecraft mc = ctx.mc();
         State state = new State();
-        StepRunner runner = joinB(ctx, state, Map.of())
+        StepRunner runner = joinB(ctx, state, HANDOFF_ON)
                 .step("copy complete", 2 * PEER_TICKS, copyComplete(mc, state));
         return mark(runner, mc, MARK_C)
                 .action("tell A", () -> ctx.writeShared("c-marked", "ok"))
@@ -204,7 +207,7 @@ final class M3Scenarios {
         Minecraft mc = ctx.mc();
         State state = new State();
         // A few hundred records, each held back a quarter of a second: B stays mid-download for minutes.
-        return hostA(ctx, state, Map.of("dropin.dev.syncDelayMs", "250"), 450)
+        return hostA(ctx, state, Map.of("dropin.dev.syncDelayMs", "250", "dropin.dev.noHandoff", "false"), 450)
                 .step("B is mid-download", STARTUP_TICKS + 2 * PEER_TICKS, () -> ctx.sharedExists("b-partial"))
                 .action("A quits", () -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE))
                 // A checkpoint, then DESIGN 4.9's wait of up to 30 s for B, which cannot finish in time.
@@ -242,7 +245,7 @@ final class M3Scenarios {
         int[] ticks = {0};
         int[] stayed = {0};
         long[] applied = {0};
-        return joinB(ctx, state, Map.of())
+        return joinB(ctx, state, HANDOFF_ON)
                 .step("mid-download, part of it on disk", PEER_TICKS, () -> {
                     failIfDisconnected(mc);
                     if (ticks[0]++ % 5 != 0) {
