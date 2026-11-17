@@ -1,0 +1,127 @@
+package dropin.mc.host;
+
+import dropin.core.manifest.RecordKey;
+import dropin.core.world.CoopWorldStore;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.chunk.storage.IOWorker;
+import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
+
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * The game's chunk storage objects of the worlds that are open, and the dirty set of DESIGN 4.5: every
+ * chunk, entity and POI write of a co-op world passes {@code IOWorker.store}, where its key is recorded.
+ * World data is only ever read back through these objects, never from the region files.
+ */
+public final class ChunkStores {
+    /**
+     * @param dim       dimension id, for example {@code minecraft:overworld}
+     * @param kind      region, entities or poi
+     * @param dir       the folder of the region files
+     * @param worldRoot the world folder, derived from {@code dir}
+     */
+    public record Store(IOWorker worker, String dim, String kind, Path dir, Path worldRoot) {
+    }
+
+    private static final Map<IOWorker, Store> STORES = new ConcurrentHashMap<>();
+    private static final Set<Path> TRACKED = ConcurrentHashMap.newKeySet();
+    private static final Map<Path, Set<String>> DIRTY = new ConcurrentHashMap<>();
+
+    private ChunkStores() {
+    }
+
+    /** Called when the game creates a chunk storage worker. */
+    public static void register(IOWorker worker, RegionStorageInfo info, Path dir) {
+        if (!RecordKey.KINDS.contains(info.type())) {
+            return;
+        }
+        Path folder = dir.toAbsolutePath().normalize();
+        Path root = worldRoot(folder);
+        if (root == null) {
+            return;
+        }
+        STORES.put(worker, new Store(worker, info.dimension().identifier().toString(), info.type(), folder, root));
+        if (CoopWorldStore.readMarker(root).isPresent()) {
+            TRACKED.add(root);
+        }
+    }
+
+    public static void unregister(IOWorker worker) {
+        STORES.remove(worker);
+    }
+
+    /** Called after the game handed a chunk to a storage worker. */
+    public static void stored(IOWorker worker, ChunkPos pos) {
+        Store store = STORES.get(worker);
+        if (store != null && TRACKED.contains(store.worldRoot())) {
+            DIRTY.computeIfAbsent(store.worldRoot(), root -> ConcurrentHashMap.newKeySet())
+                    .add(RecordKey.chunk(store.dim(), store.kind(), pos.x(), pos.z()));
+        }
+    }
+
+    /** {@code <world>/dimensions/<namespace>/<path...>/<kind>}: the world folder, or null. */
+    private static Path worldRoot(Path dir) {
+        for (int i = dir.getNameCount() - 4; i >= 1; i--) {
+            if (dir.getName(i).toString().equals("dimensions")) {
+                return dir.getRoot() == null ? dir.subpath(0, i) : dir.getRoot().resolve(dir.subpath(0, i));
+            }
+        }
+        return null;
+    }
+
+    /** Starts recording writes of this world (a world made co-op while it is open). */
+    public static void track(Path worldRoot) {
+        TRACKED.add(worldRoot);
+    }
+
+    public static void untrack(Path worldRoot) {
+        TRACKED.remove(worldRoot);
+        DIRTY.remove(worldRoot);
+    }
+
+    /** Takes the keys written since the last call. */
+    public static Set<String> drain(Path worldRoot) {
+        Set<String> taken = new HashSet<>();
+        Set<String> dirty = DIRTY.get(worldRoot);
+        if (dirty != null) {
+            for (String key : dirty) {
+                if (dirty.remove(key)) {
+                    taken.add(key);
+                }
+            }
+        }
+        return taken;
+    }
+
+    public static void markDirty(Path worldRoot, Collection<String> keys) {
+        if (!keys.isEmpty()) {
+            DIRTY.computeIfAbsent(worldRoot, root -> ConcurrentHashMap.newKeySet()).addAll(keys);
+        }
+    }
+
+    public static List<Store> of(Path worldRoot) {
+        List<Store> stores = new ArrayList<>();
+        for (Store store : STORES.values()) {
+            if (store.worldRoot().equals(worldRoot)) {
+                stores.add(store);
+            }
+        }
+        return stores;
+    }
+
+    public static Store find(Path worldRoot, String dim, String kind) {
+        for (Store store : STORES.values()) {
+            if (store.worldRoot().equals(worldRoot) && store.dim().equals(dim) && store.kind().equals(kind)) {
+                return store;
+            }
+        }
+        return null;
+    }
+}

@@ -5,7 +5,10 @@ import dropin.core.pkarr.Rendezvous;
 import dropin.core.pkarr.RendezvousRecord;
 import dropin.core.world.CoopWorld;
 import dropin.mc.DropIn;
+import dropin.mc.member.SyncClient;
+import dropin.mc.menu.CoopStatus;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.AlertScreen;
 import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.GenericMessageScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
@@ -55,6 +58,22 @@ public final class CoopLauncher {
         String uuid = mc.getUser().getProfileId().toString();
         String name = mc.getUser().getName();
         Rendezvous rendezvous = CoopWorlds.rendezvous(world);
+        java.nio.file.Path folder = mc.getLevelSource().getLevelPath(levelId);
+        if (SyncClient.incomplete(folder)) {
+            // DESIGN 4.7: an unfinished download is not a world yet. It can only be continued from a live host.
+            CoopStatus.Status status = CoopStatus.lookup(world);
+            if (status.kind() == CoopStatus.Kind.PLAYING) {
+                DropIn.LOGGER.info("Co-op world '{}': continuing the download from {}", world.name(), status.hostName());
+                remember(world, status.hostUuid(), status.hostName());
+                join(mc, world, status.address());
+            } else {
+                int percent = SyncClient.savedState(folder).percent();
+                DropIn.LOGGER.info("Co-op world '{}': nobody is online and the copy is {}% downloaded", world.name(), percent);
+                mc.execute(() -> mc.gui.setScreen(new AlertScreen(onCancel, Component.translatable("menu.dropin_coop.title"),
+                        Component.translatable("text.dropin_coop.sync.incomplete_nobody", percent))));
+            }
+            return;
+        }
         Env env = new Env();
         HostClaim.Result result;
         try {
@@ -72,12 +91,13 @@ public final class CoopLauncher {
             DropIn.LOGGER.info("Co-op world '{}': {} is hosting, joining {}", world.name(), join.host().name(), address);
             remember(world, join.host().host(), join.host().name());
             remember(world, uuid, name);
-            mc.execute(() -> ConnectScreen.startConnecting(new TitleScreen(), mc, ServerAddress.parseString(address),
-                    new ServerData(world.name(), address, ServerData.Type.OTHER), false, null));
+            join(mc, world, address);
         } else if (result instanceof HostClaim.Host host) {
             DropIn.LOGGER.info("Co-op world '{}': nobody is hosting, opening the local copy (announced={})",
                     world.name(), host.announced());
             remember(world, uuid, name);
+            // The copy is about to be opened by the game: a sync from an earlier session must have let go of it.
+            SyncClient.stopAndWait(world.worldId(), 15_000);
             mc.execute(() -> {
                 HostSession.start(mc, world, rendezvous, host.sess(), uuid, name);
                 passThrough = true;
@@ -88,6 +108,15 @@ public final class CoopLauncher {
                 }
             });
         }
+    }
+
+    /** Connects to a live host and keeps the local copy in step with it meanwhile (DESIGN 4.4, 4.7). */
+    public static void join(Minecraft mc, CoopWorld world, String address) {
+        mc.execute(() -> {
+            ConnectScreen.startConnecting(new TitleScreen(), mc, ServerAddress.parseString(address),
+                    new ServerData(world.name(), address, ServerData.Type.OTHER), false, null);
+            SyncClient.start(mc, world, address);
+        });
     }
 
     public static void remember(CoopWorld world, String uuid, String name) {

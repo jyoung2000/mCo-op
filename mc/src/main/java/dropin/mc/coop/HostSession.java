@@ -96,6 +96,7 @@ public final class HostSession implements Runnable {
             if (server == null) {
                 return;
             }
+            dropin.mc.host.HostSync.start(server, world, base.host(), base.name(), base.sess());
             String lan = openToLan(server);
             if (DropIn.switches().flag("dropin.dev.online")) {
                 // Development only: the online smoke test must go through the relay, not the LAN shortcut.

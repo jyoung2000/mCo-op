@@ -24,6 +24,7 @@ public abstract class ServerConnectionListenerMixin {
 
     @ModifyArg(method = "startTcpServerListener", at = @At(value = "INVOKE", target = "Lio/netty/bootstrap/ServerBootstrap;childHandler(Lio/netty/channel/ChannelHandler;)Lio/netty/bootstrap/ServerBootstrap;", remap = false))
     private ChannelHandler interceptHandler(ChannelHandler childHandler) {
+        childHandler = E4mcClient.wrapChildHandler(childHandler); // DropIn hook, DESIGN section 3 row 6
         e4mc$childHandler = childHandler;
         return childHandler;
     }

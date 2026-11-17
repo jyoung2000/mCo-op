@@ -1,0 +1,578 @@
+package dropin.mc.host;
+
+import dropin.core.crypto.WorldKeys;
+import dropin.core.ledger.Deltas;
+import dropin.core.ledger.Ledger;
+import dropin.core.ledger.LedgerEntry;
+import dropin.core.manifest.Manifest;
+import dropin.core.manifest.RecordKey;
+import dropin.core.sync.SyncServerSession;
+import dropin.core.sync.SyncState;
+import dropin.core.world.CoopWorld;
+import dropin.core.world.CoopWorldStore;
+import dropin.mc.DropIn;
+import dropin.mc.coop.CoopWorlds;
+import dropin.mc.net.PathPolicy;
+import dropin.mc.net.SyncPipe;
+import io.netty.channel.Channel;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.storage.LevelResource;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.security.SecureRandom;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
+
+/**
+ * The sync half of a host session (DESIGN 4.5 to 4.7): checkpoints the hosted world every interval and
+ * when the host quits, keeps its manifest and ledger, and serves diffs and records to the members'
+ * sync connections. Everything is read through the game's storage objects or, for the non-chunk
+ * files, from the world folder after a save.
+ */
+public final class HostSync implements SyncServerSession.Host {
+    private static final SecureRandom RANDOM = new SecureRandom();
+    private static final Pattern REGION_FILE = Pattern.compile("r\\.(-?\\d+)\\.(-?\\d+)\\.mca");
+    private static final long SAVE_TIMEOUT_MS = 120_000;
+    private static final long READ_TIMEOUT_S = 60;
+    /** How long a quitting host waits for the members to take its last checkpoint. */
+    private static final long QUIT_WAIT_MS = 10_000;
+
+    private static volatile HostSync current;
+
+    private record Peer(SyncServerSession session, SyncPipe pipe) {
+    }
+
+    private final MinecraftServer server;
+    private final CoopWorld world;
+    private final WorldKeys keys;
+    private final Path root;
+    private final Path dropin;
+    private final String hostUuid;
+    private final String hostName;
+    private final String sess;
+    private final Ledger ledger;
+    private final Manifest manifest;
+    private final Map<String, long[]> fileStamps = new HashMap<>();
+    private final List<Peer> peers = new CopyOnWriteArrayList<>();
+    private final Object lock = new Object();
+    private final ReentrantLock checkpointLock = new ReentrantLock();
+    private final AtomicLong closedRecordFrames = new AtomicLong();
+    private final long intervalMs;
+    private final long devDelayMs;
+    private volatile boolean needFullScan;
+    private volatile boolean stopping;
+    private volatile boolean finished;
+
+    private HostSync(MinecraftServer server, CoopWorld world, Path root, Ledger ledger, Manifest manifest,
+                     String hostUuid, String hostName, String sess) {
+        this.server = server;
+        this.world = world;
+        this.keys = world.keys();
+        this.root = root;
+        this.dropin = root.resolve(CoopWorldStore.MARKER_DIR);
+        this.ledger = ledger;
+        this.manifest = manifest;
+        this.hostUuid = hostUuid;
+        this.hostName = hostName;
+        this.sess = sess;
+        this.needFullScan = ledger.size() == 0 || manifest.isEmpty() || !manifest.root().equals(ledger.last().root());
+        long seconds = DropIn.switches().read("dropin.dev.checkpointSeconds").map(Long::parseLong)
+                .orElseGet(() -> (long) CoopWorlds.configInt("checkpointSeconds", 60));
+        this.intervalMs = Math.max(5, seconds) * 1000;
+        this.devDelayMs = DropIn.switches().read("dropin.dev.syncDelayMs").map(Long::parseLong).orElse(0L);
+    }
+
+    /** The sync state of the co-op world this game hosts, or null. */
+    public static HostSync current() {
+        return current;
+    }
+
+    /** Called once the hosted world is up, before it is opened to LAN. */
+    public static void start(MinecraftServer server, CoopWorld world, String hostUuid, String hostName, String sess) {
+        Path root = server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize();
+        Path dropin = root.resolve(CoopWorldStore.MARKER_DIR);
+        ChunkStores.track(root);
+        try {
+            Ledger ledger = Ledger.load(world.keys().auth(), dropin.resolve("ledger.jsonl"));
+            Manifest manifest = Manifest.load(dropin.resolve("manifest").resolve("current.tsv"));
+            Path leftover = dropin.resolve("dirty.txt");
+            if (Files.isRegularFile(leftover)) {
+                // Chunks the last session wrote after its final checkpoint.
+                ChunkStores.markDirty(root, Files.readAllLines(leftover, StandardCharsets.UTF_8));
+                Files.delete(leftover);
+            }
+            HostSync sync = new HostSync(server, world, root, ledger, manifest, hostUuid, hostName, sess);
+            current = sync;
+            Thread thread = new Thread(sync::run, "dropin-coop-sync");
+            thread.setDaemon(true);
+            thread.start();
+        } catch (IOException | RuntimeException e) {
+            DropIn.LOGGER.error("World sync of '{}' could not start; friends can play but will not get a copy", world.name(), e);
+        }
+    }
+
+    private void run() {
+        long next = 0;
+        while (!stopping && server.isRunning()) {
+            try {
+                long now = System.currentTimeMillis();
+                if (now >= next) {
+                    checkpoint(true);
+                    next = System.currentTimeMillis() + intervalMs;
+                }
+                for (Peer peer : peers) {
+                    peer.session().refresh();
+                }
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            } catch (Exception e) {
+                DropIn.LOGGER.error("Checkpoint of '{}' failed", world.name(), e);
+                next = System.currentTimeMillis() + intervalMs;
+            }
+        }
+    }
+
+    // ---- checkpoints --------------------------------------------------------------------------
+
+    /**
+     * Takes a checkpoint now (DESIGN 4.5): saves, re-hashes what was written since the last one, and if
+     * anything changed appends a ledger entry and pushes it to the members.
+     *
+     * @return the new entry, or null if nothing changed
+     */
+    public LedgerEntry checkpoint(boolean save) throws IOException, InterruptedException {
+        if (save && !server.isSameThread()) {
+            CompletableFuture<Void> saved = server.submit(() -> {
+                server.saveEverything(true, false, false);
+            });
+            long deadline = System.currentTimeMillis() + SAVE_TIMEOUT_MS;
+            while (!saved.isDone()) {
+                if (stopping || System.currentTimeMillis() > deadline) {
+                    return null;
+                }
+                Thread.sleep(50);
+            }
+        }
+        checkpointLock.lock();
+        try {
+            if (finished) {
+                return null;
+            }
+            boolean full = needFullScan;
+            long started = System.currentTimeMillis();
+            Map<String, String> changed = new LinkedHashMap<>();
+            Set<String> chunkKeys = ChunkStores.drain(root);
+            if (full) {
+                chunkKeys.addAll(allChunkKeys());
+                for (String key : manifest.keys()) {
+                    if (RecordKey.isChunk(key)) {
+                        chunkKeys.add(key);
+                    }
+                }
+            }
+            List<String> failed = new ArrayList<>();
+            for (String key : chunkKeys) {
+                try {
+                    byte[] bytes = readChunk(key);
+                    String hash = bytes == null ? "" : Manifest.hash(bytes);
+                    String old = manifest.get(key);
+                    if (hash.isEmpty() ? old != null : !hash.equals(old)) {
+                        changed.put(key, hash);
+                    }
+                } catch (IOException | RuntimeException e) {
+                    failed.add(key);
+                }
+            }
+            ChunkStores.markDirty(root, failed);
+            scanFiles(changed);
+            if (changed.isEmpty() && ledger.size() > 0) {
+                needFullScan = false;
+                return null;
+            }
+            LedgerEntry entry;
+            synchronized (lock) {
+                changed.forEach((key, hash) -> {
+                    if (hash.isEmpty()) {
+                        manifest.remove(key);
+                    } else {
+                        manifest.put(key, hash);
+                    }
+                });
+                entry = LedgerEntry.create(keys.auth(), ledger.headSeq() + 1, ledger.head(), hostUuid, hostName, sess,
+                        System.currentTimeMillis() / 1000, manifest.root(), changed.size());
+                Deltas.write(dropin.resolve("deltas"), entry.seq(), changed);
+                ledger.append(entry);
+                manifest.save(dropin.resolve("manifest").resolve("current.tsv"));
+                int size = manifest.size();
+                new SyncState(entry.hash(), entry.seq(), true, size, size).save(dropin.resolve("state.json"));
+                for (Peer peer : peers) {
+                    peer.session().checkpoint(entry, changed);
+                }
+            }
+            needFullScan = false;
+            DropIn.LOGGER.info("Checkpoint {} of '{}': {} records changed{}, root {}, {} ms", entry.seq(), world.name(),
+                    changed.size(), full ? " (full scan)" : "", entry.root(), System.currentTimeMillis() - started);
+            return entry;
+        } finally {
+            checkpointLock.unlock();
+        }
+    }
+
+    /** Every chunk position of every region file of the world, by file name only: the files are not opened. */
+    private Set<String> allChunkKeys() throws IOException {
+        Set<String> all = new HashSet<>();
+        for (ChunkStores.Store store : ChunkStores.of(root)) {
+            if (!Files.isDirectory(store.dir())) {
+                continue;
+            }
+            try (Stream<Path> files = Files.list(store.dir())) {
+                for (Path file : files.toList()) {
+                    Matcher matcher = REGION_FILE.matcher(file.getFileName().toString());
+                    if (matcher.matches()) {
+                        int rx = Integer.parseInt(matcher.group(1));
+                        int rz = Integer.parseInt(matcher.group(2));
+                        for (int index = 0; index < 1024; index++) {
+                            all.add(RecordKey.chunk(store.dim(), store.kind(), rx * 32 + (index & 31), rz * 32 + (index >> 5)));
+                        }
+                    }
+                }
+            }
+        }
+        return all;
+    }
+
+    /** The chunk as the game's storage worker has it (a pending write, else what is on disk), or null. */
+    private byte[] readChunk(String key) throws IOException {
+        RecordKey.Chunk chunk = RecordKey.parseChunk(key);
+        ChunkStores.Store store = ChunkStores.find(root, chunk.dim(), chunk.kind());
+        if (store == null) {
+            return null;
+        }
+        try {
+            Optional<CompoundTag> tag = store.worker().loadAsync(new ChunkPos(chunk.cx(), chunk.cz()))
+                    .get(READ_TIMEOUT_S, TimeUnit.SECONDS);
+            return tag.map(ChunkBytes::canonical).orElse(null);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted reading " + key);
+        } catch (Exception e) {
+            throw new IOException("Could not read " + key, e);
+        }
+    }
+
+    /** Re-hashes the file records whose size or modification time changed, and notes the ones that are gone. */
+    private void scanFiles(Map<String, String> changed) throws IOException {
+        Set<String> seen = new HashSet<>();
+        Files.walkFileTree(root, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                String relative = root.relativize(dir).toString().replace('\\', '/');
+                boolean regionFolder = relative.startsWith("dimensions/") && RecordKey.KINDS.contains(dir.getFileName().toString());
+                return relative.equals(CoopWorldStore.MARKER_DIR) || regionFolder
+                        ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                String relative = root.relativize(file).toString().replace('\\', '/');
+                if (!RecordKey.fileAllowed(relative)) {
+                    return FileVisitResult.CONTINUE;
+                }
+                String key = RecordKey.file(relative);
+                seen.add(key);
+                long[] stamp = {attrs.size(), attrs.lastModifiedTime().toMillis()};
+                long[] old = fileStamps.get(key);
+                String known = manifest.get(key);
+                if (old != null && old[0] == stamp[0] && old[1] == stamp[1] && known != null) {
+                    return FileVisitResult.CONTINUE;
+                }
+                try {
+                    String hash = Manifest.hash(Files.readAllBytes(file));
+                    fileStamps.put(key, stamp);
+                    if (!hash.equals(known)) {
+                        changed.put(key, hash);
+                    }
+                } catch (IOException e) {
+                    // Being written right now: the next checkpoint takes it.
+                    fileStamps.remove(key);
+                }
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFileFailed(Path file, IOException e) {
+                return FileVisitResult.CONTINUE;
+            }
+        });
+        for (String key : manifest.keys()) {
+            if (RecordKey.isFile(key) && !seen.contains(key)) {
+                changed.put(key, "");
+                fileStamps.remove(key);
+            }
+        }
+    }
+
+    // ---- quitting -----------------------------------------------------------------------------
+
+    /** Head of {@code MinecraftServer.stopServer}, on the server thread. */
+    public static void serverStopping(MinecraftServer server) {
+        HostSync sync = current;
+        if (sync == null || sync.server != server) {
+            return;
+        }
+        sync.stopping = true;
+        try {
+            if (server.getPlayerList() != null) {
+                server.saveEverything(true, true, false);
+            }
+            sync.checkpoint(false);
+            sync.awaitPeers(sync.ledger.headSeq());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            DropIn.LOGGER.error("Final checkpoint of '{}' failed", sync.world.name(), e);
+        }
+        sync.finished = true;
+    }
+
+    /** Waits, for a short while, until every member that may receive bulk data has the checkpoint. */
+    private void awaitPeers(long seq) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + QUIT_WAIT_MS;
+        while (System.currentTimeMillis() < deadline) {
+            boolean waiting = false;
+            for (Peer peer : peers) {
+                if (peer.session().ready() && bulkAllowed(peer.session()) && peer.session().syncedSeq() < seq) {
+                    waiting = true;
+                }
+            }
+            if (!waiting) {
+                return;
+            }
+            Thread.sleep(50);
+        }
+        DropIn.LOGGER.warn("Not every member took the final checkpoint {} of '{}' in time", seq, world.name());
+    }
+
+    /** Tail of {@code MinecraftServer.stopServer}: the storage workers are closed. */
+    public static void serverStopped(MinecraftServer server) {
+        HostSync sync = current;
+        if (sync == null || sync.server != server) {
+            return;
+        }
+        sync.stopping = true;
+        sync.finished = true;
+        current = null;
+        try {
+            // Whatever the shutdown itself wrote is hashed by the next host session's first checkpoint.
+            Set<String> leftover = ChunkStores.drain(sync.root);
+            if (!leftover.isEmpty()) {
+                Files.write(sync.dropin.resolve("dirty.txt"), leftover, StandardCharsets.UTF_8);
+            }
+        } catch (IOException | RuntimeException e) {
+            DropIn.LOGGER.error("Could not save the list of unsynced chunks of '{}'", sync.world.name(), e);
+            sync.needFullScan = true;
+        }
+        ChunkStores.untrack(sync.root);
+        for (Peer peer : sync.peers) {
+            peer.session().close();
+        }
+    }
+
+    // ---- connections --------------------------------------------------------------------------
+
+    /** A connection that sent the sync magic. Returns its pipeline handler, or null if nothing is hosted. */
+    public static SyncPipe accept(Channel channel) {
+        HostSync sync = current;
+        if (sync == null || sync.finished) {
+            return null;
+        }
+        SyncPipe pipe = new SyncPipe("dropin-sync-serve");
+        SyncServerSession session = new SyncServerSession(sync, pipe, RANDOM);
+        Peer peer = new Peer(session, pipe);
+        pipe.endpoint(new SyncPipe.Endpoint() {
+            @Override
+            public void onFrame(byte[] frame) {
+                session.onFrame(frame);
+            }
+
+            @Override
+            public void onClosed() {
+                session.onClosed();
+                if (sync.peers.remove(peer)) {
+                    sync.closedRecordFrames.addAndGet(session.recordFrames());
+                }
+            }
+        });
+        sync.peers.add(peer);
+        return pipe;
+    }
+
+    private Peer peer(SyncServerSession session) {
+        for (Peer peer : peers) {
+            if (peer.session() == session) {
+                return peer;
+            }
+        }
+        return null;
+    }
+
+    // ---- what the self-tests and the menu read --------------------------------------------------
+
+    public CoopWorld world() {
+        return world;
+    }
+
+    public String rootHash() {
+        return manifest.root();
+    }
+
+    public long seq() {
+        return ledger.headSeq();
+    }
+
+    public int records() {
+        return manifest.size();
+    }
+
+    /** RECORD frames sent to members in this host session. */
+    public long recordFrames() {
+        long frames = closedRecordFrames.get();
+        for (Peer peer : peers) {
+            frames += peer.session().recordFrames();
+        }
+        return frames;
+    }
+
+    /** Sync connections that finished the handshake. */
+    public int readyPeers() {
+        int ready = 0;
+        for (Peer peer : peers) {
+            if (peer.session().ready()) {
+                ready++;
+            }
+        }
+        return ready;
+    }
+
+    /** The newest checkpoint every connected member has fully applied (0 with no member). */
+    public long syncedByAll() {
+        long seq = Long.MAX_VALUE;
+        for (Peer peer : peers) {
+            if (peer.session().ready()) {
+                seq = Math.min(seq, peer.session().syncedSeq());
+            }
+        }
+        return seq == Long.MAX_VALUE ? 0 : seq;
+    }
+
+    // ---- SyncServerSession.Host -----------------------------------------------------------------
+
+    @Override
+    public String worldId() {
+        return world.worldId();
+    }
+
+    @Override
+    public byte[] auth() {
+        return keys.auth();
+    }
+
+    @Override
+    public byte[] enc() {
+        return keys.enc();
+    }
+
+    @Override
+    public Object lock() {
+        return lock;
+    }
+
+    @Override
+    public LedgerEntry head() {
+        return ledger.last();
+    }
+
+    @Override
+    public List<LedgerEntry> ledgerAfter(long seq) {
+        return ledger.entriesAfter(seq);
+    }
+
+    @Override
+    public Map<String, String> top() {
+        return manifest.top();
+    }
+
+    @Override
+    public Map<String, String> chunks(String regionKey) {
+        return manifest.chunks(regionKey);
+    }
+
+    @Override
+    public byte[] read(String key) throws IOException {
+        if (RecordKey.isChunk(key)) {
+            return readChunk(key);
+        }
+        if (!RecordKey.isFile(key) || !RecordKey.fileAllowed(RecordKey.filePath(key))) {
+            return null;
+        }
+        Path file = root.resolve(RecordKey.filePath(key));
+        return Files.isRegularFile(file) ? Files.readAllBytes(file) : null;
+    }
+
+    @Override
+    public boolean bulkAllowed(SyncServerSession session) {
+        Peer peer = peer(session);
+        return peer != null && peer.pipe().channel() != null && PathPolicy.bulkAllowed(peer.pipe().channel());
+    }
+
+    @Override
+    public void throttle(SyncServerSession session, int bytes) throws InterruptedException {
+        Peer peer = peer(session);
+        if (peer == null) {
+            return;
+        }
+        if (devDelayMs > 0) {
+            // Development only: slows the download down so a self-test can interrupt it.
+            Thread.sleep(devDelayMs);
+        }
+        if (!PathPolicy.direct(peer.pipe().channel())) {
+            // Opted-in bulk sync over a relay is capped (DESIGN 4.6).
+            int rate = Math.max(1, CoopWorlds.configInt("relayRateKBps", 128));
+            Thread.sleep(bytes * 1000L / (rate * 1024L));
+        }
+        // Bulk transfer must not slow the game down: wait while the server is behind (below about 18 TPS).
+        for (int waited = 0; !stopping && waited < 5000 && server.getAverageTickTimeNanos() > 55_000_000L; waited += 100) {
+            Thread.sleep(100);
+        }
+        peer.pipe().awaitWritable(30_000);
+    }
+
+    @Override
+    public void peerSynced(SyncServerSession session, long seq) {
+        DropIn.LOGGER.info("A member's copy of '{}' is complete through checkpoint {}", world.name(), seq);
+    }
+}

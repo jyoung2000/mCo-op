@@ -88,6 +88,38 @@ public final class CoopWorlds {
         return true;
     }
 
+    /** A boolean of {@code config/dropin/coop.json}, e.g. {@code bulkSyncOverRelay}; the default when absent or unreadable. */
+    public static boolean configFlag(String name, boolean fallback) {
+        JsonElement value = configValue(name);
+        try {
+            return value == null ? fallback : value.getAsBoolean();
+        } catch (RuntimeException e) {
+            return fallback;
+        }
+    }
+
+    /** A number of {@code config/dropin/coop.json}, e.g. {@code checkpointSeconds}; the default when absent or unreadable. */
+    public static int configInt(String name, int fallback) {
+        JsonElement value = configValue(name);
+        try {
+            return value == null ? fallback : value.getAsInt();
+        } catch (RuntimeException e) {
+            return fallback;
+        }
+    }
+
+    private static JsonElement configValue(String name) {
+        Path file = CONFIG_DIR.resolve("coop.json");
+        if (Files.isRegularFile(file)) {
+            try {
+                return JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8)).getAsJsonObject().get(name);
+            } catch (IOException | RuntimeException e) {
+                return null;
+            }
+        }
+        return null;
+    }
+
     /** {@code config/dropin/coop.json}: {@code {"pkarrRelays": ["https://..."]}}. Defaults when absent or unreadable. */
     public static List<URI> relays() {
         Path file = CONFIG_DIR.resolve("coop.json");

@@ -23,6 +23,8 @@ public final class DropIn {
 
     public static void init() {
         E4mcClient.init();
+        // DESIGN 4.6: world sync shares the game's listener; the first bytes decide which protocol it is.
+        E4mcClient.childHandlerWrapper = dropin.mc.net.ProtocolSniffer::wrap;
         if (Agnos.isClient()) {
             SWITCHES.selfTest().ifPresent(DropIn::startSelfTest);
         }

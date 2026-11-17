@@ -67,7 +67,14 @@ public class CoopWorldsScreen extends Screen {
 
     public Component statusLine(CoopWorld world) {
         CoopStatus.Status status = CoopStatus.of(world.worldId());
-        boolean hasCopy = folders.containsKey(world.worldId());
+        String folder = folders.get(world.worldId());
+        boolean hasCopy = folder != null;
+        Component sync = dropin.mc.member.SyncClient.statusLine(world.worldId(),
+                hasCopy ? this.minecraft.getLevelSource().getLevelPath(folder) : null);
+        if (sync != null) {
+            return status.kind() == CoopStatus.Kind.PLAYING
+                    ? Component.translatable(K + "status.playing", status.hostName()).append(" — ").append(sync) : sync;
+        }
         return switch (status.kind()) {
             case LOOKING -> Component.translatable(K + "status.looking");
             case PLAYING -> Component.translatable(hasCopy ? K + "status.playing" : K + "status.playing_no_copy", status.hostName());
@@ -203,6 +210,7 @@ public class CoopWorldsScreen extends Screen {
                     CoopLauncher.remember(world, this.minecraft.getUser().getProfileId().toString(), this.minecraft.getUser().getName());
                     ConnectScreen.startConnecting(this, this.minecraft, ServerAddress.parseString(status.address()),
                             new ServerData(world.name(), status.address(), ServerData.Type.OTHER), false, null);
+                    dropin.mc.member.SyncClient.start(this.minecraft, world, status.address());
                 } else {
                     this.minecraft.gui.setScreen(new AlertScreen(() -> this.minecraft.gui.setScreen(this), TITLE,
                             Component.translatable(K + "first_join_needs_host")));

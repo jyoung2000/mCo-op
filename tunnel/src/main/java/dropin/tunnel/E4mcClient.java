@@ -25,6 +25,14 @@ public class E4mcClient {
         }
     }
 
+    /** DropIn hook (DESIGN section 3 row 6): wraps the handler every accepted connection is set up with. */
+    public static volatile java.util.function.UnaryOperator<io.netty.channel.ChannelHandler> childHandlerWrapper;
+
+    public static io.netty.channel.ChannelHandler wrapChildHandler(io.netty.channel.ChannelHandler handler) {
+        java.util.function.UnaryOperator<io.netty.channel.ChannelHandler> wrapper = childHandlerWrapper;
+        return wrapper == null ? handler : wrapper.apply(handler);
+    }
+
     public static void init() {
         Config.INSTANCE.id(); // Touch to initialize for McQoy
     }
