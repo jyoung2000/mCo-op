@@ -14,6 +14,34 @@ The owner ruled ("Yes, exempt them") that `io.netty.incubator.codec.quic` and `l
 the gate wording in `docs/MILESTONES.md` and `scripts/jarcheck.ps1` now say so. The owner still has the M0 manual checklist to do
 (real Fabric and NeoForge instances). **Next step: M1**, in a new session. The guesses listed below are still unconfirmed.
 
+## M1 — IN PROGRESS (started 2026-11-17, same session as the M0 checklist, at the owner's request)
+
+M0 manual checklist: items 1 and 2 done by the agent in real Prism instances (`DropIn-M0-Fabric`, `DropIn-M0-NeoForge`, both
+added to the owner's Prism Launcher); item 3 (a real join in both directions) is still open, it needs two accounts.
+
+Done and committed:
+
+- **Work item 1** `core/crypto`, `core/invite` (`bbea437`): 14 tests, RFC 5869 and RFC 8032 vectors pass.
+- **Work item 2** `core/pkarr`: `DnsPacket`, `SignedPacket`, `HttpPkarrClient`, `RendezvousRecord`, `PkarrRendezvous`,
+  `FileRendezvous`, `HostClaim`; 21 unit tests against a fake relay, plus the opt-in `RealRelayOnlineTest`
+  (`-Pdropin.online=true`), which passed against the real relays on 2026-11-17.
+
+Decisions made in M1 so far (not spelled out in the design; tell the owner):
+
+- Invite base32 is RFC 4648, upper case, no padding, 77 characters in groups of five; decoding ignores case, dashes, spaces.
+- HKDF uses an empty salt; the AEAD for the rendezvous payload uses the world id as associated data and a random 12-byte nonce.
+- Wire format taken from https://pubky.github.io/pkarr/design/relays.html: `sig(64) ‖ timestamp(8, BE, µs) ‖ DNS`, signature over
+  `3:seqi<ts>e1:v<len>:<dns>`. **That page does not document `If-Match`**, which DESIGN §4.3 mentions for the claim; it is not sent.
+  A relay's 409 for an older timestamp is surfaced as `StaleRecordException`.
+- Live public relays found: `relay.pkarr.org`, `pkarr.pubky.org`, `pkarr.pubky.app` (default list in `HttpPkarrClient`; the config
+  entry for it is still to be added in the `mc` module).
+- `HostClaim` makes one reading of §4.3 explicit: someone else's fresh `starting` claim (≤ 60 s old) is waited for (≤ 45 s) instead
+  of hosting next to it; and if our own claim took > 1.5 s to publish, the claim starts over.
+- `core` compiles against Gson (`compileOnly`, 2.11.0); Minecraft ships Gson, so nothing is bundled.
+
+Not started: work items 3–8 (everything in `mc/`: menu, import, launch flow, `singleplayer_uuid`, owner key file, Players tab),
+the §8 source confirmations for them (items 1, 2, 3, 9, 10, 11, 12, 15, 18), the `m1` self-test scenarios and the gate.
+
 ### Design change after M0 (2026-11-17, docs only, no code)
 
 The owner asked for: world owner as admin of mods and datapacks, automatic mod download for members, a mod list and a player list

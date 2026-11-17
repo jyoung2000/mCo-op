@@ -12,6 +12,9 @@ repositories {
 }
 
 dependencies {
+    // Gson ships with Minecraft, so the mod does not bundle it; core only compiles against it.
+    compileOnly 'com.google.code.gson:gson:2.11.0'
+    testImplementation 'com.google.code.gson:gson:2.11.0'
     testImplementation platform('org.junit:junit-bom:5.11.4')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -19,6 +22,8 @@ dependencies {
 
 tasks.named('test', Test) {
     useJUnitPlatform()
+    // Opt-in tests that talk to public pkarr relays: ./gradlew :core:test -Pdropin.online=true
+    systemProperty 'dropin.online', providers.gradleProperty('dropin.online').getOrElse('false')
 }
 
 // The loader modules compile these sources into the mod (see build-logic/multiloader-loader.gradle).
