@@ -14,6 +14,15 @@ The owner ruled ("Yes, exempt them") that `io.netty.incubator.codec.quic` and `l
 the gate wording in `docs/MILESTONES.md` and `scripts/jarcheck.ps1` now say so. The owner still has the M0 manual checklist to do
 (real Fabric and NeoForge instances). **Next step: M1**, in a new session. The guesses listed below are still unconfirmed.
 
+### Design change after M0 (2026-11-17, docs only, no code)
+
+The owner asked for: world owner as admin of mods and datapacks, automatic mod download for members, a mod list and a player list
+with skins per world. Ruling on mod sync: **"Own sync, MIT"** (no AutoModpack code; it is LGPL-3.0). Written into DESIGN §1, §2
+(limits 5–7 new; the old limit 5 is now 8), §4.1 (invite carries the owner-key fingerprint), §4.2, §4.4, new §4.13–4.15, §6, §7,
+§8 items 16–20. MILESTONES: M1 gained work items 7–8 and gates `owner-invite`, `players-tab`; new milestone **M2b** after M2.
+These sections are my proposal and the owner has not reviewed them line by line yet. Unproven and flagged in the text: the
+swap-helper mechanism (M2b step 1 is a spike). **Next step is still M1.**
+
 ### History: state before the ruling
 
 State at `b5c639a` (2026-11-16), details in `docs/VERIFICATION.md`:
