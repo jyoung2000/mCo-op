@@ -237,7 +237,7 @@ final class M1Scenarios {
         return mc.gui.screen() instanceof TitleScreen screen ? buttonContaining(screen, CoopWorldsScreen.TITLE.getString()) : null;
     }
 
-    private static Button buttonContaining(Screen screen, String text) {
+    static Button buttonContaining(Screen screen, String text) {
         for (GuiEventListener child : screen.children()) {
             if (child instanceof Button button && button.getMessage().getString().contains(text)) {
                 return button;
@@ -656,7 +656,7 @@ final class M1Scenarios {
         return Agnos.configDir().resolve("dropin").resolve("worlds");
     }
 
-    private static Invite randomInvite() {
+    static Invite randomInvite() {
         SecureRandom random = new SecureRandom();
         byte[] seed = new byte[32];
         byte[] fingerprint = new byte[16];

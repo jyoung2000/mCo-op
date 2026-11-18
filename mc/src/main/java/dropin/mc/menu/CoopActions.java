@@ -275,10 +275,40 @@ public final class CoopActions {
 
     // ---- invite, remove, owner key -----------------------------------------------------------
 
+    /** The world an invite code names, not saved anywhere, or null if the text is not an invite. For the join preview. */
+    public static CoopWorld previewInvite(String text) {
+        try {
+            Invite invite = Invite.decode(text.trim());
+            java.util.HexFormat hex = java.util.HexFormat.of();
+            String worldId = dropin.core.crypto.WorldKeys.fromSeed(invite.seed()).worldId();
+            return new CoopWorld(worldId, hex.formatHex(invite.seed()), worldId.substring(0, 6),
+                    hex.formatHex(invite.ownerFingerprint()), "", List.of());
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Export world (the owner's wrench menu): the closed world as a zip in its backups folder, without the
+     * co-op folder, so it opens anywhere as an ordinary world and can be imported again. Not the client thread.
+     */
+    public static Path exportWorld(Minecraft mc, CoopWorld world, Path folder) throws IOException {
+        if (mc.getSingleplayerServer() != null) {
+            throw new IOException("a world is open");
+        }
+        String name = world.name().replaceAll("[^A-Za-z0-9 _.-]", "_").trim();
+        String stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"));
+        Path zip = dropin.mc.savepoint.SavePointActions.backupsDir(folder)
+                .resolve((name.isEmpty() ? "world" : name) + "-world-" + stamp + ".zip");
+        int files = dropin.core.world.WorldArchive.exportZip(folder, zip);
+        DropIn.LOGGER.info("Exported co-op world '{}' to {}: {} files", world.name(), zip, files);
+        return zip;
+    }
+
     public static Outcome joinWithInvite(Minecraft mc, String text) {
         Invite invite;
         try {
-            invite = Invite.decode(text);
+            invite = Invite.decode(text.trim());
         } catch (RuntimeException e) {
             return Outcome.fail("invite.bad");
         }

@@ -142,9 +142,11 @@ Verify the wire format against the pkarr spec and at least one known-good vector
 
 | Top button | Action |
 |--------|--------|
-| Join | Paste an invite code. The world is added to the list. |
-| Create | Vanilla Create World screen; the new world is registered as co-op before its first load. |
-| Import | Import flow below. |
+| Create | The game's own Create World screen, so every option, data pack and mod of the player applies; the new world is registered as co-op before its first load. |
+| Join | Paste an invite code. Before joining, the screen shows who is hosting the world and the players the host names in its status answer (head and name; the game sends at most 12), or that nobody is online. Nothing is saved until **Join**: it adds the world to the list and, if someone is hosting, connects. |
+| Import | Import flow below: a picker of this PC's ordinary worlds; a world zip or folder can also be dropped on the screen. |
+
+The order is Create, Join, Import (decided by the owner 2026-11-17).
 
 The list has every world that has `dropin/world.json`, sorted: worlds this player **owns** first, then worlds where this player is an **admin** (§4.13), then the rest; by name within each group. A row looks like a row of the game's world list:
 
@@ -171,6 +173,7 @@ While this PC hosts the world, the info screen also shows the tunnel's address (
 | Open backups folder | Opens `saves/<folder>/dropin/backups/`, where exported save points are written and found for import. |
 | Open mods folder | Opens the game's `mods/` folder (the mod list of §4.14 is made from it). |
 | Open datapacks folder | Opens `saves/<folder>/datapacks/`. |
+| Export world | Writes the whole world, while it is closed, as `<name>-world-<date>_<time>.zip` into the backups folder. The zip has one top folder and leaves out `dropin/` and `session.lock`, so it is an ordinary world that opens anywhere and that Import takes back. |
 | Export owner key | Backup of the owner key (§4.13). |
 
 Co-op worlds also stay in the normal Singleplayer list with a badge, and opening one from there goes through the same launch flow. The pause menu of a non-co-op singleplayer world gets "Make co-op", which is Import in place.

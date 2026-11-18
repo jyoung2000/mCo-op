@@ -125,4 +125,29 @@ class WorldArchiveTest {
         assertEquals(Reason.NO_LEVEL_DAT, assertThrows(WorldImportException.class, () -> WorldArchive.copyFolder(source, saves)).reason());
         assertEquals(0, savesEntries());
     }
+
+    @Test
+    void exportedZipLeavesOutTheCoopFolderAndImportsBack(@org.junit.jupiter.api.io.TempDir Path dir) throws Exception {
+        Path world = Files.createDirectories(dir.resolve("saves/My World"));
+        Files.writeString(world.resolve("level.dat"), "level");
+        Files.writeString(world.resolve("session.lock"), "lock");
+        Files.createDirectories(world.resolve("region"));
+        Files.writeString(world.resolve("region/r.0.0.mca"), "chunks");
+        Files.createDirectories(world.resolve("dropin/backups"));
+        Files.writeString(world.resolve("dropin/world.json"), "{}");
+        // Into the world's own backups folder, as the menu does.
+        Path zip = world.resolve("dropin/backups/My World.zip");
+        org.junit.jupiter.api.Assertions.assertEquals(2, WorldArchive.exportZip(world, zip));
+
+        Path back = WorldArchive.extractZip(zip, Files.createDirectories(dir.resolve("other")));
+        org.junit.jupiter.api.Assertions.assertEquals("My World", back.getFileName().toString());
+        org.junit.jupiter.api.Assertions.assertEquals("chunks", Files.readString(back.resolve("region/r.0.0.mca")));
+        org.junit.jupiter.api.Assertions.assertEquals("level", Files.readString(back.resolve("level.dat")));
+        org.junit.jupiter.api.Assertions.assertFalse(Files.exists(back.resolve("dropin")), "the co-op folder was exported");
+        org.junit.jupiter.api.Assertions.assertFalse(Files.exists(back.resolve("session.lock")));
+
+        Path notAWorld = Files.createDirectories(dir.resolve("empty"));
+        org.junit.jupiter.api.Assertions.assertThrows(java.io.IOException.class, () -> WorldArchive.exportZip(notAWorld, dir.resolve("x.zip")));
+        org.junit.jupiter.api.Assertions.assertFalse(Files.exists(dir.resolve("x.zip")));
+    }
 }

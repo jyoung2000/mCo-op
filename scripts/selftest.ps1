@@ -144,6 +144,16 @@ $suites['m3b'] = $savePointSuite
 $suites['ui'] = @(
     # A makes B an admin; B's rights, B's own menu rows and the announced player list are checked on both sides.
     @{ Id = 'admin-online'; Scenario = 'admin-online'; TimeoutSec = 600
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+    # The import picker by its buttons, Export world and its way back in, and the Join screen with its preview.
+    @{ Id = 'menu-flows'; Scenario = 'menu-flows'; Roles = @((New-Role 'solo' 'fabric' 'a')) },
+    # Two players in one session: hits land both ways with the pvp game rule on, none with it off, and
+    # the host sees the other player where that player says it is after walking.
+    @{ Id = 'pvp'; Scenario = 'pvp'; TimeoutSec = 600
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+    # What the host's server does (a block, an item, health and an effect, a mob's place) is on the other
+    # player's screen within a second, and the other player's hit on a mob is on the host's.
+    @{ Id = 'realtime'; Scenario = 'realtime'; TimeoutSec = 600
        Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
 )
 

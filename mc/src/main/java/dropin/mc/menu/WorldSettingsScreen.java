@@ -34,14 +34,15 @@ public class WorldSettingsScreen extends Screen {
     @Override
     protected void init() {
         int x = this.width / 2 - 100;
-        int y = Math.max(34, this.height / 2 - 84);
+        int y = Math.max(30, this.height / 2 - 96);
         button(K + "settings.players", x, y, true, () -> this.minecraft.gui.setScreen(new PlayersScreen(this, world.worldId())));
         button(K + "settings.savepoints", x, y + 24, folder != null,
                 () -> this.minecraft.gui.setScreen(new SavePointsScreen(this, world, folder)));
         button(K + "settings.backups", x, y + 48, folder != null, () -> open(SavePointActions.backupsDir(folder)));
         button(K + "settings.mods_folder", x, y + 72, true, () -> open(WorldPolicy.modsDir()));
         button(K + "settings.datapacks", x, y + 96, folder != null, () -> open(folder.resolve("datapacks")));
-        button(K + "button.export_key", x, y + 120, true,
+        button(K + "settings.export_world", x, y + 120, folder != null, this::exportWorld);
+        button(K + "button.export_key", x, y + 144, true,
                 () -> notice = CoopActions.exportOwnerKey(this.minecraft, world).message());
         this.addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, button -> onClose())
                 .bounds(x, this.height - 26, 200, 20).build());
@@ -51,6 +52,28 @@ public class WorldSettingsScreen extends Screen {
         Button button = Button.builder(Component.translatable(key), pressed -> action.run()).bounds(x, y, 200, 20).build();
         button.active = active;
         this.addRenderableWidget(button);
+    }
+
+    /** The whole world as one zip in its backups folder; on a thread, a world can be large. */
+    private void exportWorld() {
+        if (SavePointActions.isOpen(this.minecraft)) {
+            notice = Component.translatable(K + "export.world_open");
+            return;
+        }
+        notice = Component.translatable(K + "export.working");
+        Thread thread = new Thread(() -> {
+            Component result;
+            try {
+                result = Component.translatable(K + "export.done", CoopActions.exportWorld(this.minecraft, world, folder).getFileName().toString());
+            } catch (java.io.IOException | RuntimeException e) {
+                dropin.mc.DropIn.LOGGER.error("Could not export co-op world '{}'", world.name(), e);
+                result = Component.translatable(K + "export.failed", String.valueOf(e.getMessage()));
+            }
+            Component shown = result;
+            this.minecraft.execute(() -> notice = shown);
+        }, "dropin-coop-export");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private void open(Path dir) {

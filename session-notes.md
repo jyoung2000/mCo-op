@@ -522,3 +522,10 @@ State when the session stopped (usage limit, 2026-11-17):
   gate (`build`, `jarcheck`, `-Suite all`; add `ui` to what `all` runs if wanted); VERIFICATION entry; MILESTONES entry.
 - Network audit (grep): the mod sets no system properties, proxy, DNS, default SSL or authenticator; its only process launch
   is the mod-swap helper. Not tested at runtime.
+
+## Menu rework finished, PvP and realtime checks (2026-11-17, gate 46/46)
+
+- Top buttons Create, Join, Import. Join screen previews host and players from the status ping (`StatusPing.players`, `CoopStatus.Status.online`, `CoopActions.previewInvite`). Export world in the wrench menu (`WorldArchive.exportZip`, `CoopActions.exportWorld`).
+- New ui scenarios: `menu-flows`, `pvp`, `realtime`. The mod has no mixin on entities, damage or animation packets.
+- My choices awaiting the owner's word: "mc link" read as the invite code; export zip name and place; realtime limit of 1000 ms in the test.
+- Next: the owner's hit-animation report needs their steps (which player, which loader, relay or LAN); not reproduced here.

@@ -44,8 +44,9 @@ import java.util.UUID;
 public class CoopWorldsScreen extends Screen {
     public static final Component TITLE = Component.translatable("menu.dropin_coop.title");
     private static final String K = "text.dropin_coop.";
-    private static final int ROW_HEIGHT = 40;
-    private static final int ROW_PITCH = 42;
+    private static final int ROW_HEIGHT = 46;
+    private static final int ROW_PITCH = 48;
+    private static final int HEAD = 12;
     private static final int LIST_TOP = 50;
     private static final int ICON = 32;
     private static final int GOLD = 0xFFFFAA00;
@@ -163,8 +164,9 @@ public class CoopWorldsScreen extends Screen {
         int left = (this.width - listWidth) / 2;
         int gap = 4;
         int third = (listWidth - 2 * gap) / 3;
-        top(K + "button.join", left, third, () -> this.minecraft.gui.setScreen(new JoinInviteScreen(this)));
-        top(K + "button.create", left + third + gap, third, this::createNew);
+        // Create is the game's own Create World screen, so every option and mod of the player applies.
+        top(K + "button.create", left, third, this::createNew);
+        top(K + "button.join", left + third + gap, third, () -> this.minecraft.gui.setScreen(new JoinInviteScreen(this)));
         top(K + "button.import", left + 2 * (third + gap), third, () -> this.minecraft.gui.setScreen(new ImportScreen(this)));
 
         int perPage = Math.max(1, (this.height - LIST_TOP - 44) / ROW_PITCH);
@@ -176,11 +178,11 @@ public class CoopWorldsScreen extends Screen {
             boolean owner = roleOf(world.worldId()) == Role.OWNER;
             this.addRenderableWidget(new WorldRow(left, y, listWidth - (owner ? 48 : 24), world));
             int infoX = left + listWidth - (owner ? 44 : 20);
-            glyph(infoX, y + 10, K + "tooltip.info", INFO_ICON,
+            glyph(infoX, y + 13, K + "tooltip.info", INFO_ICON,
                     () -> this.minecraft.gui.setScreen(new WorldInfoScreen(this, world.worldId())));
             if (owner) {
                 // DESIGN 4.13, 4.16: admins, save points and the world's folders are the owner's.
-                glyph(left + listWidth - 20, y + 10, K + "tooltip.settings", WRENCH_ICON,
+                glyph(left + listWidth - 20, y + 13, K + "tooltip.settings", WRENCH_ICON,
                         () -> this.minecraft.gui.setScreen(new WorldSettingsScreen(this, world, folderOf(world.worldId()))));
             }
         }
@@ -448,12 +450,12 @@ public class CoopWorldsScreen extends Screen {
             }
             FaviconTexture icon = icons.get(world.worldId());
             if (icon != null && !icon.isClosed()) {
-                graphics.blit(RenderPipelines.GUI_TEXTURED, icon.textureLocation(), x + 4, y + 4, 0.0F, 0.0F, ICON, ICON, ICON, ICON);
+                graphics.blit(RenderPipelines.GUI_TEXTURED, icon.textureLocation(), x + 4, y + 7, 0.0F, 0.0F, ICON, ICON, ICON, ICON);
             }
             if (this.isHovered()) {
                 boolean onIcon = mouseX < x + 4 + ICON;
-                graphics.fill(x + 4, y + 4, x + 4 + ICON, y + 4 + ICON, -1601138544);
-                graphics.blitSprite(RenderPipelines.GUI_TEXTURED, onIcon ? JOIN_HIGHLIGHTED_SPRITE : JOIN_SPRITE, x + 4, y + 4, ICON, ICON);
+                graphics.fill(x + 4, y + 7, x + 4 + ICON, y + 7 + ICON, -1601138544);
+                graphics.blitSprite(RenderPipelines.GUI_TEXTURED, onIcon ? JOIN_HIGHLIGHTED_SPRITE : JOIN_SPRITE, x + 4, y + 7, ICON, ICON);
             }
             int textX = x + 4 + ICON + 5;
             int right = x + this.width - 4;
@@ -468,7 +470,7 @@ public class CoopWorldsScreen extends Screen {
                 graphics.fill(tagX - 3, y + 3, right + 1, y + 13, 0xC0000000);
                 graphics.text(font, tag, tagX, y + 4, mine == Role.OWNER ? GOLD : AQUA);
             }
-            heads(graphics, textX + 2, y + 28, right, mouseX, mouseY);
+            heads(graphics, textX + 2, y + 29, right, mouseX, mouseY);
         }
 
         /** Green ring: online. Outer gold ring: the owner; outer aqua ring: an admin. Offline heads are dimmed. */
@@ -476,31 +478,31 @@ public class CoopWorldsScreen extends Screen {
             List<Head> list = CoopWorldsScreen.this.heads(world.worldId());
             for (int i = 0; i < list.size(); i++) {
                 Head head = list.get(i);
-                if (x + 10 > right - (i < list.size() - 1 ? 22 : 0)) {
-                    graphics.text(font, Component.translatable(K + "more", list.size() - i), x, y, GRAY);
+                if (x + HEAD + 2 > right - (i < list.size() - 1 ? 22 : 0)) {
+                    graphics.text(font, Component.translatable(K + "more", list.size() - i), x, y + 2, GRAY);
                     return;
                 }
                 if (head.role() != Role.PLAYER) {
-                    graphics.fill(x - 2, y - 2, x + 10, y + 10, head.role() == Role.OWNER ? GOLD : AQUA);
+                    graphics.fill(x - 2, y - 2, x + HEAD + 2, y + HEAD + 2, head.role() == Role.OWNER ? GOLD : AQUA);
                 }
                 if (head.online()) {
-                    graphics.fill(x - 1, y - 1, x + 9, y + 9, GREEN);
+                    graphics.fill(x - 1, y - 1, x + HEAD + 1, y + HEAD + 1, GREEN);
                 } else if (head.role() != Role.PLAYER) {
-                    graphics.fill(x - 1, y - 1, x + 9, y + 9, 0xFF000000);
+                    graphics.fill(x - 1, y - 1, x + HEAD + 1, y + HEAD + 1, 0xFF000000);
                 }
                 try {
-                    PlayerFaceExtractor.extractRenderState(graphics, ResolvableProfile.createUnresolved(UUID.fromString(head.uuid())), x, y, 8);
+                    PlayerFaceExtractor.extractRenderState(graphics, ResolvableProfile.createUnresolved(UUID.fromString(head.uuid())), x, y, HEAD);
                 } catch (IllegalArgumentException e) {
-                    graphics.fill(x, y, x + 8, y + 8, 0xFF555555);
+                    graphics.fill(x, y, x + HEAD, y + HEAD, 0xFF555555);
                 }
                 if (!head.online()) {
-                    graphics.fill(x, y, x + 8, y + 8, 0x99000000);
+                    graphics.fill(x, y, x + HEAD, y + HEAD, 0x70000000);
                 }
-                if (mouseX >= x - 2 && mouseX < x + 10 && mouseY >= y - 2 && mouseY < y + 10) {
+                if (mouseX >= x - 2 && mouseX < x + HEAD + 2 && mouseY >= y - 2 && mouseY < y + HEAD + 2) {
                     graphics.setTooltipForNextFrame(font, Component.literal(head.name()).append(" — ").append(roleName(head.role()))
                             .append(", ").append(Component.translatable(K + (head.online() ? "head.online" : "head.offline"))), mouseX, mouseY);
                 }
-                x += 14;
+                x += HEAD + 6;
             }
         }
     }

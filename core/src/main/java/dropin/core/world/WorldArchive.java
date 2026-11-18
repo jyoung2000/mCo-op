@@ -113,6 +113,48 @@ public final class WorldArchive {
         }
     }
 
+    /**
+     * Writes a closed world folder as a zip that {@link #extractZip} takes back: one top folder named after the
+     * world folder, without the co-op folder ({@code dropin/}) and without {@code session.lock}, so the result
+     * is an ordinary world. Returns the number of files written.
+     */
+    public static int exportZip(Path worldFolder, Path zip) throws IOException {
+        Path root = worldFolder.toAbsolutePath().normalize();
+        if (!Files.isRegularFile(root.resolve(LEVEL_DAT))) {
+            throw new IOException("not a world folder: " + root.getFileName());
+        }
+        Path target = zip.toAbsolutePath().normalize();
+        Files.createDirectories(target.getParent());
+        Path tmp = target.resolveSibling(target.getFileName() + ".tmp");
+        String top = root.getFileName() + "/";
+        int[] count = {0};
+        try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(Files.newOutputStream(tmp))) {
+            Files.walkFileTree(root, new java.nio.file.SimpleFileVisitor<Path>() {
+                @Override
+                public java.nio.file.FileVisitResult preVisitDirectory(Path dir, java.nio.file.attribute.BasicFileAttributes attrs) {
+                    boolean coop = root.equals(dir.getParent()) && dir.getFileName().toString().equals(CoopWorldStore.MARKER_DIR);
+                    return coop ? java.nio.file.FileVisitResult.SKIP_SUBTREE : java.nio.file.FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public java.nio.file.FileVisitResult visitFile(Path file, java.nio.file.attribute.BasicFileAttributes attrs) throws IOException {
+                    if (!file.getFileName().toString().equals("session.lock")) {
+                        out.putNextEntry(new ZipEntry(top + root.relativize(file).toString().replace('\\', '/')));
+                        Files.copy(file, out);
+                        out.closeEntry();
+                        count[0]++;
+                    }
+                    return java.nio.file.FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (IOException | RuntimeException e) {
+            Files.deleteIfExists(tmp);
+            throw e;
+        }
+        Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        return count[0];
+    }
+
     /** Copies a world folder into a new folder under {@code savesDir} and returns that folder. */
     public static Path copyFolder(Path folder, Path savesDir) throws IOException, WorldImportException {
         if (!Files.isDirectory(folder)) {

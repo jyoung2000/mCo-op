@@ -298,3 +298,26 @@ Not verified:
 - Restore with more than one member, with a member on another PC or through the relay, on NeoForge, and of a large world.
 - Restoring the `before-restore` save point (undo of a restore).
 - How much disk the store really saves over time: only that identical records are stored once (unit test).
+
+## Menu rework, admins, PvP and realtime checks: 2026-11-17
+
+Gate run on this machine, one pass, on the tree committed with this entry:
+
+| Check | Result |
+| --- | --- |
+| `./gradlew build` | exit 0 |
+| `scripts/jarcheck.ps1` | exit 0 |
+| `scripts/selftest.ps1 -Suite all` | 46 of 46 PASS |
+
+New or changed scenarios (logs: `build/selftest-logs/`):
+
+- `menu-flows`: top buttons in the order Create, Join, Import; the import picker by its buttons (choose a world, Import, invite shown, world marked, no longer offered); Export world (zip in the backups folder, extracts to a world with `level.dat` and no `dropin/`); Join screen (bad text keeps Join off, an invite turns it on, preview says nobody online, nothing saved before Join, then both worlds listed with the owned one first).
+- `admin-online`: the join preview by invite names the host and both connected players; admin grant and removal; online heads.
+- `pvp`: with the pvp game rule on, B's hit hurts A and A's hit hurts B (20 to 19 health), and the hurt animation (`hurtTime`) is seen on both clients for A, B and a pig; with the rule off neither hit does damage; B walked 8.85 blocks and the host and A's screen had B 0.000 blocks from where B said it was.
+- `realtime`: host changes reached the other client in 22 ms (block), 84 ms (item), 50 ms (health and effect), 184 ms (mob moved); B's hit on a pig was on the host's screen within 48 ms.
+
+Not verified:
+- All clients were on one PC over loopback; delays over the internet or a relay were not measured. No test with three or more players fighting.
+- The owner's report that the hit animation does not play was not reproduced: the test reads `hurtTime`, it does not look at the rendered picture.
+- `pvp` failed four times while it was being written, each time from the test's own setup (knockback out of reach, walking into the other player, a one-tick race); one `admin-online` run found nobody on a single lookup and passed on rerun, cause not found, the check now asks again like the menu does.
+- Export world of a large world, the Export button itself (the action under it ran), file drop on Import, the Join screen while a host is online (only its lookup was run), NeoForge for all new screens, the chat change, and other programs' networking at runtime (source audit only).

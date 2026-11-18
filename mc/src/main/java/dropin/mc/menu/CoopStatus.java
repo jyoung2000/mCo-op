@@ -18,11 +18,13 @@ public final class CoopStatus {
     /**
      * @param address the address that answered the ping, when {@code kind} is PLAYING
      * @param record  the host's announcement, when {@code kind} is PLAYING; otherwise null
+     * @param online  the players the host named when it answered the ping (uuid and name); empty otherwise
      */
-    public record Status(Kind kind, String hostName, String hostUuid, String address, RendezvousRecord record) {
-        static final Status LOOKING = new Status(Kind.LOOKING, "", "", "", null);
-        static final Status NOBODY = new Status(Kind.NOBODY, "", "", "", null);
-        static final Status UNREACHABLE = new Status(Kind.UNREACHABLE, "", "", "", null);
+    public record Status(Kind kind, String hostName, String hostUuid, String address, RendezvousRecord record,
+                         java.util.List<StatusPing.Player> online) {
+        static final Status LOOKING = new Status(Kind.LOOKING, "", "", "", null, java.util.List.of());
+        static final Status NOBODY = new Status(Kind.NOBODY, "", "", "", null, java.util.List.of());
+        static final Status UNREACHABLE = new Status(Kind.UNREACHABLE, "", "", "", null, java.util.List.of());
 
         /** True if the player is in the world's session right now: the host or someone connected to it. */
         public boolean isOnline(String uuid) {
@@ -58,8 +60,10 @@ public final class CoopStatus {
             if (found.isPresent() && found.get().isState(RendezvousRecord.HOST)) {
                 RendezvousRecord record = found.get();
                 for (String address : new String[]{record.lan(), record.addr()}) {
-                    if (address != null && !address.isEmpty() && StatusPing.answers(address, PING_TIMEOUT_MS)) {
-                        return new Status(Kind.PLAYING, record.name(), record.host(), address, record);
+                    java.util.List<StatusPing.Player> online = address == null || address.isEmpty() ? null
+                            : StatusPing.players(address, PING_TIMEOUT_MS);
+                    if (online != null) {
+                        return new Status(Kind.PLAYING, record.name(), record.host(), address, record, java.util.List.copyOf(online));
                     }
                 }
             }
