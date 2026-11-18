@@ -154,7 +154,22 @@ $suites['ui'] = @(
     # What the host's server does (a block, an item, health and an effect, a mob's place) is on the other
     # player's screen within a second, and the other player's hit on a mob is on the host's.
     @{ Id = 'realtime'; Scenario = 'realtime'; TimeoutSec = 600
-       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+    # Things that move by themselves: a minecart on powered rails, a cow led by wheat, a cow fleeing after a
+    # hit. Each is followed tick by tick on the host's server and on three screens (C runs NeoForge); the paths,
+    # the resting places and the mob's health, age, glow and name must be the same.
+    @{ Id = 'motion'; Scenario = 'motion'; TimeoutSec = 900
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'neoforge' 'c')) }
+)
+
+# World integrity (DESIGN 4.5 to 4.9): after play and after a handoff, every copy holds the host's data.
+$suites['integrity'] = @(
+    # A hosts; B and C have copies. Ores, a chest, a villager (inventory, trades), mob health and each player's
+    # health, effects and items are decoded from the host's records and from each member's copy at the same
+    # checkpoint and must be the same; again after A handed the world to B; then every closed copy is read back
+    # from disk in full. C runs NeoForge.
+    @{ Id = 'integrity'; Scenario = 'integrity'; TimeoutSec = 1200
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'neoforge' 'c')) }
 )
 
 # Measurements, not gates: run by name only, never by "all".
@@ -178,6 +193,10 @@ $onlineSuites = @{
     )
     m2 = @(
         @{ Id = 'first-download-root-match.online'; Scenario = 'first-download-root-match'; Online = $true
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+        # The first download with the real mods of $packMods in both games, over the LAN (two clients: quick).
+        @{ Id = 'first-download-root-match.pack'; Scenario = 'first-download-root-match'; TimeoutSec = 240
+           Mods = @{ a = @('pack'); b = @('pack') }
            Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
     )
     m2b = @(
@@ -191,12 +210,21 @@ $onlineSuites = @{
         @{ Id = 'handoff-3.online'; Scenario = 'handoff-3'; Online = $true; TimeoutSec = 900
            Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'fabric' 'c')) }
     )
+    integrity = @(
+        # The integrity scenario with the real mods of $packMods in every game (all Fabric). The games talk over
+        # the LAN; "online" here is only the download of the mods from Modrinth.
+        @{ Id = 'integrity.pack'; Scenario = 'integrity'; TimeoutSec = 1500
+           Mods = @{ a = @('pack'); b = @('pack'); c = @('pack') }
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'fabric' 'c')) }
+    )
     ui = @(
         # Hits, hurt animations, movement and realtime changes with the second player connected through the real relay.
         @{ Id = 'pvp.online'; Scenario = 'pvp'; Online = $true; TimeoutSec = 900
            Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
         @{ Id = 'realtime.online'; Scenario = 'realtime'; Online = $true; TimeoutSec = 900
-           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+        @{ Id = 'motion.online'; Scenario = 'motion'; Online = $true; TimeoutSec = 1200
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'neoforge' 'c')) }
     )
 }
 
@@ -206,6 +234,58 @@ $onlineMod = @{
     Url = 'https://cdn.modrinth.com/data/uXXizFIs/versions/d5ddUdiB/ferritecore-9.0.0-fabric.jar'
     Sha512 = 'd81fa97e11784c19d42f89c2f433831d007603dd7193cee45fa177e4a6a9c52b384b198586e04a0f7f63cd996fed713322578bde9a8db57e1188854ae5cbe584'
 }
+
+# Real mods (Fabric, published on Modrinth for Minecraft 26.3) for the modpack run of the integrity scenario:
+# chunk storage and threading (C2ME), game logic (Lithium), the network stack (Krypton), rendering (Sodium,
+# ImmediatelyFast, Entity Culling), memory (FerriteCore), content with blocks, items and block entities
+# (Farmer's Delight), world generation hooks (TerraBlender) and common libraries. Fabric API comes from the dev runtime.
+$packMods = @(
+    @{ File = 'lithium-fabric-0.26.3+mc26.3.jar'
+       Url = 'https://cdn.modrinth.com/data/gvQqBUqZ/versions/fWv5bnZk/lithium-fabric-0.26.3%2Bmc26.3.jar'
+       Sha512 = '2ca92fb530135d2baddf0ba4cc4f93976234876a38c4aa02b487b2552400f005afcfbeebf5373fb4396fe2020537a42d7597b8da5a52b904355ef51d5fef07ad' },
+    @{ File = 'sodium-fabric-0.9.3-beta.5+mc26.3.jar'
+       Url = 'https://cdn.modrinth.com/data/AANobbMI/versions/v7Lw0h1m/sodium-fabric-0.9.3-beta.5%2Bmc26.3.jar'
+       Sha512 = '343e63958e3867077ecbfa752dbc0ce079e1244d7a125309258ade62bc13aecb95c47378d4f42e76369c957c1f97c29dd751551151b65136830374d553cd275c' },
+    @{ File = 'c2me-fabric-mc26.3-0.4.2-alpha.0.119.jar'
+       Url = 'https://cdn.modrinth.com/data/VSNURh3q/versions/W9HllAiU/c2me-fabric-mc26.3-0.4.2-alpha.0.119.jar'
+       Sha512 = 'ba50c585ac92588bbe40ed77d2bdac3c22bc2a543165feebe19684730479da52fa8e5bffaebe8801b90d8f7616fd57703b2f2b447807a65061919fb86f887821' },
+    @{ File = 'ferritecore-9.0.0-fabric.jar'
+       Url = 'https://cdn.modrinth.com/data/uXXizFIs/versions/d5ddUdiB/ferritecore-9.0.0-fabric.jar'
+       Sha512 = 'd81fa97e11784c19d42f89c2f433831d007603dd7193cee45fa177e4a6a9c52b384b198586e04a0f7f63cd996fed713322578bde9a8db57e1188854ae5cbe584' },
+    @{ File = 'cloth-config-fabric-26.3.159.jar'
+       Url = 'https://cdn.modrinth.com/data/9s6osm5g/versions/fg2uyxOW/cloth-config-fabric-26.3.159.jar'
+       Sha512 = '8924e19d41845096724fa10f3717bc51964a0edbbbcad0ff1e6c6187a398b08f356e49579a657c2dc44a7f92e3850771f3ca70bf8c1f654de60425163b91dbb1' },
+    @{ File = 'Jade-mc26.3-Fabric-26.3.5.jar'
+       Url = 'https://cdn.modrinth.com/data/nvQzSEkH/versions/71CTWqdE/Jade-mc26.3-Fabric-26.3.5.jar'
+       Sha512 = '2e7331e62eb6658268ae92dc42de8b469f50dd6c6a9d2546a6f649bae97c2cdfd8d4c1560948cf46269175d2c79c6c47a36a02685e39d476768d18fbb2a28703' },
+    @{ File = 'appleskin-fabric-mc26.3-3.0.10.jar'
+       Url = 'https://cdn.modrinth.com/data/EsAfCjCV/versions/PHjDtQay/appleskin-fabric-mc26.3-3.0.10.jar'
+       Sha512 = '17d257af419b7530aa8617c2e8c0e4bbfabcf888f26655790e0188e7957e0bcd931f85f9a4c69fd27e889dee5082cf7b2b8741a14a6ed4425e9ef4bfe13a8b8c' },
+    @{ File = 'entityculling-fabric-1.12.1-mc26.3.jar'
+       Url = 'https://cdn.modrinth.com/data/NNAgCjsB/versions/UWpkLRV5/entityculling-fabric-1.12.1-mc26.3.jar'
+       Sha512 = 'c56e2a19fa98b8ee85d7f46b74966a272f03ec9a8edacd4a6eb629970f19fd4d2a9bddeacb8405f9abdb790a40895244927a28cf5dbbe4dcb65a0b307f493fcb' },
+    @{ File = 'ImmediatelyFast-Fabric-1.17.1+26.3.jar'
+       Url = 'https://cdn.modrinth.com/data/5ZwdcRci/versions/3MP9UR23/ImmediatelyFast-Fabric-1.17.1%2B26.3.jar'
+       Sha512 = '8e139589fd995bce3d485a34d92a07243964212f7ed2e4fc2f6de5b9a74d0f59b03252e7ce40c64e006cf3e21bed5de27b830d33ef048b286e041f6178ad8428' },
+    @{ File = 'krypton-0.3.2.jar'
+       Url = 'https://cdn.modrinth.com/data/fQEb0iXm/versions/UugdIYJw/krypton-0.3.2.jar'
+       Sha512 = 'd1d57ebd41395b75b01f130cd9503eb8d208212424a399ff9f367f50be8fbc1c6472442b33c686e777c3148f6a609520e8fb732c755157c358cb207fd4d1123a' },
+    @{ File = 'FarmersDelight-26.3-3.6.30+refabricated.jar'
+       Url = 'https://cdn.modrinth.com/data/7vxePowz/versions/dRScyUeE/FarmersDelight-26.3-3.6.30%2Brefabricated.jar'
+       Sha512 = '099f724599022ac9232f265d62907fdde6ad48a73b246d45930d938a7f850be6a8b520244ffa218a59fdef96b0170fc0c04f00ff91f108b5a02bbc4cb2a013bc' },
+    @{ File = 'TerraBlender-fabric-26.3-26.3.0.0.9.jar'
+       Url = 'https://cdn.modrinth.com/data/kkmrDlKT/versions/xirJYe1V/TerraBlender-fabric-26.3-26.3.0.0.9.jar'
+       Sha512 = '183f809fe992aaaaf4d84c594730b95b392338caf17b690debbb14434b23b46f5923cfcc5aecb81368ea06a299503a3738dcf942b7f179abd000f1312cf2cbdb' },
+    @{ File = 'architectury-fabric-22.0.6.jar'
+       Url = 'https://cdn.modrinth.com/data/lhGA9TYQ/versions/Njpa4lhR/architectury-fabric-22.0.6.jar'
+       Sha512 = 'ba6c4facc8b6fd0bc2759de295b2db007471a7baa3523ca9163c2e17d7106ed1c6bf90dd54ba9da6235fba5a84141739b18e06be7fd0beea628cb67c7eaa2ec5' },
+    @{ File = 'geckolib-fabric-26.3-5.5.7.jar'
+       Url = 'https://cdn.modrinth.com/data/8BmcQJ2H/versions/kSxHvs99/geckolib-fabric-26.3-5.5.7.jar'
+       Sha512 = 'c7c89bd6c5f2801ef1575e2e1212202f5a3eff480d73503beff12b1d60dfb751112fccf36e36c243b26b6b492261cef12d8b2c1a92a734bb0b621daa8c158fc5' },
+    @{ File = 'yet_another_config_lib_v3-3.9.7+26.3-fabric.jar'
+       Url = 'https://cdn.modrinth.com/data/1eAoo2KR/versions/s9SjoFu1/yet_another_config_lib_v3-3.9.7%2B26.3-fabric.jar'
+       Sha512 = 'f3957028dd31cae78f08aee3e768f61bd12c4c8423257d357bc3c1a2172047c769d37901f99775c7ffff1e5ee794025dc72738b2869cab06f1c2811841d68b24' }
+)
 
 function Resolve-Jdk25 {
     $candidates = @()
@@ -238,6 +318,7 @@ function Get-GameDir([string]$slot) {
 
 function Get-TestMod([string]$loader, [string]$name) {
     if ($name -eq 'online') { return Get-OnlineMod }
+    if ($name -eq 'pack') { return Get-PackMods }
     return Join-Path $root "build\testmods\$loader\dropin-testmod-$name.jar"
 }
 
@@ -255,6 +336,30 @@ function Get-OnlineMod {
         throw "The downloaded $($onlineMod.File) does not have the published hash."
     }
     return $file
+}
+
+# Downloads the pack's mods once (build/testmods/pack) and checks each against its published hash.
+function Get-PackMods {
+    $dir = Join-Path $root 'build\testmods\pack'
+    New-Item -ItemType Directory -Force $dir | Out-Null
+    $files = @()
+    # DROPIN_PACK_SKIP=krypton,c2me leaves those mods out: for finding which mod a failure comes from.
+    $skip = @()
+    if ($env:DROPIN_PACK_SKIP) { $skip = $env:DROPIN_PACK_SKIP -split ',' }
+    foreach ($mod in $packMods) {
+        if ($skip | Where-Object { $mod.File -like "*$_*" }) { continue }
+        $file = Join-Path $dir $mod.File
+        if (-not (Test-Path $file)) {
+            Invoke-WebRequest -Uri $mod.Url -OutFile $file -UserAgent 'dropin-coop/selftest' -UseBasicParsing
+        }
+        $hash = (Get-FileHash -Algorithm SHA512 $file).Hash.ToLower()
+        if ($hash -ne $mod.Sha512) {
+            Remove-Item -Force $file
+            throw "The downloaded $($mod.File) does not have the published hash."
+        }
+        $files += $file
+    }
+    return $files
 }
 
 # $mods: names of test mods (x, y, z) that are in the slot's mods folder when the game first starts.

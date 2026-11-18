@@ -165,6 +165,8 @@ final class PerfScenarios {
                 });
     }
 
+    private static long sentBefore;
+
     private static void reportCheckpoints(String name) {
         HostSync sync = HostSync.current();
         if (sync == null) {
@@ -172,9 +174,13 @@ final class PerfScenarios {
         }
         HostSync.Perf perf = sync.takePerf();
         int n = Math.max(1, perf.checkpoints());
+        long bytes = sync.recordBytes();
         DropIn.LOGGER.info("Self-test perf: [{}] {} checkpoints, {} records changed; server thread held by the save: avg {} ms, "
-                + "max {} ms; work off the server thread: avg {} ms, max {} ms", name, perf.checkpoints(), perf.changed(),
-                perf.saveMsSum() / n, perf.saveMsMax(), perf.workMsSum() / n, perf.workMsMax());
+                + "max {} ms; work off the server thread: avg {} ms, max {} ms, CPU time of that work avg {} ms; world record "
+                + "bytes sent to members in this phase: {}", name, perf.checkpoints(), perf.changed(),
+                perf.saveMsSum() / n, perf.saveMsMax(), perf.workMsSum() / n, perf.workMsMax(), perf.cpuMsSum() / n,
+                bytes - sentBefore);
+        sentBefore = bytes;
     }
 
     private static boolean areaLoaded(Minecraft mc) {

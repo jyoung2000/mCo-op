@@ -89,7 +89,8 @@ final class Scenarios {
         boolean expectOnline = spec.scenario().equals("tunnel-join");
         boolean eitherWay = spec.scenario().equals("drop-in") || spec.scenario().equals("first-download-root-match")
                 || spec.scenario().equals("mod-join") || spec.scenario().equals("handoff-3")
-                || spec.scenario().equals("pvp") || spec.scenario().equals("realtime");
+                || spec.scenario().equals("pvp") || spec.scenario().equals("realtime")
+                || spec.scenario().equals("motion");
         if (!eitherWay && expectOnline != ctx.online()) {
             throw new IllegalStateException(key + " needs dropin.dev.online=" + expectOnline);
         }
@@ -116,6 +117,14 @@ final class Scenarios {
         StepRunner savePoints = SavePointScenarios.build(key, ctx);
         if (savePoints != null) {
             return savePoints;
+        }
+        StepRunner motion = MotionScenarios.build(key, ctx);
+        if (motion != null) {
+            return motion;
+        }
+        StepRunner integrity = IntegrityScenarios.build(key, ctx);
+        if (integrity != null) {
+            return integrity;
         }
         StepRunner perf = PerfScenarios.build(key, ctx);
         if (perf != null) {

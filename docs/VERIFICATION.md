@@ -340,3 +340,35 @@ Not verified:
 - Why a status connection is sometimes never answered. The gate that passed did not log a use of the second connection, so the change is not shown to be what made it pass.
 - The owner's report (Fabric, relay: no hit animation on the player being hit) was not reproduced; the tests read `hurtTime`, not the picture, and both clients ran on one PC.
 - Earlier `pvp` failures were test flaws, fixed in the test: pigs left in the kept self-test world made the two clients watch different pigs; a fed player healed the one point of damage before the check saw it; knockback out of reach.
+
+## World integrity, large modpacks, other software, moving things: 2026-11-18
+
+Gate run on this machine, on the tree committed with this entry:
+
+| Check | Result |
+| --- | --- |
+| `./gradlew build` | exit 0 |
+| `scripts/jarcheck.ps1` | exit 0 (`no-selftest-classes`: 0 entries) |
+| `scripts/selftest.ps1 -Suite all` | 48 of 48 PASS (new: `integrity`, `motion`) |
+| `scripts/selftest.ps1 -Suite ui -Online -Only motion.online` | PASS, 2 of 2 runs with the final measurement |
+| `scripts/selftest.ps1 -Suite integrity -Online` (`integrity.pack`) | PASS (before the motion work; main sources unchanged since) |
+| `scripts/selftest.ps1 -Suite m2 -Online -Only first-download-root-match.pack` | PASS (same) |
+| `scripts/selftest.ps1 -Suite perf` | measurement, see below |
+
+Jar: `build/libs/dropin-0.1.0+mc26.3.jar`, 1,134,414 bytes.
+
+- `integrity` (A, B Fabric, C NeoForge): ores, a chest, a villager (place, inventory, trades), mob health and each player's health, effects and items, decoded from the host's records and from each member's copy at the same checkpoint, are equal on A, B and C (46 lines), again after A handed the world to B, and the closed copies of A and C read back in full equal checkpoint 11 of B's ledger.
+- Found and fixed by it: a former host kept about 1,350 to 1,470 records its shutdown wrote after the final checkpoint (mostly half-generated border chunks). `SyncClient.reconcileLeftover` now hashes those again from disk before the first comparison.
+- `motion` (A, B Fabric, C NeoForge; LAN and through the real e4mc relay): a minecart on powered rails (25.7 blocks), a cow led by wheat (6.9 blocks) and a cow fleeing after a hit (10.8 to 12.3 blocks) followed tick by tick on the host's server and on three screens. Farthest any screen was from the server's path: 0.15 blocks; screens 100 to 150 ms behind the server (the game draws between updates); at rest within 0.0001 blocks; health, baby, glow and name equal on every screen within 110 ms. No change to the mod was needed: these things run only on the host's server and reach every player by the game's own packets.
+- Real mods, 15 Fabric mods from Modrinth in every game (107 mod entries loaded): lithium 0.26.3, sodium 0.9.3-beta.5, c2me-fabric 0.4.2-alpha.0.119, ferritecore 9.0.0, cloth-config 26.3.159, Jade 26.3.5, appleskin 3.0.10, entityculling 1.12.1, ImmediatelyFast 1.17.1, krypton 0.3.2, FarmersDelight 26.3-3.6.30 (refabricated), TerraBlender 26.3.0.0.9, architectury 22.0.6, geckolib 5.5.7, yacl 3.9.7.
+- Found and fixed by them: with Krypton the host's world never finished loading (two `@Redirect`s of `Crypt.getCipher`; ours is now `@WrapOperation`, DESIGN §3 row 15, owner's decision). With C2ME the mod saw only 25 of the world's records, because C2ME stores chunks with its own class; DropIn now notices this, compares every chunk at every checkpoint and says so in the log once.
+- `perf` (512 loaded chunks, 2,598 records, 8 chunk edits a second): a checkpoint holds the server thread 14 to 19 ms on average (most 23), its work off that thread 51 to 60 ms (10 to 15 ms CPU); first full scan 641 ms; first download 53,143,777 bytes in about 10 s on loopback; 5,300,728 bytes a minute to one member while editing; 20 ticks a second in every phase.
+- Other software, measured on a host serving one member: one listening TCP port (the game's own, a free port), one UDP socket, two HTTPS connections to Mojang; DropIn threads: host, status, sync, sync-serve. Read in the code, not measured: no `System.setProperty`, proxy, DNS, firewall or `netsh` use; the only process started is the mod-swap helper; relayed traffic is capped at `relayRateKBps` (128).
+- Test flaws on the way, fixed in the tests, no test weakened: the integrity decoder expected `Name` in palette entries; the motion track's braking rails were powered by their neighbours; the motion comparison measured to sample points and lacked the path's starting point (two relay runs failed with 0.89 and 0.93 blocks at 0 to 50 ms after the start, on the host's own screen too).
+
+Not verified:
+- Blocks, entities, items or dimensions added by mods: the pack runs used vanilla content in a flat world. NeoForge with real mods. More than 15 mods. Mods on Forge-only or other loaders.
+- Minecarts with riders or chests, slopes, curves, the experimental minecart rules; boats; mobs other than a cow; mob fights; mobs in unloaded or far chunks; villagers' behaviour over time.
+- Two PCs: every run had all games on this one PC, so real latency, packet loss and a slow link are not covered. The picture itself was not looked at; positions and status were read from the game.
+- Other programs (browser, Steam, video) running beside it; only sockets and threads were counted.
+- Open, not decided: records are sent uncompressed; folders that mods add to a world's root are not copied; no bandwidth cap on direct connections; with C2ME every checkpoint compares all chunks (330 ms for about 1,100 records); `SyncServerSession` closes without a log line on an error.

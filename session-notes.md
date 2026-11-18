@@ -536,3 +536,23 @@ State when the session stopped (usage limit, 2026-11-17):
 - `StatusPing.players`: second status connection after 2 s, same 5 s limit; logs "No status answer…" and "The first status ping … got no answer; the second did". Root cause of unanswered status connections unknown; watch the logs for those lines.
 - Self-test world is kept between runs: scenarios that spawn entities must clear old ones and identify theirs by id (`UiScenarios.spawnPig`).
 - Open: owner's missing hit animation (Fabric, relay) not reproduced. Ask what they see on which screen (victim's own first-person view only tilts the camera; "Damage Tilt" at 0 turns that off).
+
+## Integrity session, 2026-11-18: state when the usage limit was reached (NOT committed)
+
+All changes are in the working tree, nothing committed. Untracked `AGENTS.md` and `.codex/` are not ours.
+
+Done and run on this machine:
+- Full gate on the tree BEFORE the motion work: `./gradlew build` 0, `scripts/jarcheck.ps1` 0, `selftest.ps1 -Suite all` 47 of 47 PASS (logs `build/logs/gate-*`). Jar: `build/libs/dropin-0.1.0+mc26.3.jar`.
+- `integrity` PASS (LAN, C on NeoForge); `integrity.pack` and `first-download-root-match.pack` PASS with 15 real Fabric mods.
+- Fixes: `SyncClient.reconcileLeftover` (former host's leftover records), C2ME full-scan fallback (`ChunkStores.unseenWriter`, `rescan` marker), Krypton (`@WrapOperation`, owner approved, DESIGN §3 row 15 added).
+- New `motion` scenario (`MotionScenarios.java`, suite `ui`, roles a, b, c with C on NeoForge): PASS on LAN (69.4 s, `build/logs/motion-2.log`). Minecart 25.4 blocks, cow led by wheat 6.9 blocks, cow fleeing 12 blocks: every screen within 0.31 / 0.04 / 0.54 blocks of the server's path, about 150 ms behind (vanilla smoothing), at rest within 0.0001 blocks; health, baby, glow and name equal within 70 ms.
+
+Not done:
+- `motion.online` (relay): one run FAILED on `cow-fleeing`, 0.926 blocks off the path on the host's own screen and on B's alike. Hypothesis (not proven): the server's path is sampled on the host's client tick, a late tick leaves a hole. `compare` now measures against the line between samples (`toSegment`) and logs `longestGap`; this version compiles in my head only: it has NOT been compiled or run. Run `selftest.ps1 -Suite ui -Online -Only motion.online`, then `-Suite ui -Only motion` again.
+- The full gate must be rerun on the final tree (the `ui` suite now has `motion`, so 48 scenarios), then `docs/VERIFICATION.md`, then a local commit.
+- 26.3 signatures used by the motion test (seen in the sources): `EntityType.spawn(ServerLevel, BlockPos, EntitySpawnReason)`, `LivingEntity.hurtServer(ServerLevel, DamageSource, float)`, `DamageSources.playerAttack(Player)`, `Entity.setGlowingTag(boolean)`, `ClientLevel.entitiesForRendering()`, `ServerLevel.getEntity(UUID)`, `net.minecraft.world.entity.animal.cow.Cow`, `net.minecraft.world.entity.vehicle.minecart.Minecart`.
+- Open for the owner: wire compression of records; mod folders in a world's root are not replicated; no bandwidth cap on direct paths; `SyncServerSession` closes silently on errors; modded blocks/entities/dimensions were never placed in a test.
+
+## Integrity session, 2026-11-18: final state (replaces the "usage limit" section above)
+
+Committed. Gate on the final tree: build 0, jarcheck 0, `-Suite all` 48 of 48 (logs `build/logs/gate2-*`). `motion` and `motion.online` PASS; the earlier relay failures were the test's measurement (the server's path lacked its starting point), shown by the logged worst samples, all 0 to 50 ms after the start. Details and the not-verified list: `docs/VERIFICATION.md`, last entry. Next: owner decisions listed there under "Open".

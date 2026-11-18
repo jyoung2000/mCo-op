@@ -28,6 +28,13 @@ public final class ChunkStores {
      * @param worldRoot the world folder, derived from {@code dir}
      */
     public record Store(IOWorker worker, String dim, String kind, Path dir, Path worldRoot) {
+        /**
+         * False when another mod put its own class in place of the game's storage worker (C2ME does): such a
+         * class overrides the methods this mod watches, so its writes are not seen and must be found by comparing.
+         */
+        public boolean writesSeen() {
+            return worker.getClass() == IOWorker.class;
+        }
     }
 
     private static final Map<IOWorker, Store> STORES = new ConcurrentHashMap<>();
@@ -49,6 +56,9 @@ public final class ChunkStores {
         if (root == null) {
             return;
         }
+        // A worker of an earlier session of this world that was never reported closed (a replaced class's close()
+        // is not seen either) must not be asked for chunks again.
+        STORES.values().removeIf(old -> old.dir().equals(folder));
         STORES.put(worker, new Store(worker, info.dimension().identifier().toString(), kind, folder, root));
         if (CoopWorldStore.readMarker(root).isPresent()) {
             TRACKED.add(root);
@@ -106,6 +116,16 @@ public final class ChunkStores {
         if (!keys.isEmpty()) {
             DIRTY.computeIfAbsent(worldRoot, root -> ConcurrentHashMap.newKeySet()).addAll(keys);
         }
+    }
+
+    /** The class of a storage worker of this world whose writes are not seen, or null if all are the game's own. */
+    public static String unseenWriter(Path worldRoot) {
+        for (Store store : STORES.values()) {
+            if (store.worldRoot().equals(worldRoot) && !store.writesSeen()) {
+                return store.worker().getClass().getName();
+            }
+        }
+        return null;
     }
 
     public static List<Store> of(Path worldRoot) {

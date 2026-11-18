@@ -61,6 +61,7 @@ Line numbers are from commit `93ce8a8`.
 | 12 | The 26.x Fabric jar already depends on Fabric API | `fabric/src/main/resources-modern/fabric.mod.json` | On Fabric, players need Fabric API as well (already true upstream). NeoForge needs nothing extra. |
 | 13 | Build lists 26.3 as a supported game version | `fabric/build.gradle:178-180`, `neoforge/build.gradle:115-117` | Upstream tunnel code is expected to work on 26.3 as is. |
 | 14 | The tunnel writes the assigned domain (with a click-to-stop link) and relay broadcasts into chat | `QuiclimeSession.java` (`Mirror.addMessage`) | Hook, decided by the owner 2026-11-17: these two notices go to the log (`Mirror.addNotice`); the domain is shown on the world's info screen. The tunnel's error line stays in chat. |
+| 15 | The login mixin `@Redirect`s `Crypt.getCipher` in `handleKey` to skip encryption on a tunnel connection | `mixin/ServerLoginPacketListenerImplMixin.java` | Hook, decided by the owner 2026-11-18: the handler wraps the call (MixinExtras `@WrapOperation`) instead of redirecting it. Two redirects of one call cannot both apply, and Krypton redirects the same call: with the redirect, the host's world never finished loading when Krypton was installed. |
 
 From outside the repo:
 

@@ -3,6 +3,7 @@ package dropin.mc.member;
 import dropin.core.ledger.Ledger;
 import dropin.core.ledger.LedgerEntry;
 import dropin.core.manifest.Manifest;
+import dropin.core.manifest.RecordKey;
 import dropin.core.sync.SyncClientSession;
 import dropin.core.sync.SyncClientSession.Phase;
 import dropin.core.sync.SyncState;
@@ -20,10 +21,13 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.SecureRandom;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -149,6 +153,65 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
         return total <= 0 ? 0 : (int) Math.min(99, have * 100L / total);
     }
 
+    /**
+     * This PC hosted the world last (DESIGN 4.9). What its shutdown wrote after the final checkpoint is in no
+     * ledger entry: the chunks listed in {@code dirty.txt}, and files such as {@code level.dat}. The manifest
+     * is made to say what is on disk for those records, so the comparison with the new host fetches the
+     * ledger's version of each one and this copy ends up equal to everyone else's.
+     */
+    private void reconcileLeftover(Path manifestFile) throws IOException {
+        Path leftover = dropin.resolve("dirty.txt");
+        Path rescan = dropin.resolve("rescan");
+        if (Files.isRegularFile(rescan)) {
+            // The files changed in a way nobody recorded (a restored save point, or a mod with its own chunk
+            // storage): the whole copy is hashed again.
+            manifest = RecordApplier.scan(folderPath);
+            manifest.save(manifestFile);
+            Files.delete(rescan);
+            Files.deleteIfExists(leftover);
+            DropIn.LOGGER.info("The copy of '{}' was hashed again in full ({} records)", world.name(), manifest.size());
+            return;
+        }
+        if (!Files.isRegularFile(leftover)) {
+            return;
+        }
+        Set<String> keys = new LinkedHashSet<>(Files.readAllLines(leftover, StandardCharsets.UTF_8));
+        for (String key : manifest.keys()) {
+            if (RecordKey.isFile(key)) {
+                keys.add(key);
+            }
+        }
+        int differ = 0;
+        for (String key : keys) {
+            if (!RecordKey.isFile(key) && !RecordKey.isChunk(key)) {
+                continue;
+            }
+            String hash;
+            try {
+                byte[] bytes = applier.read(key);
+                hash = bytes == null ? "" : Manifest.hash(bytes);
+            } catch (IOException | RuntimeException e) {
+                // Unreadable here: treated as missing, so it is downloaded again.
+                hash = "";
+            }
+            String old = manifest.get(key);
+            if (hash.isEmpty() ? old != null : !hash.equals(old)) {
+                if (hash.isEmpty()) {
+                    manifest.remove(key);
+                } else {
+                    manifest.put(key, hash);
+                }
+                differ++;
+            }
+        }
+        if (differ > 0) {
+            manifest.save(manifestFile);
+        }
+        Files.delete(leftover);
+        DropIn.LOGGER.info("'{}' was hosted here last: {} records written after its final checkpoint will be fetched "
+                + "from the new host", world.name(), differ);
+    }
+
     @Override
     public void run() {
         try {
@@ -181,6 +244,7 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
                 state.save(stateFile);
             }
             applier = new RecordApplier(folder);
+            reconcileLeftover(manifestFile);
             DropIn.LOGGER.info("World sync of '{}' started: {} records here, checkpoint {}", world.name(),
                     manifest.size(), ledger.headSeq());
             int failures = 0;

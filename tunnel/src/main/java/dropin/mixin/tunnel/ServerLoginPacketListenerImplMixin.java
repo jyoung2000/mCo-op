@@ -1,5 +1,7 @@
 package dropin.mixin.tunnel;
 
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import dropin.tunnel.DialtoneConnectionExtensions;
 import dropin.tunnel.dialtone.DialtoneAddress;
 import net.minecraft.network.Connection;
@@ -67,12 +69,13 @@ public class ServerLoginPacketListenerImplMixin {
         return instance.getSecretKey(privateKey);
     }
 
-    @Redirect(method = "handleKey", at = @At(value = "INVOKE", target = "Lnet/minecraft/util/Crypt;getCipher(ILjava/security/Key;)Ljavax/crypto/Cipher;"))
-    private Cipher getCipher(int i, Key key) throws CryptException {
+    // DropIn: wraps instead of redirecting, so a mod that redirects the same call (Krypton) still applies.
+    @WrapOperation(method = "handleKey", at = @At(value = "INVOKE", target = "Lnet/minecraft/util/Crypt;getCipher(ILjava/security/Key;)Ljavax/crypto/Cipher;"))
+    private Cipher getCipher(int i, Key key, Operation<Cipher> original) {
         if (connection.getRemoteAddress() instanceof DialtoneAddress) {
             return null;
         }
-        return Crypt.getCipher(i, key);
+        return original.call(i, key);
     }
 
     @Redirect(method = "handleKey", at = @At(value = "INVOKE", target = "Lnet/minecraft/util/Crypt;digestData(Ljava/lang/String;Ljava/security/PublicKey;Ljavax/crypto/SecretKey;)[B"))

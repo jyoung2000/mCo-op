@@ -93,7 +93,8 @@ public final class HostSync implements SyncServerSession.Host {
      * What the checkpoints since the last {@link #takePerf()} cost. {@code saveMs} is time the server thread was
      * held by the save (no game ticks run meanwhile); {@code workMs} is the hashing and writing off that thread.
      */
-    public record Perf(int checkpoints, long saveMsSum, long saveMsMax, long workMsSum, long workMsMax, long changed) {
+    public record Perf(int checkpoints, long saveMsSum, long saveMsMax, long workMsSum, long workMsMax, long cpuMsSum,
+                       long changed) {
     }
 
     private record Peer(SyncServerSession session, SyncPipe pipe) {
@@ -114,6 +115,7 @@ public final class HostSync implements SyncServerSession.Host {
     private final Object lock = new Object();
     private final ReentrantLock checkpointLock = new ReentrantLock();
     private final AtomicLong closedRecordFrames = new AtomicLong();
+    private final AtomicLong closedRecordBytes = new AtomicLong();
     private final long intervalMs;
     private final long devDelayMs;
     private volatile boolean needFullScan;
@@ -130,6 +132,8 @@ public final class HostSync implements SyncServerSession.Host {
     private long perfSaveMax;
     private long perfWorkSum;
     private long perfWorkMax;
+    private long perfCpuSum;
+    private boolean unseenWritesTold;
     private long perfChanged;
     private volatile Announcer announcer;
     private boolean finalAnnounceTaken;
@@ -246,13 +250,14 @@ public final class HostSync implements SyncServerSession.Host {
         }
         long saveMs = saveNanos.get() / 1_000_000;
         long started = 0;
+        long cpuFrom = threadCpuNanos();
         Map<String, String> changed = new LinkedHashMap<>();
         checkpointLock.lock();
         try {
             if (finished) {
                 return null;
             }
-            boolean full = needFullScan;
+            boolean full = needFullScan || unseenWrites();
             started = System.currentTimeMillis();
             Set<String> chunkKeys = ChunkStores.drain(root);
             if (full) {
@@ -264,6 +269,7 @@ public final class HostSync implements SyncServerSession.Host {
                 }
             }
             List<String> failed = new ArrayList<>();
+            Exception firstFailure = null;
             for (String key : chunkKeys) {
                 try {
                     byte[] bytes = readChunk(key);
@@ -273,8 +279,16 @@ public final class HostSync implements SyncServerSession.Host {
                         changed.put(key, hash);
                     }
                 } catch (IOException | RuntimeException e) {
+                    if (firstFailure == null) {
+                        firstFailure = e;
+                    }
                     failed.add(key);
                 }
+            }
+            if (firstFailure != null) {
+                // Not silent: until these are read, the members do not have them.
+                DropIn.LOGGER.warn("Checkpoint of '{}': {} chunk records could not be read (first: {}); they are tried again "
+                        + "at the next checkpoint", world.name(), failed.size(), failed.get(0), firstFailure);
             }
             ChunkStores.markDirty(root, failed);
             scanFiles(changed);
@@ -310,7 +324,7 @@ public final class HostSync implements SyncServerSession.Host {
         } finally {
             checkpointLock.unlock();
             if (started != 0) {
-                notePerf(saveMs, System.currentTimeMillis() - started, changed.size());
+                notePerf(saveMs, System.currentTimeMillis() - started, (threadCpuNanos() - cpuFrom) / 1_000_000, changed.size());
             }
         }
     }
@@ -348,26 +362,48 @@ public final class HostSync implements SyncServerSession.Host {
         }
     }
 
-    private void notePerf(long saveMs, long workMs, int changed) {
+    /** CPU time this thread has used; 0 where the JVM does not measure it. */
+    private static long threadCpuNanos() {
+        java.lang.management.ThreadMXBean threads = java.lang.management.ManagementFactory.getThreadMXBean();
+        return threads.isCurrentThreadCpuTimeSupported() ? threads.getCurrentThreadCpuTime() : 0;
+    }
+
+    private void notePerf(long saveMs, long workMs, long cpuMs, int changed) {
         synchronized (perfLock) {
             perfCheckpoints++;
             perfSaveSum += saveMs;
             perfSaveMax = Math.max(perfSaveMax, saveMs);
             perfWorkSum += workMs;
             perfWorkMax = Math.max(perfWorkMax, workMs);
+            perfCpuSum += cpuMs;
             perfChanged += changed;
         }
+    }
+
+    /**
+     * True when another mod replaced the game's chunk storage worker with its own class. Which chunks were
+     * written is then unknown, so every checkpoint compares all of them: slower, but nothing is missed.
+     */
+    private boolean unseenWrites() {
+        String writer = ChunkStores.unseenWriter(root);
+        if (writer != null && !unseenWritesTold) {
+            unseenWritesTold = true;
+            DropIn.LOGGER.warn("Another mod stores the chunks of '{}' with its own class ({}). DropIn cannot see which chunks "
+                    + "it writes, so every checkpoint compares all chunks of the world: correct, but more work.", world.name(), writer);
+        }
+        return writer != null;
     }
 
     /** The cost of the checkpoints since the last call; the counters start again from zero. */
     public Perf takePerf() {
         synchronized (perfLock) {
-            Perf perf = new Perf(perfCheckpoints, perfSaveSum, perfSaveMax, perfWorkSum, perfWorkMax, perfChanged);
+            Perf perf = new Perf(perfCheckpoints, perfSaveSum, perfSaveMax, perfWorkSum, perfWorkMax, perfCpuSum, perfChanged);
             perfCheckpoints = 0;
             perfSaveSum = 0;
             perfSaveMax = 0;
             perfWorkSum = 0;
             perfWorkMax = 0;
+            perfCpuSum = 0;
             perfChanged = 0;
             return perf;
         }
@@ -659,6 +695,10 @@ public final class HostSync implements SyncServerSession.Host {
         try {
             // Whatever the shutdown itself wrote is hashed by the next host session's first checkpoint.
             Set<String> leftover = ChunkStores.drain(sync.root);
+            if (ChunkStores.unseenWriter(sync.root) != null) {
+                // What the shutdown wrote is unknown: whoever opens this copy next compares all of it (DESIGN 4.16 marker).
+                Files.write(sync.dropin.resolve("rescan"), new byte[0]);
+            }
             if (!leftover.isEmpty()) {
                 Files.write(sync.dropin.resolve("dirty.txt"), leftover, StandardCharsets.UTF_8);
             }
@@ -694,6 +734,7 @@ public final class HostSync implements SyncServerSession.Host {
                 session.onClosed();
                 if (sync.peers.remove(peer)) {
                     sync.closedRecordFrames.addAndGet(session.recordFrames());
+                    sync.closedRecordBytes.addAndGet(session.recordBytes());
                 }
             }
         });
@@ -726,6 +767,15 @@ public final class HostSync implements SyncServerSession.Host {
 
     public int records() {
         return manifest.size();
+    }
+
+    /** Bytes of world records sent to members in this host session. */
+    public long recordBytes() {
+        long bytes = closedRecordBytes.get();
+        for (Peer peer : peers) {
+            bytes += peer.session().recordBytes();
+        }
+        return bytes;
     }
 
     /** RECORD frames sent to members in this host session. */
@@ -976,7 +1026,13 @@ public final class HostSync implements SyncServerSession.Host {
     @Override
     public byte[] read(String key) throws IOException {
         if (RecordKey.isChunk(key)) {
-            return readChunk(key);
+            try {
+                return readChunk(key);
+            } catch (IOException | RuntimeException e) {
+                // The session that asked for it ends; without this line nobody would know why.
+                DropIn.LOGGER.warn("Could not read {} of '{}' for a member", key, world.name(), e);
+                throw e;
+            }
         }
         if (!RecordKey.isFile(key) || !RecordKey.fileAllowed(RecordKey.filePath(key))) {
             return null;
