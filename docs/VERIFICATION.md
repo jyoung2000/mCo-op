@@ -321,3 +321,22 @@ Not verified:
 - The owner's report that the hit animation does not play was not reproduced: the test reads `hurtTime`, it does not look at the rendered picture.
 - `pvp` failed four times while it was being written, each time from the test's own setup (knockback out of reach, walking into the other player, a one-tick race); one `admin-online` run found nobody on a single lookup and passed on rerun, cause not found, the check now asks again like the menu does.
 - Export world of a large world, the Export button itself (the action under it ran), file drop on Import, the Join screen while a host is online (only its lookup was run), NeoForge for all new screens, the chat change, and other programs' networking at runtime (source audit only).
+
+## PvP and realtime over the relay; status ping second try: 2026-11-18
+
+Gate run on this machine, on the tree committed with this entry:
+
+| Check | Result |
+| --- | --- |
+| `./gradlew build` | exit 0 |
+| `scripts/jarcheck.ps1` | exit 0 |
+| `scripts/selftest.ps1 -Suite all` | 46 of 46 PASS |
+| `scripts/selftest.ps1 -Suite ui -Online` (before the status ping change) | `pvp.online` and `realtime.online` PASS, 3 of 3 runs each |
+
+- Over the real e4mc relay (second client forced off the LAN shortcut): hits both ways with pvp on, none with it off, hurt animation (`hurtTime`) on both clients for both players and a pig, B walked 8.85 blocks with 0.000 blocks of difference on the host and on A's screen; realtime delays 34 to 210 ms (block, item, health and effect, mob moved), B's hit on a pig on the host's screen within 55 to 60 ms.
+- Two gate runs before this one failed, 44 of 46 (`host-swap-own-inventory`, `owner-rights`) and 45 of 46 (`mod-change-live`). Logged cause in the second: "No status answer from 127.0.0.1:<port> within 5000 ms (the game's pinger says: Pinging...)" while the host was up, so the launcher took the world as not hosted. The failed scenarios passed 12 of 12 when run alone. `StatusPing` now opens a second status connection after 2 s within the same 5 s limit.
+
+Not verified:
+- Why a status connection is sometimes never answered. The gate that passed did not log a use of the second connection, so the change is not shown to be what made it pass.
+- The owner's report (Fabric, relay: no hit animation on the player being hit) was not reproduced; the tests read `hurtTime`, not the picture, and both clients ran on one PC.
+- Earlier `pvp` failures were test flaws, fixed in the test: pigs left in the kept self-test world made the two clients watch different pigs; a fed player healed the one point of damage before the check saw it; knockback out of reach.

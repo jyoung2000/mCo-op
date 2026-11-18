@@ -123,7 +123,7 @@ Payload (compact JSON, about 150 bytes):
 
 Rules:
 
-- **Liveness is a ping, not the record.** The record is a pointer. A host counts as live only if a Minecraft status ping to `addr` answers within 5 s (resolved through the normal `ServerNameResolver`, so e4mc's mixins apply).
+- **Liveness is a ping, not the record.** The record is a pointer. A host counts as live only if a Minecraft status ping to `addr` answers within 5 s (resolved through the normal `ServerNameResolver`, so e4mc's mixins apply). If the first status connection has no answer after 2 s, a second one asks as well; either answer within the 5 s counts (a connection that is made and never answered was seen about once per full self-test run).
 - **Claim before hosting:** GET → if a live host exists, join it. Otherwise PUT `st:"starting"` with a fresh `sess` (send `If-Match` with the timestamp of the record just read, when there was one). Wait 2 s, GET again. If the record now carries someone else's `sess` and they ping, join them. Otherwise open the world, and once the e4mc domain arrives PUT `st:"host"` with `addr`.
 - **Heartbeat:** re-PUT every 5 minutes with the current `head`/`seq`. This also keeps the record alive on the DHT. Back off on HTTP 429.
 - **Clean exit:** PUT `st:"idle"` with the final `head`.

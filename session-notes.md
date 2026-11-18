@@ -529,3 +529,10 @@ State when the session stopped (usage limit, 2026-11-17):
 - New ui scenarios: `menu-flows`, `pvp`, `realtime`. The mod has no mixin on entities, damage or animation packets.
 - My choices awaiting the owner's word: "mc link" read as the invite code; export zip name and place; realtime limit of 1000 ms in the test.
 - Next: the owner's hit-animation report needs their steps (which player, which loader, relay or LAN); not reproduced here.
+
+## Relay PvP/realtime, status ping second try (2026-11-18, gate 46/46)
+
+- `pvp.online`, `realtime.online` added to the online `ui` suite (`-Suite ui -Online`); 3 of 3 passes each.
+- `StatusPing.players`: second status connection after 2 s, same 5 s limit; logs "No status answer…" and "The first status ping … got no answer; the second did". Root cause of unanswered status connections unknown; watch the logs for those lines.
+- Self-test world is kept between runs: scenarios that spawn entities must clear old ones and identify theirs by id (`UiScenarios.spawnPig`).
+- Open: owner's missing hit animation (Fabric, relay) not reproduced. Ask what they see on which screen (victim's own first-person view only tilts the camera; "Damage Tilt" at 0 turns that off).

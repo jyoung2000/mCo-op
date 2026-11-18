@@ -24,6 +24,8 @@ public final class StatusPing {
     public record Player(String uuid, String name) {
     }
 
+    private static final long SECOND_TRY_MS = 2_000;
+
     /** The players the server names in its status answer (the game sends up to 12), or null if it did not answer. */
     public static synchronized java.util.List<Player> players(String address, long timeoutMillis) {
         ServerData data = new ServerData("dropin", address, ServerData.Type.OTHER);
@@ -32,21 +34,40 @@ public final class StatusPing {
             pinger.pingServer(data, () -> {
             }, () -> {
             }, EventLoopGroupHolder.remote(false));
-            long deadline = System.currentTimeMillis() + timeoutMillis;
+            long started = System.currentTimeMillis();
+            long deadline = started + timeoutMillis;
+            // Seen on this project's test machine: now and then a status connection is made and never answered,
+            // while the host is up. So after two seconds without an answer a second connection asks as well;
+            // either answer counts, and the time limit stays the same.
+            ServerData second = null;
             while (System.currentTimeMillis() < deadline) {
                 pinger.tick();
-                if (data.players != null) {
+                ServerData answered = data.players != null ? data : second != null && second.players != null ? second : null;
+                if (answered != null) {
                     java.util.List<Player> list = new java.util.ArrayList<>();
-                    data.players.sample().forEach(player -> list.add(new Player(player.id().toString(), player.name())));
+                    answered.players.sample().forEach(player -> list.add(new Player(player.id().toString(), player.name())));
+                    if (answered == second) {
+                        dropin.mc.DropIn.LOGGER.info("The first status ping of {} got no answer; the second did", address);
+                    }
                     return list;
+                }
+                if (second == null && System.currentTimeMillis() - started >= SECOND_TRY_MS) {
+                    second = new ServerData("dropin", address, ServerData.Type.OTHER);
+                    pinger.pingServer(second, () -> {
+                    }, () -> {
+                    }, EventLoopGroupHolder.remote(false));
                 }
                 Thread.sleep(50);
             }
+            // To the log only: why a host that is announced counted as not there.
+            dropin.mc.DropIn.LOGGER.info("No status answer from {} within {} ms (the game's pinger says: {})", address, timeoutMillis,
+                    data.motd == null ? "" : data.motd.getString());
             return null;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return null;
         } catch (Exception e) {
+            dropin.mc.DropIn.LOGGER.info("The status ping of {} failed: {}", address, e.toString());
             return null;
         } finally {
             pinger.removeAll();

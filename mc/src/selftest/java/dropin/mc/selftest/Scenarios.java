@@ -88,7 +88,8 @@ final class Scenarios {
         String key = spec.scenario() + ":" + spec.role();
         boolean expectOnline = spec.scenario().equals("tunnel-join");
         boolean eitherWay = spec.scenario().equals("drop-in") || spec.scenario().equals("first-download-root-match")
-                || spec.scenario().equals("mod-join") || spec.scenario().equals("handoff-3");
+                || spec.scenario().equals("mod-join") || spec.scenario().equals("handoff-3")
+                || spec.scenario().equals("pvp") || spec.scenario().equals("realtime");
         if (!eitherWay && expectOnline != ctx.online()) {
             throw new IllegalStateException(key + " needs dropin.dev.online=" + expectOnline);
         }

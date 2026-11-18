@@ -45,6 +45,7 @@ final class UiScenarios {
     }
 
     static StepRunner build(String key, Context ctx) {
+        shared = ctx;
         return switch (key) {
             case "admin-online:a" -> adminA(ctx);
             case "admin-online:b" -> adminB(ctx);
@@ -139,15 +140,48 @@ final class UiScenarios {
                 .filter(player -> player.getUUID().toString().equals(uuid)).findFirst().orElse(null);
     }
 
+    private static Context shared;
+    private static String pigId;
+
+    /**
+     * The pig the host spawned for this run, on this client's screen. By its id: the self-test world is kept
+     * between runs, so pigs of earlier runs may still be around, and each client would pick a different one.
+     */
     private static net.minecraft.world.entity.animal.pig.Pig pig(Minecraft mc) {
-        if (mc.level != null) {
+        try {
+            if (pigId == null && shared.sharedExists("pig-id")) {
+                pigId = shared.readShared("pig-id").trim();
+            }
+        } catch (java.io.IOException e) {
+            return null;
+        }
+        if (mc.level != null && pigId != null) {
             for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
-                if (entity instanceof net.minecraft.world.entity.animal.pig.Pig pig) {
+                if (entity instanceof net.minecraft.world.entity.animal.pig.Pig pig && pig.getUUID().toString().equals(pigId)) {
                     return pig;
                 }
             }
         }
         return null;
+    }
+
+    /** On the server thread: removes the pigs of earlier runs, spawns this run's pig without AI and names it to both clients. */
+    private static void spawnPig(net.minecraft.server.MinecraftServer server, Context ctx, double x, double y, double z) {
+        java.util.List<net.minecraft.world.entity.Entity> old = new java.util.ArrayList<>();
+        for (var entity : server.overworld().getAllEntities()) {
+            if (entity instanceof net.minecraft.world.entity.animal.pig.Pig) {
+                old.add(entity);
+            }
+        }
+        old.forEach(net.minecraft.world.entity.Entity::discard);
+        var pig = net.minecraft.world.entity.EntityTypes.PIG.spawn(server.overworld(),
+                net.minecraft.core.BlockPos.containing(x, y, z), net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        pig.setNoAi(true);
+        try {
+            ctx.writeShared("pig-id", pig.getUUID().toString());
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
     }
 
     /** A real attack, as a left click on the other player does it. */
@@ -190,6 +224,7 @@ final class UiScenarios {
         int[] ticks = {0};
         double[] start = new double[3];
         boolean[] anim = {false};
+        boolean[] hurt = {false};
         return hostA(ctx, state, Map.of(), 0)
                 .step("B dropped in", 2 * PEER_TICKS, () -> players(mc) == 2 && ctx.sharedExists("b-ready"))
                 .action("survival, pvp on, B two blocks from A", () -> {
@@ -217,21 +252,25 @@ final class UiScenarios {
                     return true;
                 })
                 .step("B's hit hurt A, with the hurt animation", PEER_TICKS, () -> {
+                    // Kept once seen: a fed player heals one point within half a second.
                     anim[0] |= mc.player.hurtTime > 0;
-                    return ctx.sharedExists("b-hit") && mc.player.getHealth() < 20.0f && anim[0];
+                    hurt[0] |= mc.player.getHealth() < 20.0f;
+                    return ctx.sharedExists("b-hit") && hurt[0] && anim[0];
                 })
                 // B's hit knocked A back, out of reach.
                 .step("B is next to A again", PEER_TICKS, () -> near(mc, b[0], ticks))
                 .action("hit back", () -> {
                     DropIn.LOGGER.info("Self-test: B's hit took A to {} health", mc.player.getHealth());
                     anim[0] = false;
+                    hurt[0] = false;
                     hit(mc, b[0]);
                 })
                 .step("A's hit hurt B on the host, and A sees B's hurt animation", PEER_TICKS, () -> {
                     ServerPlayer other = mc.getSingleplayerServer().getPlayerList().getPlayer(UUID.fromString(b[0]));
                     var seen = seenPlayer(mc, b[0]);
                     anim[0] |= seen != null && seen.hurtTime > 0;
-                    if (other == null || other.getHealth() >= 20.0f || !anim[0]) {
+                    hurt[0] |= other != null && other.getHealth() < 20.0f;
+                    if (other == null || !hurt[0] || !anim[0]) {
                         return false;
                     }
                     ctx.writeShared("a-hit", String.valueOf(other.getHealth()));
@@ -277,13 +316,30 @@ final class UiScenarios {
                     var server = mc.getSingleplayerServer();
                     server.execute(() -> {
                         ServerPlayer a = server.getPlayerList().getPlayer(mc.getUser().getProfileId());
-                        var pig = net.minecraft.world.entity.EntityTypes.PIG.spawn(server.overworld(),
-                                net.minecraft.core.BlockPos.containing(a.getX() + 1.0, a.getY(), a.getZ() + 1.0),
-                                net.minecraft.world.entity.EntitySpawnReason.COMMAND);
-                        pig.setNoAi(true);
+                        spawnPig(server, ctx, a.getX() + 1.0, a.getY(), a.getZ() + 1.0);
                     });
                 })
-                .step("A sees the pig", PEER_TICKS, () -> pig(mc) != null && mc.player.distanceTo(pig(mc)) < 3.0f)
+                // Not before B has the pig too: a client that gets an entity after the hit gets its lower health but,
+                // as in the game without this mod, no hurt animation for a hit that is already over.
+                .step("A and B see the pig", PEER_TICKS, () -> {
+                    if (pig(mc) != null && mc.player.distanceTo(pig(mc)) < 3.0f && ctx.sharedExists("b-pig")) {
+                        return true;
+                    }
+                    if (++ticks[0] % 200 == 0) {
+                        var server = mc.getSingleplayerServer();
+                        ServerPlayer other = server.getPlayerList().getPlayer(UUID.fromString(b[0]));
+                        StringBuilder pigs = new StringBuilder();
+                        for (var entity : server.overworld().getAllEntities()) {
+                            if (entity instanceof net.minecraft.world.entity.animal.pig.Pig pig) {
+                                pigs.append(pig.position()).append(' ');
+                            }
+                        }
+                        DropIn.LOGGER.info("Self-test: waiting for the pig: A's screen {}, B says {}, host has pigs at [{}], A at {}, B at {} (alive {}, mode {})",
+                                pig(mc) == null ? "none" : mc.player.distanceTo(pig(mc)) + " blocks away", ctx.sharedExists("b-pig"), pigs,
+                                mc.player.position(), other.position(), other.isAlive(), other.gameMode.getGameModeForPlayer());
+                    }
+                    return false;
+                })
                 .action("hit the pig", () -> {
                     anim[0] = false;
                     start[0] = pig(mc).getHealth();
@@ -329,6 +385,7 @@ final class UiScenarios {
         int[] ticks = {0};
         String[] a = {null};
         boolean[] anim = {false};
+        boolean[] hurt = {false};
         return joinB(ctx, state, Map.of())
                 .step("copy complete", 2 * PEER_TICKS, copyComplete(mc, state))
                 .action("tell A", () -> ctx.writeShared("b-ready", mc.getUser().getProfileId().toString()))
@@ -349,7 +406,8 @@ final class UiScenarios {
                 .step("A's hit hurt B, with the hurt animation", PEER_TICKS, () -> {
                     failIfDisconnected(mc);
                     anim[0] |= mc.player.hurtTime > 0;
-                    if (!ctx.sharedExists("a-hit") || mc.player.getHealth() >= 20.0f || !anim[0]) {
+                    hurt[0] |= mc.player.getHealth() < 20.0f;
+                    if (!ctx.sharedExists("a-hit") || !hurt[0] || !anim[0]) {
                         return false;
                     }
                     DropIn.LOGGER.info("Self-test: A's hit took B to {} health (the host says {})", mc.player.getHealth(), ctx.readShared("a-hit").trim());
@@ -367,13 +425,27 @@ final class UiScenarios {
                 })
                 .step("A says walk", PEER_TICKS, () -> {
                     failIfDisconnected(mc);
+                    if (pig(mc) == null && ++ticks[0] % 200 == 0) {
+                        int entities = 0;
+                        for (var entity : mc.level.entitiesForRendering()) {
+                            entities++;
+                        }
+                        DropIn.LOGGER.info("Self-test: B has no pig: B at {}, on ground {}, {} entities, health {}, screen {}",
+                                mc.player.position(), mc.player.onGround(), entities, mc.player.getHealth(), mc.gui.screen());
+                    }
+                    if (pig(mc) != null && !ctx.sharedExists("b-pig")) {
+                        DropIn.LOGGER.info("Self-test: B first sees the pig, with {} health", pig(mc).getHealth());
+                        ctx.writeShared("b-pig", "ok");
+                        ticks[0] = 0;
+                    }
                     anim[0] |= pig(mc) != null && pig(mc).hurtTime > 0;
                     // A is in the host's own process and may see the animation, and say "walk", a tick before
                     // the packet reaches B: B looks for it for up to five more seconds before failing.
                     return ctx.sharedExists("walk") && (anim[0] || ++ticks[0] > 100);
                 })
                 .action("A's hit with pvp off did nothing; walk forward", () -> {
-                    require(anim[0], "B did not see the pig's hurt animation when A hit it");
+                    require(anim[0], "B did not see the pig's hurt animation when A hit it; B's pig: "
+                            + (pig(mc) == null ? "none" : "health " + pig(mc).getHealth() + ", " + mc.player.distanceTo(pig(mc)) + " blocks away"));
                     DropIn.LOGGER.info("Self-test: hurt animations seen on B for A, B and the pig");
                     require(mc.player.getHealth() == 20.0f, "pvp is off but A's hit took B to " + mc.player.getHealth());
                     ticks[0] = 0;
@@ -477,10 +549,7 @@ final class UiScenarios {
                     var server = mc.getSingleplayerServer();
                     server.execute(() -> {
                         ServerPlayer other = server.getPlayerList().getPlayer(UUID.fromString(b[0]));
-                        var pig = net.minecraft.world.entity.EntityTypes.PIG.spawn(server.overworld(),
-                                net.minecraft.core.BlockPos.containing(other.getX() + 6.0, other.getY(), other.getZ()),
-                                net.minecraft.world.entity.EntitySpawnReason.COMMAND);
-                        pig.setNoAi(true);
+                        spawnPig(server, ctx, other.getX() + 6.0, other.getY(), other.getZ());
                     });
                 })
                 .step("A sees the pig", PEER_TICKS, () -> pig(mc) != null && ctx.sharedExists("b-pig"))

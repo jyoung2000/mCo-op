@@ -191,6 +191,13 @@ $onlineSuites = @{
         @{ Id = 'handoff-3.online'; Scenario = 'handoff-3'; Online = $true; TimeoutSec = 900
            Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'fabric' 'c')) }
     )
+    ui = @(
+        # Hits, hurt animations, movement and realtime changes with the second player connected through the real relay.
+        @{ Id = 'pvp.online'; Scenario = 'pvp'; Online = $true; TimeoutSec = 900
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+        @{ Id = 'realtime.online'; Scenario = 'realtime'; Online = $true; TimeoutSec = 900
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
+    )
 }
 
 # The real mod of the online smoke (Fabric): small, no dependencies, published on Modrinth for Minecraft 26.3.
