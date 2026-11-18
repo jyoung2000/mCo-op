@@ -108,6 +108,10 @@ final class Scenarios {
         if (m3 != null) {
             return m3;
         }
+        StepRunner ui = UiScenarios.build(key, ctx);
+        if (ui != null) {
+            return ui;
+        }
         StepRunner savePoints = SavePointScenarios.build(key, ctx);
         if (savePoints != null) {
             return savePoints;

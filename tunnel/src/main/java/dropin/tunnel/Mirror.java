@@ -277,6 +277,11 @@ public class Mirror {
         throw new RuntimeException("Could not locate any way to call setUsingWhitelist!");
     }
 
+    /** DropIn: relay notices (the assigned domain, broadcasts) are logged instead of written to chat. */
+    public static void addNotice(Component message) {
+        E4mcClient.LOGGER.info("e4mc: {}", message.getString());
+    }
+
     public static void addMessage(Component message) {
         Minecraft.getInstance().execute(() -> Minecraft.getInstance().gui.hud.getChat().addClientSystemMessage(message));
     }

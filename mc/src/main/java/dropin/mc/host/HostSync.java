@@ -832,6 +832,10 @@ public final class HostSync implements SyncServerSession.Host {
         if (policy.policy().isOwner(id.toString())) {
             return LevelBasedPermissionSet.OWNER;
         }
+        if (policy.policy().isAdmin(id.toString())) {
+            // DESIGN 4.13: commands, kick and ban in every session, whoever hosts.
+            return LevelBasedPermissionSet.ADMIN;
+        }
         return policy.policy().membersMayUseCommands() ? LevelBasedPermissionSet.GAMEMASTER : LevelBasedPermissionSet.ALL;
     }
 

@@ -31,12 +31,13 @@ import java.util.TreeMap;
  * @param datapackFiles    path (relative to {@code datapacks/}, '/' separated) to SHA-256 hex of every file there
  * @param datapacksEnabled the world's enabled world-datapacks ({@code file/...} entries of level.dat), in order
  * @param banned           UUIDs that hosts refuse
+ * @param admins           UUIDs the owner made admins: operator rights in every session (DESIGN 4.13)
  * @param ts               epoch seconds when it was signed
  * @param sig              hex of the Ed25519 signature over {@link #canonicalBytes()}
  */
 public record Policy(long version, String ownerKey, String ownerUuid, String ownerName, String loader, String minecraftVersion,
                      String modManifestHash, Map<String, String> datapackFiles, List<String> datapacksEnabled,
-                     List<String> banned, boolean membersMayUseCommands, long ts, String sig) {
+                     List<String> banned, List<String> admins, boolean membersMayUseCommands, long ts, String sig) {
     public static final String FILE = "policy.json";
     private static final HexFormat HEX = HexFormat.of();
 
@@ -46,6 +47,16 @@ public record Policy(long version, String ownerKey, String ownerUuid, String own
         List<String> sorted = new ArrayList<>(banned);
         java.util.Collections.sort(sorted);
         banned = List.copyOf(sorted);
+        List<String> sortedAdmins = new ArrayList<>(new java.util.TreeSet<>(admins));
+        admins = List.copyOf(sortedAdmins);
+    }
+
+    /** A policy without admins. */
+    public Policy(long version, String ownerKey, String ownerUuid, String ownerName, String loader, String minecraftVersion,
+                  String modManifestHash, Map<String, String> datapackFiles, List<String> datapacksEnabled,
+                  List<String> banned, boolean membersMayUseCommands, long ts, String sig) {
+        this(version, ownerKey, ownerUuid, ownerName, loader, minecraftVersion, modManifestHash, datapackFiles, datapacksEnabled,
+                banned, List.of(), membersMayUseCommands, ts, sig);
     }
 
     /** The bytes the owner signs: one line per field in a fixed order, lists sorted or in their given order. */
@@ -61,6 +72,8 @@ public record Policy(long version, String ownerKey, String ownerUuid, String own
         datapackFiles.forEach((path, hash) -> line(out, "datapack", hash + " " + path));
         datapacksEnabled.forEach(name -> line(out, "enabled", name));
         banned.forEach(uuid -> line(out, "banned", uuid));
+        // No line when there are none, so a policy signed before admins existed still verifies.
+        admins.forEach(uuid -> line(out, "admin", uuid));
         line(out, "membersMayUseCommands", Boolean.toString(membersMayUseCommands));
         line(out, "ts", Long.toString(ts));
         return out.toString().getBytes(StandardCharsets.UTF_8);
@@ -83,7 +96,7 @@ public record Policy(long version, String ownerKey, String ownerUuid, String own
 
     private Policy with(String newOwnerKey, String newSig) {
         return new Policy(version, newOwnerKey, ownerUuid, ownerName, loader, minecraftVersion, modManifestHash,
-                datapackFiles, datapacksEnabled, banned, membersMayUseCommands, ts, newSig);
+                datapackFiles, datapacksEnabled, banned, admins, membersMayUseCommands, ts, newSig);
     }
 
     /**
@@ -130,6 +143,11 @@ public record Policy(long version, String ownerKey, String ownerUuid, String own
         return ownerUuid.equals(uuid);
     }
 
+    /** True for a player the owner made an admin. A ban wins over it. */
+    public boolean isAdmin(String uuid) {
+        return admins.contains(uuid) && !banned.contains(uuid);
+    }
+
     public String toJson() {
         JsonObject json = new JsonObject();
         json.addProperty("version", version);
@@ -150,6 +168,11 @@ public record Policy(long version, String ownerKey, String ownerUuid, String own
         JsonArray bans = new JsonArray();
         banned.forEach(bans::add);
         json.add("banned", bans);
+        if (!admins.isEmpty()) {
+            JsonArray list = new JsonArray();
+            admins.forEach(list::add);
+            json.add("admins", list);
+        }
         json.addProperty("membersMayUseCommands", membersMayUseCommands);
         json.addProperty("ts", ts);
         json.addProperty("sig", sig);
@@ -169,10 +192,14 @@ public record Policy(long version, String ownerKey, String ownerUuid, String own
             datapacks.getAsJsonArray("enabled").forEach(e -> enabled.add(e.getAsString()));
             List<String> banned = new ArrayList<>();
             json.getAsJsonArray("banned").forEach(e -> banned.add(e.getAsString()));
+            List<String> admins = new ArrayList<>();
+            if (json.has("admins")) {
+                json.getAsJsonArray("admins").forEach(e -> admins.add(e.getAsString()));
+            }
             return new Policy(json.get("version").getAsLong(), json.get("ownerKey").getAsString(),
                     json.get("ownerUuid").getAsString(), json.get("ownerName").getAsString(), json.get("loader").getAsString(),
                     json.get("minecraftVersion").getAsString(), json.get("modManifestHash").getAsString(), files, enabled,
-                    banned, json.get("membersMayUseCommands").getAsBoolean(), json.get("ts").getAsLong(),
+                    banned, admins, json.get("membersMayUseCommands").getAsBoolean(), json.get("ts").getAsLong(),
                     json.get("sig").getAsString());
         } catch (RuntimeException e) {
             throw new IllegalArgumentException("not a policy record", e);

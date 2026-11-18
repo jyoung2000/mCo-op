@@ -140,6 +140,13 @@ $savePointSuite = @(
 )
 $suites['m3b'] = $savePointSuite
 
+# DESIGN 4.13 (admins) and 4.15 (who is online in the menu).
+$suites['ui'] = @(
+    # A makes B an admin; B's rights, B's own menu rows and the announced player list are checked on both sides.
+    @{ Id = 'admin-online'; Scenario = 'admin-online'; TimeoutSec = 600
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
+)
+
 # Measurements, not gates: run by name only, never by "all".
 $measureSuites = @{
     perf = @(

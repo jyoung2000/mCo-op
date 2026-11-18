@@ -8,7 +8,7 @@ The design is in `docs/DESIGN.md`. It is the source of truth. If the code and th
 
 - **Read the real 26.3 sources before coding against Minecraft.** 26.x is unobfuscated. Every Minecraft class or method name in `docs/DESIGN.md` §8 is unconfirmed until you have looked at it. Quote the signature you found in `session-notes.md`.
 - **`core/` has no Minecraft, Fabric or NeoForge imports.** Everything in it has unit tests. Run only the tests for the package you changed until the final check.
-- **`tunnel/` is upstream code.** Change it only where the design names a hook (DESIGN §3 rows 6–9). Keep diffs there small so upstream fixes can still be merged.
+- **`tunnel/` is upstream code.** Change it only where the design names a hook (DESIGN §3 rows 6–9 and 14). Keep diffs there small so upstream fixes can still be merged.
 - **Do not fork or rebuild `iroh-java`.** Its native library is downloaded from upstream's host at runtime (DESIGN §3 row 5).
 - **Bulk world data never goes over a relayed path unless `bulkSyncOverRelay` is on** (DESIGN §2 limit 3).
 - **Never read or write `.mca` files of a world that is open on this machine.** Go through the game's storage objects (DESIGN §4.5).
@@ -42,7 +42,7 @@ powershell -ExecutionPolicy Bypass -File scripts/jarcheck.ps1                   
 ```
 
 Gradle must run on JDK 25 (`JAVA_HOME`); `scripts/selftest.ps1` finds one by itself. Self-test logs: `build/selftest-logs/`.
-Suites: `m0`, `m1`, `m2`, `m2b`, `m3` (`handoff-3` starts three clients: slots a, b, c), `m3b` (save points); `perf` is a measurement, not part of `all`. The m2b scenarios use test mods built by `:<loader>:testmodJars` (`build/testmods/`); `-Suite m2b -Online`
+Suites: `m0`, `m1`, `m2`, `m2b`, `m3` (`handoff-3` starts three clients: slots a, b, c), `m3b` (save points), `ui` (admins, who is online); `perf` is a measurement, not part of `all`. The m2b scenarios use test mods built by `:<loader>:testmodJars` (`build/testmods/`); `-Suite m2b -Online`
 downloads one small real mod from Modrinth into `build/testmods/online/`. Add `-Only <scenario id>` to run a single scenario.
 Modules: `core` (pure Java), `tunnel` (upstream e4mc), `mc` (Minecraft-facing, plus the dev-only `selftest` source set),
 `fabric` and `neoforge` (entry points and run tasks). The loader modules compile the sources of the other three;

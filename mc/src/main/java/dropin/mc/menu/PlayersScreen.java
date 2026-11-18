@@ -30,7 +30,7 @@ import java.util.UUID;
 public class PlayersScreen extends Screen {
     private static final String K = "text.dropin_coop.";
 
-    public record Row(String uuid, String name, boolean owner, boolean playingNow, long lastSeen, boolean banned) {
+    public record Row(String uuid, String name, boolean owner, boolean playingNow, long lastSeen, boolean banned, boolean admin) {
     }
 
     private final Screen parent;
@@ -56,15 +56,16 @@ public class PlayersScreen extends Screen {
                 WorldPolicy.Held held = PolicyActions.held(Minecraft.getInstance(), world);
                 CoopStatus.Status status = CoopStatus.of(worldId);
                 for (Member member : world.members()) {
-                    boolean playing = status.kind() == CoopStatus.Kind.PLAYING && member.uuid().equals(status.hostUuid());
-                    rows.add(new Row(member.uuid(), member.name(), member.isOwner(), playing, member.lastSeen(),
-                            held != null && held.policy().isBanned(member.uuid())));
+                    rows.add(new Row(member.uuid(), member.name(), member.isOwner(), status.isOnline(member.uuid()), member.lastSeen(),
+                            held != null && held.policy().isBanned(member.uuid()),
+                            held != null && held.policy().isAdmin(member.uuid())));
                 }
             }
         } catch (Exception e) {
             DropIn.LOGGER.warn("Could not read the members of {}", worldId, e);
         }
-        rows.sort(Comparator.comparing((Row row) -> !row.owner()).thenComparing(Row::name, String.CASE_INSENSITIVE_ORDER));
+        rows.sort(Comparator.comparing((Row row) -> !row.owner()).thenComparing(row -> !row.admin())
+                .thenComparing(Row::name, String.CASE_INSENSITIVE_ORDER));
         return rows;
     }
 
@@ -113,6 +114,10 @@ public class PlayersScreen extends Screen {
                     this.addRenderableWidget(Button.builder(Component.translatable(K + (row.banned() ? "players.unban" : "players.ban")),
                             button -> change(() -> PolicyActions.setBanned(this.minecraft, world, row.uuid(), !row.banned())))
                             .bounds(left + 250, y - 2, 50, 20).build());
+                    // DESIGN 4.13: admins get operator rights in every session.
+                    this.addRenderableWidget(Button.builder(Component.translatable(K + (row.admin() ? "players.unadmin" : "players.admin")),
+                            button -> change(() -> PolicyActions.setAdmin(this.minecraft, world, row.uuid(), !row.admin())))
+                            .bounds(left + 176, y - 2, 70, 20).build());
                 }
                 y += 20;
             }
@@ -130,6 +135,9 @@ public class PlayersScreen extends Screen {
         MutableComponent text = Component.literal(row.name());
         if (row.owner()) {
             text.append(" ").append(Component.translatable(K + "players.owner"));
+        }
+        if (row.admin()) {
+            text.append(" ").append(Component.translatable(K + "players.admin_tag"));
         }
         if (row.banned()) {
             text.append(" ").append(Component.translatable(K + "players.banned"));

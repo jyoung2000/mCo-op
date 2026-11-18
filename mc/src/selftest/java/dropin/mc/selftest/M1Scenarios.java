@@ -165,6 +165,9 @@ final class M1Scenarios {
         screen.play();
     }
 
+    private static long menuShownAt;
+    private static long importShownAt;
+
     static boolean hosting(Context ctx) {
         Minecraft mc = ctx.mc();
         IntegratedServer server = mc.getSingleplayerServer();
@@ -208,8 +211,26 @@ final class M1Scenarios {
                     require(screen.worlds().stream().anyMatch(world -> world.worldId().equals(state.world.worldId())),
                             "the known co-op world is not listed");
                     require(buttonContaining(screen, state.world.name()) != null, "no row shows the world's name");
+                    // The decluttered layout: three buttons on top, and per world an info button. This world was
+                    // joined by invite, so this player is not its owner: no wrench, and nobody has joined it yet.
+                    for (String key : new String[]{"button.join", "button.create", "button.import"}) {
+                        String label = net.minecraft.network.chat.Component.translatable("text.dropin_coop." + key).getString();
+                        require(buttonContaining(screen, label) != null, "no '" + label + "' button");
+                    }
+                    long plain = screen.children().stream().filter(child -> child instanceof Button).count();
+                    require(plain == 3 + 2 + 1, "the screen has " + plain + " buttons, expected Join, Create, Import, one row, info, Back");
+                    require(screen.roleOf(state.world.worldId()) == CoopWorldsScreen.Role.PLAYER, "a world joined by invite is shown as owned");
+                    require(screen.heads(state.world.worldId()).stream().noneMatch(CoopWorldsScreen.Head::online),
+                            "a head is shown online while nobody hosts");
                     require(!CoopWorldsScreen.TITLE.getString().equals("menu.dropin_coop.title"), "the language file is not loaded");
-                });
+                    menuShownAt = System.currentTimeMillis();
+                })
+                // A picture of the screen for the person reading the results; nothing is asserted on it.
+                .step("the screen was drawn", SHORT_TICKS, () -> System.currentTimeMillis() - menuShownAt > 2500)
+                .action("save a picture", () -> net.minecraft.client.Screenshot.grab(mc.gameDirectory, "dropin-coop-menu.png",
+                        mc.gameRenderer.mainRenderTarget(), 1, message -> { }))
+                .step("picture saved", SHORT_TICKS, () -> java.nio.file.Files.isRegularFile(
+                        mc.gameDirectory.toPath().resolve("screenshots").resolve("dropin-coop-menu.png")));
     }
 
     private static Button titleButton(Minecraft mc) {
@@ -255,6 +276,22 @@ final class M1Scenarios {
                     CoopWorldsScreen screen = new CoopWorldsScreen(new TitleScreen());
                     mc.gui.setScreen(screen);
                     require(buttonContaining(screen, state.world.name()) != null, "the imported world is not on the screen");
+                    // The importer is the owner: the row has the wrench too, and the owner's head with the owner role.
+                    long plain = screen.children().stream().filter(child -> child instanceof Button).count();
+                    require(plain == 3 + 3 + 1, "the screen has " + plain + " buttons, expected Join, Create, Import, one row, info, wrench, Back");
+                    require(screen.roleOf(state.world.worldId()) == CoopWorldsScreen.Role.OWNER, "the importer is not shown as the owner");
+                    java.util.List<CoopWorldsScreen.Head> heads = screen.heads(state.world.worldId());
+                    require(heads.size() == 1 && heads.get(0).role() == CoopWorldsScreen.Role.OWNER
+                            && heads.get(0).uuid().equals(mc.getUser().getProfileId().toString()) && !heads.get(0).online(), "heads: " + heads);
+                    importShownAt = System.currentTimeMillis();
+                })
+                // A picture of the owner's row for the person reading the results; nothing is asserted on it.
+                .step("the screen was drawn", SHORT_TICKS, () -> System.currentTimeMillis() - importShownAt > 2500)
+                .action("save a picture", () -> net.minecraft.client.Screenshot.grab(mc.gameDirectory, "dropin-coop-menu-owner.png",
+                        mc.gameRenderer.mainRenderTarget(), 1, message -> { }))
+                .step("picture saved", SHORT_TICKS, () -> java.nio.file.Files.isRegularFile(
+                        mc.gameDirectory.toPath().resolve("screenshots").resolve("dropin-coop-menu-owner.png")))
+                .action("still listed", () -> {
                 })
                 .action("singleplayer list", () -> mc.gui.setScreen(new SelectWorldScreen(new TitleScreen())))
                 // long enough for the list to load its entries, which is where the badge is added

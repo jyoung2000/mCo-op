@@ -43,6 +43,8 @@ public final class HostSession implements Runnable {
     private final RendezvousRecord base;
     private volatile String domain = "";
     private volatile boolean cancelled;
+    /** UUIDs of the players in the session, read on the server thread every few seconds (DESIGN 4.15). */
+    private volatile java.util.List<String> connected = java.util.List.of();
     private volatile String announcedState = "";
     private volatile String announcedAddr = "";
 
@@ -122,7 +124,7 @@ public final class HostSession implements Runnable {
                 boolean waitingForDomain = wanted.isEmpty() && Config.INSTANCE.hostEnabled.value()
                         && now - started < DOMAIN_WAIT_MS;
                 String state = waitingForDomain ? RendezvousRecord.STARTING : RendezvousRecord.HOST;
-                String key = state + "|" + wanted + "|" + policyVersion();
+                String key = state + "|" + wanted + "|" + policyVersion() + "|" + connected;
                 long retryMs = conflict && conflictTries < CONFLICT_RETRIES ? CONFLICT_RETRY_MS : RETRY_MS;
                 boolean due = published == null ? now - lastTry >= (lastTry == 0 ? 0 : retryMs)
                         : !published.equals(key) || now - lastPublish >= HEARTBEAT_MS;
@@ -254,6 +256,9 @@ public final class HostSession implements Runnable {
     private boolean publish(String state, String addr, String lan) {
         try {
             RendezvousRecord record = base.with(state, addr, lan, System.currentTimeMillis() / 1000);
+            if (RendezvousRecord.HOST.equals(state)) {
+                record = record.withPlayers(connected);
+            }
             dropin.mc.host.HostSync sync = dropin.mc.host.HostSync.current();
             dropin.mc.policy.WorldPolicy.Held held = sync == null ? null : sync.held();
             // DESIGN 4.13: a member can see a policy change before connecting.
@@ -269,9 +274,13 @@ public final class HostSession implements Runnable {
 
     private void recordPlayers(IntegratedServer server) {
         server.execute(() -> {
+            java.util.List<String> now = new java.util.ArrayList<>();
             for (ServerPlayer player : server.getPlayerList().getPlayers()) {
                 CoopLauncher.remember(world, player.getGameProfile().id().toString(), player.getGameProfile().name());
+                now.add(player.getGameProfile().id().toString());
             }
+            java.util.Collections.sort(now);
+            connected = java.util.List.copyOf(now);
         });
     }
 }

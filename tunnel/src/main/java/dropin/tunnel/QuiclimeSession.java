@@ -323,12 +323,12 @@ public class QuiclimeSession {
                                                                     .withColor(ChatFormatting.GRAY)
                                                     )
                                             );
-                                            Mirror.addMessage(message);
+                                            Mirror.addNotice(message);
                                         }
                                     }
                                     if (msg instanceof ControlMessageCodec.RequestMessageBroadcastMessageClientbound) {
                                         if (Agnos.isClient()) {
-                                            Mirror.addMessage(Mirror.literal(((ControlMessageCodec.RequestMessageBroadcastMessageClientbound) msg).message));
+                                            Mirror.addNotice(Mirror.literal(((ControlMessageCodec.RequestMessageBroadcastMessageClientbound) msg).message));
                                         }
                                     }
                                     if (msg instanceof ControlMessageCodec.HasCapabilitiesMessageClientbound) {

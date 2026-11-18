@@ -507,3 +507,18 @@ State when the session stopped (usage limit, 2026-11-17):
 - Manual checklist (not run): open Co-op Worlds as owner and as member (Mods folder button only for the owner); Backups,
   Datapacks, Mods folder open the right folders; Save points screen: create, restore, delete, export, import, Solo world.
 - Next: M4 only when the owner asks.
+
+## Menu rework, admins, online heads, chat (2026-11-17, in progress, gate NOT run)
+
+- Owner's decisions: admins get commands + kick/ban; green heads for everyone connected (player list in the announcement);
+  an info button per world for everyone and a wrench for the owner; chat keeps errors only.
+- Done and unit-tested: `Policy.admins` (signed `admin <uuid>` lines), `RendezvousRecord.pl` (12 players, fits one packet).
+- Done, compiled: `HostSync.permissions` (admin level), `PolicyActions.setAdmin`, `HostSession` announces connected players,
+  `CoopStatus.Status.isOnline`, new `CoopWorldsScreen` (Join/Create/Import, world rows with preview, heads, role sort),
+  `WorldInfoScreen`, `WorldSettingsScreen`, admin button in `PlayersScreen`, tunnel notices to the log (`Mirror.addNotice`).
+- Run alone: `-Suite ui` (`admin-online`) PASS 34.6 s. `menu` failed on my own new assertions (world joined by invite is not
+  owned); assertions corrected, re-run of `menu` and `import-saves` was started but its result was not read.
+- Left: read that result; look at the screenshots `fabric/runs/*/screenshots/dropin-coop-menu*.png` and adjust the look;
+  gate (`build`, `jarcheck`, `-Suite all`; add `ui` to what `all` runs if wanted); VERIFICATION entry; MILESTONES entry.
+- Network audit (grep): the mod sets no system properties, proxy, DNS, default SSL or authenticator; its only process launch
+  is the mod-swap helper. Not tested at runtime.

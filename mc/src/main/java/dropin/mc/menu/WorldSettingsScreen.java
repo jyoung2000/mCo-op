@@ -1,0 +1,76 @@
+package dropin.mc.menu;
+
+import dropin.core.world.CoopWorld;
+import dropin.mc.policy.WorldPolicy;
+import dropin.mc.savepoint.SavePointActions;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.CommonComponents;
+import net.minecraft.network.chat.Component;
+
+import java.nio.file.Path;
+
+/**
+ * The owner's menu of one co-op world, behind the wrench (DESIGN 4.13, 4.16): admins, save points and the
+ * world's folders.
+ */
+public class WorldSettingsScreen extends Screen {
+    private static final String K = "text.dropin_coop.";
+
+    private final Screen parent;
+    private final CoopWorld world;
+    /** The world's folder under saves/, or null if this PC has no copy of it. */
+    private final Path folder;
+    private Component notice = Component.empty();
+
+    public WorldSettingsScreen(Screen parent, CoopWorld world, Path folder) {
+        super(Component.translatable(K + "tooltip.settings"));
+        this.parent = parent;
+        this.world = world;
+        this.folder = folder;
+    }
+
+    @Override
+    protected void init() {
+        int x = this.width / 2 - 100;
+        int y = Math.max(34, this.height / 2 - 84);
+        button(K + "settings.players", x, y, true, () -> this.minecraft.gui.setScreen(new PlayersScreen(this, world.worldId())));
+        button(K + "settings.savepoints", x, y + 24, folder != null,
+                () -> this.minecraft.gui.setScreen(new SavePointsScreen(this, world, folder)));
+        button(K + "settings.backups", x, y + 48, folder != null, () -> open(SavePointActions.backupsDir(folder)));
+        button(K + "settings.mods_folder", x, y + 72, true, () -> open(WorldPolicy.modsDir()));
+        button(K + "settings.datapacks", x, y + 96, folder != null, () -> open(folder.resolve("datapacks")));
+        button(K + "button.export_key", x, y + 120, true,
+                () -> notice = CoopActions.exportOwnerKey(this.minecraft, world).message());
+        this.addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, button -> onClose())
+                .bounds(x, this.height - 26, 200, 20).build());
+    }
+
+    private void button(String key, int x, int y, boolean active, Runnable action) {
+        Button button = Button.builder(Component.translatable(key), pressed -> action.run()).bounds(x, y, 200, 20).build();
+        button.active = active;
+        this.addRenderableWidget(button);
+    }
+
+    private void open(Path dir) {
+        try {
+            java.nio.file.Files.createDirectories(dir);
+            com.mojang.blaze3d.Blaze3D.openPath(dir);
+        } catch (java.io.IOException | RuntimeException e) {
+            notice = Component.literal(String.valueOf(e.getMessage()));
+        }
+    }
+
+    @Override
+    public void onClose() {
+        this.minecraft.gui.setScreen(parent);
+    }
+
+    @Override
+    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
+        super.extractRenderState(graphics, mouseX, mouseY, a);
+        graphics.centeredText(this.font, Component.translatable(K + "settings.title", world.name()), this.width / 2, 14, -1);
+        graphics.centeredText(this.font, notice, this.width / 2, this.height - 40, -9216);
+    }
+}

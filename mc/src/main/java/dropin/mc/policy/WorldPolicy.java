@@ -359,11 +359,11 @@ public final class WorldPolicy {
     /** Signs and stores a new policy version with the owner key of this PC. */
     public static Held sign(CoopWorld world, Path worldFolder, long version, String ownerUuid, String ownerName, ModManifest manifest,
                             Map<String, String> datapackFiles, List<String> datapacksEnabled, List<String> banned,
-                            boolean membersMayUseCommands) throws IOException {
+                            List<String> admins, boolean membersMayUseCommands) throws IOException {
         KeyPair key = CoopWorlds.store().ownerKey(world.worldId())
                 .orElseThrow(() -> new IOException("the owner key of this world is not on this PC"));
         Policy policy = Policy.sign(new Policy(version, "", ownerUuid, ownerName, loader(), minecraftVersion(), manifest.hash(),
-                datapackFiles, datapacksEnabled, banned, membersMayUseCommands, System.currentTimeMillis() / 1000, ""), key);
+                datapackFiles, datapacksEnabled, banned, admins, membersMayUseCommands, System.currentTimeMillis() / 1000, ""), key);
         Held held = verified(world, policy, manifest);
         if (!adopt(world, worldFolder, held)) {
             throw new IOException("a newer policy is already stored");

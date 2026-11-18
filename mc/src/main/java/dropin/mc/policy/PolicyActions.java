@@ -54,7 +54,7 @@ public final class PolicyActions {
     public static WorldPolicy.Held signFirst(Minecraft mc, CoopWorld world, Path folder, ModManifest manifest) throws IOException {
         Member owner = owner(mc, world);
         return WorldPolicy.sign(world, folder, 1, owner.uuid(), owner.name(), manifest, WorldPolicy.datapackFiles(folder),
-                WorldPolicy.datapacksEnabled(folder), List.of(), DropIn.switches().selfTest().isPresent());
+                WorldPolicy.datapacksEnabled(folder), List.of(), List.of(), DropIn.switches().selfTest().isPresent());
     }
 
     /** Signs the next version with this PC's mods and datapacks (the world must be closed); bans and commands stay. */
@@ -62,18 +62,24 @@ public final class PolicyActions {
                                               ModManifest manifest) throws IOException {
         Policy old = previous.policy();
         return WorldPolicy.sign(world, folder, old.version() + 1, old.ownerUuid(), old.ownerName(), manifest,
-                WorldPolicy.datapackFiles(folder), WorldPolicy.datapacksEnabled(folder), old.banned(), old.membersMayUseCommands());
+                WorldPolicy.datapackFiles(folder), WorldPolicy.datapacksEnabled(folder), old.banned(), old.admins(), old.membersMayUseCommands());
     }
 
     public static WorldPolicy.Held setMembersMayUseCommands(Minecraft mc, CoopWorld world, boolean allowed) throws IOException {
-        return change(mc, world, null, false, allowed);
+        return change(mc, world, null, false, allowed, null, false);
+    }
+
+    /** DESIGN 4.13: the owner makes a player an admin of the world, or takes that away. */
+    public static WorldPolicy.Held setAdmin(Minecraft mc, CoopWorld world, String uuid, boolean admin) throws IOException {
+        return change(mc, world, null, false, null, uuid, admin);
     }
 
     public static WorldPolicy.Held setBanned(Minecraft mc, CoopWorld world, String uuid, boolean banned) throws IOException {
-        return change(mc, world, uuid, banned, null);
+        return change(mc, world, uuid, banned, null, null, false);
     }
 
-    private static WorldPolicy.Held change(Minecraft mc, CoopWorld world, String uuid, boolean ban, Boolean commands) throws IOException {
+    private static WorldPolicy.Held change(Minecraft mc, CoopWorld world, String uuid, boolean ban, Boolean commands,
+                                           String adminUuid, boolean admin) throws IOException {
         if (!CoopWorlds.store().isOwner(world.worldId())) {
             throw new IOException("only the owner can change this");
         }
@@ -93,11 +99,18 @@ public final class PolicyActions {
                 banned.add(uuid);
             }
         }
+        List<String> admins = new ArrayList<>(old.admins());
+        if (adminUuid != null) {
+            admins.remove(adminUuid);
+            if (admin && !old.isOwner(adminUuid)) {
+                admins.add(adminUuid);
+            }
+        }
         boolean mayUse = commands == null ? old.membersMayUseCommands() : commands;
         // Mods and datapacks are taken from the signed policy, not read again: the world may be open right now.
         Map<String, String> packs = old.datapackFiles();
         WorldPolicy.Held next = WorldPolicy.sign(world, folder, old.version() + 1, old.ownerUuid(), old.ownerName(), previous.manifest(),
-                packs, old.datapacksEnabled(), banned, mayUse);
+                packs, old.datapacksEnabled(), banned, admins, mayUse);
         HostSync hosting = HostSync.current();
         if (hosting != null && hosting.world().worldId().equals(world.worldId())) {
             hosting.adoptNewer(next);

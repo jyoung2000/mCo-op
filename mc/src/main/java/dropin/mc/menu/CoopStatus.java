@@ -15,11 +15,19 @@ import java.util.concurrent.Executors;
 public final class CoopStatus {
     public enum Kind { LOOKING, PLAYING, NOBODY, UNREACHABLE }
 
-    /** @param address the address that answered the ping, when {@code kind} is PLAYING */
-    public record Status(Kind kind, String hostName, String hostUuid, String address) {
-        static final Status LOOKING = new Status(Kind.LOOKING, "", "", "");
-        static final Status NOBODY = new Status(Kind.NOBODY, "", "", "");
-        static final Status UNREACHABLE = new Status(Kind.UNREACHABLE, "", "", "");
+    /**
+     * @param address the address that answered the ping, when {@code kind} is PLAYING
+     * @param record  the host's announcement, when {@code kind} is PLAYING; otherwise null
+     */
+    public record Status(Kind kind, String hostName, String hostUuid, String address, RendezvousRecord record) {
+        static final Status LOOKING = new Status(Kind.LOOKING, "", "", "", null);
+        static final Status NOBODY = new Status(Kind.NOBODY, "", "", "", null);
+        static final Status UNREACHABLE = new Status(Kind.UNREACHABLE, "", "", "", null);
+
+        /** True if the player is in the world's session right now: the host or someone connected to it. */
+        public boolean isOnline(String uuid) {
+            return kind == Kind.PLAYING && record != null && record.isOnline(uuid);
+        }
     }
 
     private static final long PING_TIMEOUT_MS = 5_000;
@@ -51,7 +59,7 @@ public final class CoopStatus {
                 RendezvousRecord record = found.get();
                 for (String address : new String[]{record.lan(), record.addr()}) {
                     if (address != null && !address.isEmpty() && StatusPing.answers(address, PING_TIMEOUT_MS)) {
-                        return new Status(Kind.PLAYING, record.name(), record.host(), address);
+                        return new Status(Kind.PLAYING, record.name(), record.host(), address, record);
                     }
                 }
             }

@@ -32,6 +32,40 @@ class PkarrTest {
                 "069a79f4-44e9-4726-a5be-fca90e38aaf5", "Alex", "00112233aabbccdd", "", 0, 1794900000L, "");
     }
 
+    // ---- players in the record (DESIGN 4.15) ---------------------------------------------------
+
+    @Test
+    void theRecordNamesWhoIsOnlineAndStillFitsOnePacket() throws IOException {
+        String host = "069a79f4-44e9-4726-a5be-fca90e38aaf5";
+        List<String> uuids = new java.util.ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            uuids.add(new java.util.UUID(0x1000_0000_0000_0000L + i * 0x0101_0101_0101L, i).toString());
+        }
+        uuids.add(host);
+        uuids.add("not a uuid");
+        // The longest fields a session can have.
+        RendezvousRecord record = new RendezvousRecord(1, RendezvousRecord.HOST, "a-very-long-relay-name.southamerica.e4mc.link",
+                "255.255.255.255:65535", host, "SixteenCharsName", "00112233aabbccdd", "ab".repeat(16), 9_999_999L, 1794900000L, "",
+                9_999L, "cd".repeat(32)).withPlayers(uuids);
+        assertEquals(RendezvousRecord.PLAYERS_MAX * RendezvousRecord.ID_CHARS, record.pl().length());
+        assertTrue(record.isOnline(host));
+        assertTrue(record.isOnline(uuids.get(0)));
+        assertTrue(!record.isOnline(uuids.get(19)), "players beyond the limit are not listed");
+        assertTrue(!record.isOnline("not a uuid") && !record.isOnline("11111111-2222-3333-4444-555555555555"));
+        assertTrue(!record.with(RendezvousRecord.STARTING, "", "", 5).isOnline(host), "only a hosted session has players");
+        assertEquals(record, RendezvousRecord.fromJson(record.toJson()));
+        assertEquals("", record.handoffTo(uuids.get(0), 6).pl());
+        assertTrue(!hostRecord().toJson().contains("\"pl\""), "no player list when nobody else is connected");
+        assertThrows(IllegalArgumentException.class,
+                () -> RendezvousRecord.fromJson(hostRecord().toJson().replace("\"v\":1", "\"v\":1,\"pl\":\"abc\"")));
+
+        MemoryClient client = new MemoryClient();
+        new PkarrRendezvous(KEYS, client, () -> 1_000_000).publish(record);
+        SignedPacket packet = client.stored.values().iterator().next();
+        assertTrue(packet.dns().length <= SignedPacket.MAX_DNS, "DNS packet is " + packet.dns().length + " bytes");
+        assertEquals(Optional.of(record), new PkarrRendezvous(KEYS, client, () -> 1_000_000).lookup());
+    }
+
     // ---- DNS ---------------------------------------------------------------------------------
 
     @Test

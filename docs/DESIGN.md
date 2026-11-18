@@ -60,6 +60,7 @@ Line numbers are from commit `93ce8a8`.
 | 11 | Defaults point at upstream's infrastructure | `Config.java` (`broker.e4mc.link`, `natives.e4mc.link/relaymap.json`) | The fork uses someone else's servers. See limit 3. |
 | 12 | The 26.x Fabric jar already depends on Fabric API | `fabric/src/main/resources-modern/fabric.mod.json` | On Fabric, players need Fabric API as well (already true upstream). NeoForge needs nothing extra. |
 | 13 | Build lists 26.3 as a supported game version | `fabric/build.gradle:178-180`, `neoforge/build.gradle:115-117` | Upstream tunnel code is expected to work on 26.3 as is. |
+| 14 | The tunnel writes the assigned domain (with a click-to-stop link) and relay broadcasts into chat | `QuiclimeSession.java` (`Mirror.addMessage`) | Hook, decided by the owner 2026-11-17: these two notices go to the log (`Mirror.addNotice`); the domain is shown on the world's info screen. The tunnel's error line stays in chat. |
 
 From outside the repo:
 
@@ -114,8 +115,11 @@ Payload (compact JSON, about 150 bytes):
 ```
 { "v":1, "st":"starting|host|handoff|idle", "addr":"<e4mc domain>", "lan":"<ip:port, optional>", "host":"<uuid>",
   "name":"<player name>", "sess":"<8 random bytes hex>", "head":"<16-byte ledger head hex>",
-  "seq":1234, "ts":<epoch seconds>, "next":"<uuid, handoff only>" }
+  "seq":1234, "ts":<epoch seconds>, "next":"<uuid, handoff only>",
+  "pl":"<connected players besides the host, st=host only>" }
 ```
+
+`pl` (added 2026-11-17 for §4.15): for each connected player, base64url of the first 8 bytes of the UUID (11 characters), sorted and concatenated, at most 12 players; absent when nobody else is connected. The host republishes when the set changes, checked every 5 s. Like the rest of the payload it is encrypted with `enc`, so only holders of the invite can read it. The limit of 12 is what fits in one pkarr packet beside the longest other fields; more players are simply not shown as online.
 
 Rules:
 
@@ -134,17 +138,40 @@ Verify the wire format against the pkarr spec and at least one known-good vector
 
 **Title screen.** A "Co-op Worlds" button beside Singleplayer and Multiplayer, added with a mixin on the title screen's init (no loader screen APIs, so common code stays loader-free). It must not overlap vanilla buttons at GUI scales 1–4.
 
-**Co-op Worlds screen.** Lists every world that has `dropin/world.json`, each with a live status line: "Looking…", "Sam is playing", "Nobody online, you'll host", "Your copy is behind", "Downloading 63%".
+**Co-op Worlds screen** (layout decided by the owner 2026-11-17: simple, visual, no redundant buttons). Three buttons on top, then the list, then Back.
 
-| Button | Action |
+| Top button | Action |
 |--------|--------|
-| Play | Launch flow below. |
-| New | Vanilla Create World screen; the new world is registered as co-op before its first load. |
+| Join | Paste an invite code. The world is added to the list. |
+| Create | Vanilla Create World screen; the new world is registered as co-op before its first load. |
 | Import | Import flow below. |
-| Join with invite | Paste an invite code. |
+
+The list has every world that has `dropin/world.json`, sorted: worlds this player **owns** first, then worlds where this player is an **admin** (§4.13), then the rest; by name within each group. A row looks like a row of the game's world list:
+
+- the world's **preview** (the `icon.png` of the local copy, which is synced; the game's default picture without a copy);
+- the world's name, and an "Owner" or "Admin" tag if this player is one;
+- a live status line: "Looking…", "Sam is playing", "Nobody online, you'll host", "Your copy is behind", "Downloading 63%";
+- the **heads** of the world's players (§4.15).
+
+**Play** is a click on the preview (the game's play arrow appears on hover) or a double click on the row; this is the launch flow below. Each row has an **info** button for everyone, and a **wrench** button for the owner only:
+
+| Info (everyone) | Action |
+|--------|--------|
+| Players | Who has joined: head, name, role, "playing now" / "last seen". |
+| Mods | The world's mod list (§4.15). |
 | Invite | Show and copy this world's invite code. |
-| Players / Mods | World details: who has joined (names, skins) and the world's mod list (§4.15). |
-| Remove | Stop treating the world as co-op on this PC: after a confirm, delete `dropin/` and the local key. The world stays as an ordinary singleplayer world. |
+| Remove from my list | Stop treating the world as co-op on this PC: after a confirm, delete `dropin/` and the local key. The world stays as an ordinary singleplayer world. |
+
+While this PC hosts the world, the info screen also shows the tunnel's address (§3 row 14).
+
+| Wrench (owner) | Action |
+|--------|--------|
+| Players and admins | The player list with **Make admin / Remove admin**, Ban / Unban and "Members may use commands" (§4.13). |
+| Save points | The list of the world's save points: pick one to Restore, Delete, Export or make a single-player world of; Create; Import (§4.16). |
+| Open backups folder | Opens `saves/<folder>/dropin/backups/`, where exported save points are written and found for import. |
+| Open mods folder | Opens the game's `mods/` folder (the mod list of §4.14 is made from it). |
+| Open datapacks folder | Opens `saves/<folder>/datapacks/`. |
+| Export owner key | Backup of the owner key (§4.13). |
 
 Co-op worlds also stay in the normal Singleplayer list with a badge, and opening one from there goes through the same launch flow. The pause menu of a non-co-op singleplayer world gets "Make co-op", which is Import in place.
 
@@ -262,8 +289,9 @@ Added 2026-11-17 at the owner's request. The player who imports or creates a co-
 - **Owner key.** An Ed25519 key pair generated on the owner's PC at import/create. It is *not* derived from the invite seed, so holding the invite does not make you the owner. The private key never leaves `config/dropin/worlds/<worldId>.owner.key`. If that file is lost, nobody can change the policy again; the Co-op Worlds screen offers "Export owner key" for backup.
 - **Invite carries the owner's fingerprint.** Invite payload = seed (32 bytes) ‖ first 16 bytes of SHA-256(owner public key). A member gets the full public key in the sync handshake and checks it against the fingerprint, so a host cannot substitute its own key. This changes §4.1: the code is base32 of 48 bytes, still prefixed `dropin1-`.
 - **Policy.** One owner-signed record: `{version, ownerKey, ownerUuid, ownerName, loader, minecraftVersion, modManifestHash, datapackHashes, banned[], membersMayUseCommands, ts, sig}`. `version` only goes up. Every member stores the newest valid one in `dropin/policy.json` with the mod manifest beside it (§4.14). Because it is signed, any peer can carry it: it is exchanged in the sync handshake (`POLICY`, `POLICY_REQ`), and `{policy version, modManifestHash}` is added to the rendezvous payload so a member can see a change before connecting.
-- **What the owner controls.** The mod list (§4.14); the datapack set (`datapackHashes` = path and hash of every file under `datapacks/**`, plus the enabled list); who is banned; whether members may use commands. The owner has operator rights in every session, whoever is hosting.
-- **What a non-owner host does.** Before the integrated server boots it checks its mods and `datapacks/**` against the policy and refuses to host on a mismatch ("Your copy does not match the owner's mod list / datapacks"). While hosting it refuses banned UUIDs, gives the owner operator rights, and applies `membersMayUseCommands` to itself and everyone else.
+- **What the owner controls.** The mod list (§4.14); the datapack set (`datapackHashes` = path and hash of every file under `datapacks/**`, plus the enabled list); who is banned; who is an admin; whether members may use commands. The owner has operator rights in every session, whoever is hosting.
+- **Admins** (added 2026-11-17 at the owner's request). The policy has one more field, `admins[]`: UUIDs the owner chose. Every host gives an admin the game's admin permission level (commands, `/kick`, `/ban`) whoever is hosting and whatever `membersMayUseCommands` says. An admin cannot change the policy: the mod list, datapacks, the world-wide `banned[]` list, the admin list and save points stay with the owner. A `/ban` by an admin is the game's own ban on the PC that hosts at that moment; it does not travel with the world. A ban in the policy wins over admin. In the signed bytes each admin is one `admin <uuid>` line after the `banned` lines, and no line when there are none, so policies signed before this field existed stay valid.
+- **What a non-owner host does.** Before the integrated server boots it checks its mods and `datapacks/**` against the policy and refuses to host on a mismatch ("Your copy does not match the owner's mod list / datapacks"). While hosting it refuses banned UUIDs, gives the owner operator rights and admins the admin level, and applies `membersMayUseCommands` to itself and everyone else.
 - **Removing someone for real** is still re-keying (§4.1). A ban only binds honest clients.
 - **Limit.** All of this is enforced by the members' own copies of the mod. A member with a modified client and a full copy of the world can ignore it. See §2 limit 5.
 
@@ -286,6 +314,7 @@ Own implementation (MIT), modelled on how AutoModpack works; no AutoModpack code
 
 - **Member record.** `{uuid, name, firstSeen, lastSeen, role}` for everyone who has joined with the mod, kept in the world's config file and exchanged in the sync handshake (`MEMBERS`), so members who are offline are still listed.
 - **World details.** Selecting a world on the Co-op Worlds screen shows two tabs. **Players:** head from the skin, name, owner badge, "playing now" / "last seen". **Mods:** the manifest's mod names and versions, with "missing here" / "extra here" marks against the local `mods/` folder.
+- **Heads on the world's row** (Co-op Worlds screen, for every player of the world): owner first, then admins, then the rest, online before offline. A player who is in the session right now (the host, or listed in the record's `pl`, §4.3) has a **green ring** and full brightness; the others are dimmed. The owner has an outer **gold ring**, an admin an outer **aqua ring**. Hovering a head shows name, role and online/offline. Heads that do not fit are counted ("+3").
 - **Skins** come from the game's own skin lookup by UUID. Offline or unknown profiles show the default skin; no skin files are stored or sent by DropIn.
 - **Other mods and the title screen.** The button is added by a mixin and laid out relative to the vanilla buttons. Mods that replace the title screen can hide it, so the screen is also reachable from a "Co-op Worlds" button on the Singleplayer world list. Config `titleButton` (default on) turns the title-screen button off.
 
@@ -306,10 +335,10 @@ Decided by the owner on 2026-11-17.
 - **Restore.** Only with the world closed on this PC. First an automatic save point named `before-restore` is made of the current world (it replaces the previous automatic one and does not count toward the ten; restoring `before-restore` itself makes no new one). Then every record that differs is written or deleted. The ledger is not rewritten: the next host start takes a full-scan checkpoint, and members receive the rolled-back records as an ordinary checkpoint.
   From the command, the host's world is closed, restored and opened again, and members rejoin by themselves: the host sends `HANDOFF` (§4.9) naming **itself** as the successor and publishes `st:"handoff"` with `next` = itself. A member that receives a handoff to the current host shows "Host is changing…" and reconnects as soon as that host announces a session with a different `sess` than the one that ended. Nobody else takes over.
 - **Commands** (owner who is hosting): `/dropin savepoint create <name>`, `/dropin savepoint list`, `/dropin savepoint restore <name>`.
-- **Menu.** Co-op Worlds has a **Save points** button for the owner: the list with Create, Restore, Delete, Export, Import and **Make single-player world**.
+- **Menu.** The owner's wrench menu of a world (§4.4) has **Save points**: the list with Create, Restore, Delete, Export, Import and **Make single-player world**.
 - **Export / import.** One file `<world name>-<save point name>.dropinsave`: a zip with `point.json`, `point.tsv` and the `objects/` it names, plus `world.txt` holding the worldId. Import accepts only a file of the same world and stores it as a save point (the limit applies).
 - **Make single-player world.** Writes the save point as a new folder under `saves/` with no `dropin/` folder: an ordinary world, not linked to the co-op world.
-- **Folder buttons** in Co-op Worlds: **Backups** opens `saves/<folder>/dropin/backups/`, **Datapacks** opens `saves/<folder>/datapacks/`, and, for the owner only, **Mods folder** opens the game's `mods/` folder (the mod list of §4.14 is made from it).
+- **Folder buttons** are in the owner's wrench menu (§4.4): backups, mods and datapacks.
 
 ## 5. Build retarget and fork hygiene (M0)
 

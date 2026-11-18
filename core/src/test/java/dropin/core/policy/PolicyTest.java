@@ -125,4 +125,29 @@ class PolicyTest {
         assertThrows(IllegalArgumentException.class, () -> Policy.sign(sneaky, OWNER));
         assertThrows(IllegalArgumentException.class, () -> Policy.fromJson("{\"version\":1}"));
     }
+
+    @Test
+    void adminsAreSignedAndAPolicyWithoutThemStaysValid() {
+        String admin = "aaaaaaaa-2222-3333-4444-555555555555";
+        Policy plain = signed(1);
+        assertTrue(plain.admins().isEmpty());
+        assertFalse(plain.toJson().contains("admins"), "a policy without admins keeps the old form");
+
+        Policy with = Policy.sign(new Policy(2, "", OWNER_UUID, "Alex", "fabric", "26.3", "ab".repeat(32), Map.of(), List.of(),
+                List.of(BANNED_UUID), List.of(admin, admin, BANNED_UUID), false, 5, ""), OWNER);
+        assertNull(with.rejection(FINGERPRINT));
+        assertEquals(2, with.admins().size(), "duplicates are dropped");
+        assertTrue(with.isAdmin(admin));
+        assertFalse(with.isAdmin(BANNED_UUID), "a ban wins over admin");
+        assertFalse(with.isAdmin(OWNER_UUID));
+        Policy back = Policy.fromJson(with.toJson());
+        assertEquals(with, back);
+        assertNull(back.rejection(FINGERPRINT));
+
+        // Adding an admin to a signed policy without signing again must not verify.
+        Policy forged = new Policy(with.version(), with.ownerKey(), with.ownerUuid(), with.ownerName(), with.loader(),
+                with.minecraftVersion(), with.modManifestHash(), with.datapackFiles(), with.datapacksEnabled(), with.banned(),
+                List.of(admin, "bbbbbbbb-2222-3333-4444-555555555555"), with.membersMayUseCommands(), with.ts(), with.sig());
+        assertNotNull(forged.rejection(FINGERPRINT));
+    }
 }
