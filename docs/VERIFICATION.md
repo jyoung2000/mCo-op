@@ -263,3 +263,38 @@ Not verified:
 - Performance with players on different PCs, with more than one member, with more loaded chunks than 512, with mobs (the world was peaceful), or at the default 60 s interval.
 - The member's side (frame rate, disk and CPU while downloading) was not measured.
 - The online handoff with players in different networks. All three clients were on one PC and one internet connection; relay speed varied between runs (an announce took 1 to 8 s).
+
+## M3b: save points (DESIGN §4.16): 2026-11-17
+
+Gate run on this machine, one pass, on the tree committed after this entry:
+
+| Check | Result |
+| --- | --- |
+| `./gradlew build` (includes the `dropin.core.savepoint` unit tests) | exit 0 |
+| `scripts/jarcheck.ps1` | exit 0 |
+| `scripts/selftest.ps1 -Suite all` | 42 of 42 PASS (39 earlier scenarios, `savepoint-unit`, `savepoint-rollback`, `savepoint-files`) |
+
+What the two new scenarios checked (logs: `build/selftest-logs/savepoint-*.log`):
+
+- `savepoint-rollback` (45.0 s, two Fabric clients). A hosts, B joins and has a full copy. A runs `/dropin savepoint create base`
+  (save point at checkpoint 3). A places a block, both players clear their inventory and teleport away, and the changes reach a
+  checkpoint. A runs `/dropin savepoint restore base`. With no further input: A's world closes, is restored, and A hosts again;
+  B shows "Host is changing" and is back in the world (in the run made alone before the gate: 5066 ms after the handoff). Then
+  checked on the server: the later block is air, the earlier probe block is still there, both players have their item and place
+  as at the save point; a `before-restore` save point exists; the `dropin/rescan` marker was taken. After A quit, B's closed copy
+  was read back from disk and hashes to the root A ended on.
+- `savepoint-files` (25.6 s, one client, world closed). Eleven save points made: ten are kept and the oldest is gone. One is
+  exported (`.dropinsave`, 543929 bytes for 985 records in the run made alone), deleted, and imported back with the same root and
+  record count. A single-player world made from a save point has a `level.dat`, no `dropin/` folder, opens, has the probe block,
+  and is not hosted.
+- `menu` passed with the new button row on the Co-op Worlds screen.
+
+Not verified:
+- The Save points screen and the four new buttons were not clicked: no test opens `SavePointsScreen`, presses Backups, Datapacks
+  or Mods folder, or checks that the Mods folder button is hidden for a member. Only the code under them ran (through the
+  scenarios above), and the `menu` scenario shows the screen still opens.
+- `/dropin savepoint list`, the refusals (a member or a non-owner running the commands, a bad name, an unknown name), restoring
+  from the menu with the world closed, deleting from the menu, importing a file of another world, and file drop onto the screen.
+- Restore with more than one member, with a member on another PC or through the relay, on NeoForge, and of a large world.
+- Restoring the `before-restore` save point (undo of a restore).
+- How much disk the store really saves over time: only that identical records are stored once (unit test).

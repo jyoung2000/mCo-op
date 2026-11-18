@@ -42,7 +42,7 @@ powershell -ExecutionPolicy Bypass -File scripts/jarcheck.ps1                   
 ```
 
 Gradle must run on JDK 25 (`JAVA_HOME`); `scripts/selftest.ps1` finds one by itself. Self-test logs: `build/selftest-logs/`.
-Suites: `m0`, `m1`, `m2`, `m2b`, `m3` (`handoff-3` starts three clients: slots a, b, c). The m2b scenarios use test mods built by `:<loader>:testmodJars` (`build/testmods/`); `-Suite m2b -Online`
+Suites: `m0`, `m1`, `m2`, `m2b`, `m3` (`handoff-3` starts three clients: slots a, b, c), `m3b` (save points); `perf` is a measurement, not part of `all`. The m2b scenarios use test mods built by `:<loader>:testmodJars` (`build/testmods/`); `-Suite m2b -Online`
 downloads one small real mod from Modrinth into `build/testmods/online/`. Add `-Only <scenario id>` to run a single scenario.
 Modules: `core` (pure Java), `tunnel` (upstream e4mc), `mc` (Minecraft-facing, plus the dev-only `selftest` source set),
 `fabric` and `neoforge` (entry points and run tasks). The loader modules compile the sources of the other three;

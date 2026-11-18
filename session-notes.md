@@ -489,3 +489,21 @@ Mine, told to the owner: storage layout, `.dropinsave` file, automatic `before-r
 State when the session stopped (usage limit, 2026-11-17):
 - Done and committed: `core/savepoint/SavePoints` + `SavePointsTest` (unit tests pass); `mc/savepoint/SavePointActions`, `SavePointCommands`, `CommandsMixin`, `menu/SavePointsScreen`, the four new buttons in `CoopWorldsScreen`, the return-to-same-host path (`HostSync.returning`, `HostHandoff.quitToReturn`, `HostChangingScreen` with `endedSess`), `dropin/rescan` marker. This mc code COMPILES ONLY: nothing of it was run in the game.
 - Not done: self-test scenarios `savepoint-rollback` and `savepoint-files` (MILESTONES M3b), suite entry in `scripts/selftest.ps1`, the `menu` scenario re-run (the Co-op Worlds layout changed: a new button row), the gate, docs/VERIFICATION.md entry, DESIGN 4.2 line for `dropin/rescan` and the note that restoring `before-restore` makes no new automatic save point.
+
+## M3b: save points, gate passed (2026-11-17)
+
+- Gate: `./gradlew build` exit 0, `scripts/jarcheck.ps1` exit 0, `-Suite all` 42/42. Record in `docs/VERIFICATION.md`.
+- New: `mc/src/selftest/java/dropin/mc/selftest/SavePointScenarios.java` (`savepoint-rollback` a/b, `savepoint-files` solo),
+  suite `m3b` in `scripts/selftest.ps1` (part of `all`), wired in `Scenarios.build`. `M2Scenarios.quitAndReportRoot/verifyRoot`
+  and `M3Scenarios.Mark/MARK_A/MARK_B/mark/marked/markedOnServer/players` are now package-private so the new scenarios reuse them.
+- Docs: DESIGN §4.2 lists `dropin/rescan`; §4.16 says restoring `before-restore` makes no new automatic save point; CLAUDE.md
+  suites line.
+- Observed, not a fault: a restore reports about 1390 changed records in a 1000-record flat world, because every loaded chunk
+  is rewritten by the game at each save (time fields), so nearly all chunk records differ from the save point.
+- Choices that were mine and wait for the owner's word: announce retry of 2 s up to 15 times after a refused announce; the store
+  layout and the `.dropinsave` file; the automatic `before-restore`; import only from the same world; save points only on the
+  owner's PC and commands only while the owner hosts; HANDOFF naming the host itself for the rejoin; the `dropin/rescan` marker;
+  `HttpPkarrClient` still waits for all relays.
+- Manual checklist (not run): open Co-op Worlds as owner and as member (Mods folder button only for the owner); Backups,
+  Datapacks, Mods folder open the right folders; Save points screen: create, restore, delete, export, import, Solo world.
+- Next: M4 only when the owner asks.

@@ -129,6 +129,17 @@ $suites = [ordered]@{
     )
 }
 
+# DESIGN 4.16 (save points). Added to $suites below so that "all" runs it after m3.
+$savePointSuite = @(
+    @{ Id = 'savepoint-unit'; Unit = @(':core:test', '--tests', 'dropin.core.savepoint.*') },
+    # A makes a save point, A and B change the world and themselves, A restores it by command; B rejoins by itself.
+    @{ Id = 'savepoint-rollback'; Scenario = 'savepoint-rollback'; TimeoutSec = 900
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+    # The limit of ten, export and import, and a single-player world made from a save point.
+    @{ Id = 'savepoint-files'; Scenario = 'savepoint-files'; TimeoutSec = 900; Roles = @((New-Role 'solo' 'fabric' 'a')) }
+)
+$suites['m3b'] = $savePointSuite
+
 # Measurements, not gates: run by name only, never by "all".
 $measureSuites = @{
     perf = @(

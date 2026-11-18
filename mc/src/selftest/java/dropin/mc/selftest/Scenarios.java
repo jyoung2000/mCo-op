@@ -108,6 +108,10 @@ final class Scenarios {
         if (m3 != null) {
             return m3;
         }
+        StepRunner savePoints = SavePointScenarios.build(key, ctx);
+        if (savePoints != null) {
+            return savePoints;
+        }
         StepRunner perf = PerfScenarios.build(key, ctx);
         if (perf != null) {
             return perf;

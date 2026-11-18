@@ -51,11 +51,11 @@ import static dropin.mc.selftest.Scenarios.inWorld;
  */
 final class M3Scenarios {
     /** Each player's own item and place: what must be "as it was" after the handoff. */
-    private record Mark(String player, Item item, String itemId, int x, int z) {
+    record Mark(String player, Item item, String itemId, int x, int z) {
     }
 
-    private static final Mark MARK_A = new Mark("DevA", Items.DIAMOND, "minecraft:diamond", 100, 100);
-    private static final Mark MARK_B = new Mark("DevB", Items.EMERALD, "minecraft:emerald", -100, 60);
+    static final Mark MARK_A = new Mark("DevA", Items.DIAMOND, "minecraft:diamond", 100, 100);
+    static final Mark MARK_B = new Mark("DevB", Items.EMERALD, "minecraft:emerald", -100, 60);
     private static final Mark MARK_C = new Mark("DevC", Items.GOLD_INGOT, "minecraft:gold_ingot", 60, -100);
 
     /** The older scenarios run with the handoff switched off (see {@code M1Scenarios.base}); these do not. */
@@ -77,7 +77,7 @@ final class M3Scenarios {
 
     // ---- building blocks --------------------------------------------------------------------------
 
-    private static StepRunner mark(StepRunner runner, Minecraft mc, Mark mark) {
+    static StepRunner mark(StepRunner runner, Minecraft mc, Mark mark) {
         return runner
                 .action("give and move", () -> {
                     mc.player.connection.sendCommand("give @s " + mark.itemId() + " 3");
@@ -86,20 +86,20 @@ final class M3Scenarios {
                 .step(mark.player() + " has its item at its place", SHORT_TICKS, () -> marked(mc.player, mark));
     }
 
-    private static boolean marked(Player player, Mark mark) {
+    static boolean marked(Player player, Mark mark) {
         Predicate<ItemStack> isItem = stack -> stack.is(mark.item());
         return player != null && player.getInventory().contains(isItem)
                 && Math.abs(player.getX() - mark.x()) < 2 && Math.abs(player.getZ() - mark.z()) < 2;
     }
 
     /** What the server (the authority) says about a player. */
-    private static boolean markedOnServer(Minecraft mc, Mark mark) {
+    static boolean markedOnServer(Minecraft mc, Mark mark) {
         IntegratedServer server = mc.getSingleplayerServer();
         ServerPlayer player = server == null ? null : server.getPlayerList().getPlayerByName(mark.player());
         return marked(player, mark);
     }
 
-    private static int players(Minecraft mc) {
+    static int players(Minecraft mc) {
         IntegratedServer server = mc.getSingleplayerServer();
         return server == null ? 0 : server.getPlayerList().getPlayerCount();
     }

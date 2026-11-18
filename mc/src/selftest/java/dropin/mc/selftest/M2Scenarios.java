@@ -184,7 +184,7 @@ final class M2Scenarios {
     }
 
     /** A: waits until B's copy is complete, quits (the last checkpoint), and reports the root it ended on. */
-    private static StepRunner quitAndReportRoot(StepRunner runner, Context ctx, State state, int completeTicks) {
+    static StepRunner quitAndReportRoot(StepRunner runner, Context ctx, State state, int completeTicks) {
         Minecraft mc = ctx.mc();
         return quitToTitle(runner.step("B's copy is complete", completeTicks, () -> ctx.sharedExists("b-complete")), ctx)
                 .action("report the root", () -> {
@@ -198,7 +198,7 @@ final class M2Scenarios {
     }
 
     /** B: after A quit, proves from the files on disk that the copy has the root A reported. */
-    private static StepRunner verifyRoot(StepRunner runner, Context ctx, State state) {
+    static StepRunner verifyRoot(StepRunner runner, Context ctx, State state) {
         Minecraft mc = ctx.mc();
         return runner
                 .action("tell A", () -> ctx.writeShared("b-complete", "ok"))

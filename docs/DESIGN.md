@@ -100,6 +100,7 @@ saves/<folder>/dropin/deltas/<seq>.bin             keys changed at that checkpoi
 saves/<folder>/dropin/branches/<head>/...          preserved divergent records (§4.10)
 saves/<folder>/dropin/backups/...                  pre-merge copies of overwritten records
 saves/<folder>/dropin/backups/savepoints/...       the owner's save points (§4.16)
+saves/<folder>/dropin/rescan                       empty marker left by a restore: the next host start compares every record with the manifest, then deletes it (§4.16)
 ```
 
 `dropin/` is never replicated as files. The ledger travels through the protocol.
@@ -302,7 +303,7 @@ Decided by the owner on 2026-11-17.
   - `id` is the creation time in milliseconds, in decimal. Names are 1 to 32 characters of `a-z A-Z 0-9 _ -`, unique without regard to case.
 - **Limit.** Ten per world. Making an eleventh deletes the oldest. Objects no save point names any more are deleted.
 - **Create.** Take a checkpoint, then store every record the object store does not have yet. Hashing and writing run off the server thread; records are read through the game's storage objects (§4.5).
-- **Restore.** Only with the world closed on this PC. First an automatic save point named `before-restore` is made of the current world (it replaces the previous automatic one and does not count toward the ten). Then every record that differs is written or deleted. The ledger is not rewritten: the next host start takes a full-scan checkpoint, and members receive the rolled-back records as an ordinary checkpoint.
+- **Restore.** Only with the world closed on this PC. First an automatic save point named `before-restore` is made of the current world (it replaces the previous automatic one and does not count toward the ten; restoring `before-restore` itself makes no new one). Then every record that differs is written or deleted. The ledger is not rewritten: the next host start takes a full-scan checkpoint, and members receive the rolled-back records as an ordinary checkpoint.
   From the command, the host's world is closed, restored and opened again, and members rejoin by themselves: the host sends `HANDOFF` (§4.9) naming **itself** as the successor and publishes `st:"handoff"` with `next` = itself. A member that receives a handoff to the current host shows "Host is changing…" and reconnects as soon as that host announces a session with a different `sess` than the one that ended. Nobody else takes over.
 - **Commands** (owner who is hosting): `/dropin savepoint create <name>`, `/dropin savepoint list`, `/dropin savepoint restore <name>`.
 - **Menu.** Co-op Worlds has a **Save points** button for the owner: the list with Create, Restore, Delete, Export, Import and **Make single-player world**.
