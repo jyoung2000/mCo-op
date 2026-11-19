@@ -1,34 +1,36 @@
-# e4mc
+# The Co-op Mod
 
-[![Modrinth Downloads](https://img.shields.io/modrinth/dt/qANg5Jrr?color=%2300af5c&logo=modrinth&style=for-the-badge)](https://modrinth.com/project/qANg5Jrr)
-[![Modrinth Followers](https://img.shields.io/modrinth/followers/qANg5Jrr?color=00af5c&logo=modrinth&style=for-the-badge)](https://modrinth.com/project/qANg5Jrr)
-[![CurseForge Downloads](https://img.shields.io/curseforge/dt/849519?style=for-the-badge&logo=curseforge&logoColor=f16436&color=f16436)](https://curseforge.com/minecraft/mc-mods/e4mc)
+Turns a singleplayer world into a drop-in co-op world shared between friends, for Minecraft 26.3 on Fabric and NeoForge (one jar for both).
 
-Open a LAN server to anyone, anywhere, anytime.
+- Every friend keeps a copy of the world. Whoever is playing hosts; friends drop in and out.
+- When the host quits, another player takes over without losing the world. If the host crashes, a friend takes over.
+- Play offline on your own copy and your changes are merged back the next time you meet.
+- Save points, admins and a shared mod list are built in.
 
 ## Install
 
-[Modrinth](https://modrinth.com/project/qANg5Jrr)
+1. Install Fabric Loader or NeoForge for Minecraft 26.3.
+2. Put `dropin-<version>+mc26.3.jar` in your `mods` folder. The same jar works on both loaders.
+3. Open the **Co-op Worlds** screen from the title menu.
 
-### Maven
+Don't install e4mc next to this mod: it already contains e4mc's tunnel.
 
-e4mc is available in [Gayven](https://maven.is-quite.gay) under the coordinates `link.e4mc:e4mc_minecraft-[platform]:[version]`.
+## Privacy
 
-## Usage
+World data and player names travel between friends over the e4mc relay when a direct connection isn't possible.
 
-Open to LAN as normal
+## Building
 
-## Contributing
+Needs JDK 25.
 
-Please contribute
+```
+./gradlew build      # jar in build/libs
+./gradlew :core:test # unit tests
+```
 
-### Related repositories
+## Credits
 
-The following repositories may also be considered a part of e4mc:
-
-- [e4mc-quiclime](https://github.com/vgskye/e4mc-quiclime) is the relay-side code
-- my fork of [netty-incubator-codec-quic](https://github.com/vgskye/netty-incubator-codec-quic)
-- [iroh-java](https://github.com/vgskye/iroh-java) is used for Dialtone
+Made by yessirski. Built on [e4mc](https://github.com/vgskye/e4mc-minecraft-architectury) by Skye (MIT); this project isn't affiliated with or endorsed by e4mc.
 
 ## License
 
