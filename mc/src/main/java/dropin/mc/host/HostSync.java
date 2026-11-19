@@ -5,6 +5,7 @@ import dropin.core.ledger.Deltas;
 import dropin.core.ledger.Ledger;
 import dropin.core.ledger.LedgerEntry;
 import dropin.core.manifest.Manifest;
+import dropin.core.merge.ChunkContent;
 import dropin.core.manifest.RecordKey;
 import dropin.core.pkarr.RendezvousRecord;
 import dropin.core.sync.Successor;
@@ -113,6 +114,8 @@ public final class HostSync implements SyncServerSession.Host {
     private final String sess;
     private final Ledger ledger;
     private final Manifest manifest;
+    /** Content hash (dropin.core.merge.ChunkContent) of every chunk region record this copy has seen change; for merges. */
+    private Manifest content;
     private final Map<String, long[]> fileStamps = new HashMap<>();
     private final List<Peer> peers = new CopyOnWriteArrayList<>();
     private final Object lock = new Object();
@@ -160,6 +163,7 @@ public final class HostSync implements SyncServerSession.Host {
         this.hostName = hostName;
         this.sess = sess;
         this.held = WorldPolicy.load(world, root);
+        this.branches = new dropin.core.merge.BranchStore(this.dropin.resolve("branches"));
         this.needFullScan = takeRescan(root) || ledger.size() == 0 || manifest.isEmpty()
                 || !manifest.root().equals(ledger.last().root());
         long seconds = DropIn.switches().read("dropin.dev.checkpointSeconds").map(Long::parseLong)
@@ -194,6 +198,16 @@ public final class HostSync implements SyncServerSession.Host {
                 // Chunks the last session wrote after its final checkpoint.
                 ChunkStores.markDirty(root, Files.readAllLines(leftover, StandardCharsets.UTF_8));
                 Files.delete(leftover);
+            }
+            try {
+                // DESIGN 4.10: deltas are kept 30 days by default; a branch older than that cannot be merged.
+                long keepDays = Math.max(1, CoopWorlds.configInt("deltaKeepDays", 30));
+                int pruned = Deltas.prune(dropin.resolve("deltas"), System.currentTimeMillis() - keepDays * 24L * 3600 * 1000);
+                if (pruned > 0) {
+                    DropIn.LOGGER.info("Removed {} delta files of '{}' older than {} days", pruned, world.name(), keepDays);
+                }
+            } catch (IOException e) {
+                DropIn.LOGGER.warn("Could not prune the deltas of '{}': {}", world.name(), e.toString());
             }
             HostSync sync = new HostSync(server, world, root, ledger, manifest, hostUuid, hostName, sess);
             sync.announcer = announcer;
@@ -280,6 +294,8 @@ public final class HostSync implements SyncServerSession.Host {
             }
             List<String> failed = new ArrayList<>();
             Exception firstFailure = null;
+            // The content hashes (without the fields the game rewrites on every save) of the changed chunks.
+            Map<String, String> contentNow = new HashMap<>();
             for (String key : chunkKeys) {
                 try {
                     byte[] bytes = readChunk(key);
@@ -287,6 +303,9 @@ public final class HostSync implements SyncServerSession.Host {
                     String old = manifest.get(key);
                     if (hash.isEmpty() ? old != null : !hash.equals(old)) {
                         changed.put(key, hash);
+                        if (ChunkContent.applies(key)) {
+                            contentNow.put(key, ChunkContent.hash(key, bytes));
+                        }
                     }
                 } catch (IOException | RuntimeException e) {
                     if (firstFailure == null) {
@@ -308,7 +327,29 @@ public final class HostSync implements SyncServerSession.Host {
             }
             LedgerEntry entry;
             synchronized (lock) {
+                // What each record was before: a later merge compares the main world with it (DESIGN 4.10).
+                Map<String, String> base = new HashMap<>();
+                Map<String, String> contentBase = new HashMap<>();
+                Path contentFile = dropin.resolve("manifest").resolve("content.tsv");
+                if (content == null) {
+                    content = Manifest.load(contentFile);
+                }
                 changed.forEach((key, hash) -> {
+                    String old = manifest.get(key);
+                    base.put(key, old == null ? "" : old);
+                    if (contentNow.containsKey(key)) {
+                        String before = content.get(key);
+                        if (old == null) {
+                            contentBase.put(key, "");
+                        } else if (before != null) {
+                            contentBase.put(key, before);
+                        }
+                        if (hash.isEmpty()) {
+                            content.remove(key);
+                        } else {
+                            content.put(key, contentNow.get(key));
+                        }
+                    }
                     if (hash.isEmpty()) {
                         manifest.remove(key);
                     } else {
@@ -317,7 +358,8 @@ public final class HostSync implements SyncServerSession.Host {
                 });
                 entry = LedgerEntry.create(keys.auth(), ledger.headSeq() + 1, ledger.head(), hostUuid, hostName, sess,
                         System.currentTimeMillis() / 1000, manifest.root(), changed.size());
-                Deltas.write(dropin.resolve("deltas"), entry.seq(), changed);
+                Deltas.write(dropin.resolve("deltas"), entry.seq(), changed, base, contentBase);
+                content.save(contentFile);
                 ledger.append(entry);
                 manifest.save(dropin.resolve("manifest").resolve("current.tsv"));
                 int size = manifest.size();
@@ -1183,6 +1225,45 @@ public final class HostSync implements SyncServerSession.Host {
             }
         }
         return best;
+    }
+
+    // ---- DESIGN 4.10: branches of members whose copies left this world's lineage -----------------
+
+    private final dropin.core.merge.BranchStore branches;
+    private static volatile String lastBranchReceived = "";
+
+    @Override
+    public dropin.core.merge.BranchStore branches() {
+        return branches;
+    }
+
+    @Override
+    public boolean branchWanted(String head) {
+        return !ledger.hasMerged(head) && !ledger.contains(head);
+    }
+
+    /**
+     * A member's preserved session arrived. It is only stored (in {@code dropin/branches/}, never in the open
+     * world) and passed on to the other members, so that whoever starts the world next can merge it.
+     */
+    @Override
+    public void branchReceived(SyncServerSession session, String head) {
+        String player = memberName(session.playerUuid());
+        lastBranchReceived = head;
+        DropIn.LOGGER.info("{} sent the changes of an offline session of '{}' (branch {}); they are merged when the world starts next",
+                player, world.name(), head.substring(0, 16));
+        for (Peer peer : peers) {
+            if (peer.session() != session) {
+                peer.session().offerBranches();
+            }
+        }
+        server.execute(() -> server.getPlayerList().broadcastSystemMessage(
+                Component.translatable("text.dropin_coop.merge.pending", player), false));
+    }
+
+    /** For the self-tests: the head of the branch this game received last as a host; "" if none. */
+    public static String lastBranchReceived() {
+        return lastBranchReceived;
     }
 
     @Override

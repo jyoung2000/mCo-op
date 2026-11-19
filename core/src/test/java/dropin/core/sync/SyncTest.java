@@ -5,10 +5,14 @@ import dropin.core.ledger.Ledger;
 import dropin.core.ledger.LedgerEntry;
 import dropin.core.manifest.Manifest;
 import dropin.core.manifest.RecordKey;
+import dropin.core.merge.BranchStore;
+import dropin.core.merge.Branches;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -137,6 +141,24 @@ class SyncTest {
         public void peerSynced(SyncServerSession session, long seq) {
             acks.add(seq);
         }
+
+        BranchStore branches;
+        final List<String> branchesReceived = new ArrayList<>();
+
+        @Override
+        public BranchStore branches() {
+            return branches;
+        }
+
+        @Override
+        public boolean branchWanted(String head) {
+            return !ledger.hasMerged(head);
+        }
+
+        @Override
+        public void branchReceived(SyncServerSession session, String head) {
+            branchesReceived.add(head);
+        }
     }
 
     /** A member's copy held in memory. */
@@ -230,6 +252,49 @@ class SyncTest {
 
         SyncClientSession.Status status() {
             return statuses.get(statuses.size() - 1);
+        }
+
+        BranchStore branches;
+        /** What this copy changed on its own lineage: key to the hash at the ancestor. Null: it cannot split. */
+        Map<String, String> ownChanges;
+        final List<LedgerEntry> splits = new ArrayList<>();
+        final List<String> branchesReceived = new ArrayList<>();
+
+        @Override
+        public BranchStore branches() {
+            return branches;
+        }
+
+        @Override
+        public boolean branchWanted(String head) {
+            return !ledger.hasMerged(head);
+        }
+
+        @Override
+        public void branchReceived(String head) {
+            branchesReceived.add(head);
+        }
+
+        @Override
+        public boolean split(LedgerEntry ancestor) throws IOException {
+            if (ownChanges == null) {
+                return false;
+            }
+            splits.add(ancestor);
+            LedgerEntry head = ledger.last();
+            BranchStore.Writer writer = branches.begin(head.hash(), ancestor == null ? "" : ancestor.hash(), head);
+            Map<String, Branches.Change> keys = new LinkedHashMap<>();
+            ownChanges.forEach((key, base) -> keys.put(key, new Branches.Change(
+                    records.containsKey(key) ? Manifest.hash(records.get(key)) : "", base)));
+            writer.keys(keys);
+            for (String key : ownChanges.keySet()) {
+                if (records.containsKey(key)) {
+                    writer.record(records.get(key));
+                }
+            }
+            writer.finish();
+            ledger.truncate(ancestor == null ? 0 : ancestor.seq());
+            return true;
         }
     }
 
@@ -670,6 +735,130 @@ class SyncTest {
         assertArrayEquals(bytes("mine"), local.records.get("f|level.dat"));
         assertEquals(1, local.ledger.size());
         assertEquals(0, host.reads);
+    }
+
+    /** A copy that followed the host to its first checkpoint and then played a session of its own. */
+    private static FakeLocal forked(FakeHost host, Path dir) throws IOException {
+        FakeLocal local = new FakeLocal(KEYS);
+        new Link(host, local).start().cut();
+        assertSameWorld(host, local);
+        local.branches = new BranchStore(dir.resolve("member"));
+        String mine = RecordKey.chunk("minecraft:overworld", "region", 700, 700);
+        String both = RecordKey.chunk("minecraft:overworld", "region", 0, 0);
+        local.ownChanges = new LinkedHashMap<>();
+        local.ownChanges.put(mine, "");
+        local.ownChanges.put(both, local.manifest.get(both));
+        local.records.put(mine, bytes("built offline"));
+        local.manifest.put(mine, Manifest.hash(bytes("built offline")));
+        local.records.put(both, bytes("changed offline"));
+        local.manifest.put(both, Manifest.hash(bytes("changed offline")));
+        local.ledger.append(LedgerEntry.create(KEYS.auth(), 2, local.ledger.head(), "member-uuid", "Member",
+                "ffffffffffffffff", 50, local.manifest.root(), 2));
+        return local;
+    }
+
+    @Test
+    void forkedCopyPreservesItsBranchSendsItAndFollowsTheHost(@TempDir Path dir) throws IOException {
+        FakeHost host = hostWithWorld();
+        host.branches = new BranchStore(dir.resolve("host"));
+        LedgerEntry ancestor = host.ledger.last();
+        FakeLocal local = forked(host, dir);
+        String branchHead = local.ledger.head();
+        host.checkpoint(Map.of(RecordKey.chunk("minecraft:overworld", "region", 0, 0), bytes("changed by the host")));
+        host.checkpoint(Map.of("f|data/more.dat", bytes("more")));
+
+        Link link = new Link(host, local).start();
+
+        assertEquals(SyncClientSession.Phase.LIVE, link.client.phase());
+        assertEquals(List.of(ancestor), local.splits);
+        assertSameWorld(host, local);
+        assertEquals(List.of(branchHead), host.branchesReceived);
+        BranchStore.Branch held = host.branches.load(branchHead);
+        assertEquals(ancestor.hash(), held.ancestor());
+        assertEquals("Member", held.entry().name());
+        assertEquals(local.branches.load(branchHead).keys(), held.keys());
+        assertArrayEquals(bytes("built offline"), host.branches.record(branchHead, Manifest.hash(bytes("built offline"))));
+        assertArrayEquals(bytes("changed offline"), host.branches.record(branchHead, Manifest.hash(bytes("changed offline"))));
+        assertTrue(host.errors.isEmpty(), host.errors.toString());
+
+        // A member that joins later gets the pending branch from the host; nobody is sent it twice.
+        FakeLocal late = new FakeLocal(KEYS);
+        late.branches = new BranchStore(dir.resolve("late"));
+        new Link(host, late).start();
+        assertEquals(List.of(branchHead), late.branchesReceived);
+        assertEquals(held.keys(), late.branches.load(branchHead).keys());
+        assertEquals(List.of(branchHead), host.branchesReceived);
+    }
+
+    @Test
+    void copyAheadOfAHostThatPlaysAnOlderCopyBecomesABranch(@TempDir Path dir) throws IOException {
+        FakeHost host = hostWithWorld();
+        host.branches = new BranchStore(dir.resolve("host"));
+        LedgerEntry ancestor = host.ledger.last();
+        FakeLocal local = forked(host, dir);
+        String branchHead = local.ledger.head();
+
+        Link link = new Link(host, local).start();
+
+        assertEquals(SyncClientSession.Phase.LIVE, link.client.phase());
+        assertEquals(List.of(ancestor), local.splits);
+        assertSameWorld(host, local);
+        assertEquals(List.of(branchHead), host.branchesReceived);
+    }
+
+    @Test
+    void forkedCopyIsNotTouchedOverARelayedPath(@TempDir Path dir) throws IOException {
+        FakeHost host = hostWithWorld();
+        host.branches = new BranchStore(dir.resolve("host"));
+        FakeLocal local = forked(host, dir);
+        String branchHead = local.ledger.head();
+        host.checkpoint(Map.of("f|data/more.dat", bytes("more")));
+        host.bulk = false;
+
+        Link link = new Link(host, local).start();
+
+        assertEquals(SyncClientSession.Phase.WAITING_DIRECT, link.client.phase());
+        assertTrue(local.splits.isEmpty());
+        assertEquals(branchHead, local.ledger.head());
+        assertArrayEquals(bytes("built offline"), local.records.get(RecordKey.chunk("minecraft:overworld", "region", 700, 700)));
+        assertTrue(host.branches.heads().isEmpty());
+
+        host.bulk = true;
+        link.server.refresh();
+        link.run();
+
+        assertEquals(SyncClientSession.Phase.LIVE, link.client.phase());
+        assertSameWorld(host, local);
+        assertEquals(List.of(branchHead), host.branchesReceived);
+    }
+
+    @Test
+    void mergedBranchIsNotAskedFor(@TempDir Path dir) throws IOException {
+        FakeHost host = hostWithWorld();
+        host.branches = new BranchStore(dir.resolve("host"));
+        FakeLocal local = forked(host, dir);
+        String branchHead = local.ledger.head();
+        host.ledger.append(LedgerEntry.createMerge(KEYS.auth(), 2, host.ledger.head(), branchHead, "host-uuid", "Host",
+                "0011223344556677", 60, host.manifest.root(), 0));
+
+        Link link = new Link(host, local).start();
+
+        assertEquals(SyncClientSession.Phase.LIVE, link.client.phase());
+        assertTrue(host.branches.heads().isEmpty());
+        assertTrue(host.branchesReceived.isEmpty());
+    }
+
+    @Test
+    void tamperedBranchIsRefused(@TempDir Path dir) throws IOException {
+        FakeHost host = hostWithWorld();
+        BranchStore store = new BranchStore(dir.resolve("host"));
+        BranchStore.Writer writer = store.begin(host.ledger.head(), "", host.ledger.last());
+        writer.keys(Map.of("f|icon.png", new Branches.Change(Manifest.hash(bytes("icon")), "")));
+        assertThrows(IOException.class, () -> writer.record(bytes("not the icon")));
+        assertThrows(IOException.class, writer::finish);
+        assertTrue(store.heads().isEmpty());
+        LedgerEntry other = LedgerEntry.create(KEYS.auth(), 9, "", "x", "X", "s", 1, "r", 0);
+        assertThrows(IOException.class, () -> store.begin(host.ledger.head(), "", other));
     }
 
     @Test

@@ -138,6 +138,58 @@ public final class Ledger {
         return result;
     }
 
+    /** Every entry, oldest first. */
+    public synchronized List<LedgerEntry> entries() {
+        return new ArrayList<>(entries);
+    }
+
+    /** True if an entry of this ledger merged the branch with this head (DESIGN 4.10: its second parent). */
+    public synchronized boolean hasMerged(String branchHead) {
+        for (LedgerEntry entry : entries) {
+            if (!entry.parents2().isEmpty() && entry.parents2().equals(branchHead)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Drops every entry after the one with this seq (0 drops all): the copy leaves its own lineage at the common
+     * ancestor to follow the main one (DESIGN 4.10). The file is rewritten through a temp file.
+     */
+    public synchronized void truncate(long seq) throws IOException {
+        List<LedgerEntry> kept = new ArrayList<>();
+        for (LedgerEntry entry : entries) {
+            if (entry.seq() <= seq) {
+                kept.add(entry);
+            }
+        }
+        if (kept.size() == entries.size()) {
+            return;
+        }
+        if (file != null) {
+            StringBuilder text = new StringBuilder();
+            for (LedgerEntry entry : kept) {
+                text.append(entry.toJson()).append('\n');
+            }
+            Files.createDirectories(file.getParent());
+            Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
+            Files.writeString(tmp, text, StandardCharsets.UTF_8);
+            try {
+                Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+                Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+        }
+        entries.clear();
+        entries.addAll(kept);
+        hashes.clear();
+        for (LedgerEntry entry : kept) {
+            hashes.add(entry.hash());
+        }
+        head = kept.isEmpty() ? "" : kept.get(kept.size() - 1).hash();
+    }
+
     /** Entry hashes, oldest first. */
     public synchronized List<String> hashes() {
         List<String> result = new ArrayList<>(entries.size());

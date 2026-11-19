@@ -114,6 +114,10 @@ final class Scenarios {
         if (m4 != null) {
             return m4;
         }
+        StepRunner m5 = M5Scenarios.build(key, ctx);
+        if (m5 != null) {
+            return m5;
+        }
         StepRunner ui = UiScenarios.build(key, ctx);
         if (ui != null) {
             return ui;

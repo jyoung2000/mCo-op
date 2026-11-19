@@ -194,6 +194,20 @@ $suites['m4'] = @(
        Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
 )
 
+# MILESTONES M5: divergence and merge (DESIGN 4.10). A and B each play a session alone on the same copy, then
+# B joins A: B's session is kept as a branch, handed to A, and merged when A opens the world the next time.
+$suites['m5'] = @(
+    # A edits near spawn, B 500 blocks away: both edits on both machines, the roots match.
+    @{ Id = 'merge-clean'; Scenario = 'merge-clean'; TimeoutSec = 1500
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+    # Both edit the same chunk: A's version stays, B's is under dropin/backups/conflicts, the report counts one.
+    @{ Id = 'merge-conflict'; Scenario = 'merge-conflict'; TimeoutSec = 1500
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'neoforge' 'b')) },
+    # B's lists of changes are gone: its session is saved as a separate world, A's world is not touched.
+    @{ Id = 'merge-too-old'; Scenario = 'merge-too-old'; TimeoutSec = 1500
+       Roles = @((New-Role 'a' 'neoforge' 'a'), (New-Role 'b' 'fabric' 'b')) }
+)
+
 # Measurements, not gates: run by name only, never by "all".
 $measureSuites = @{
     perf = @(

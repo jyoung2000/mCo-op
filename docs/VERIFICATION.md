@@ -426,3 +426,32 @@ Not verified:
 - The stale warning after a crash: `head` is written at state changes and the heartbeat only, so it can be older than the last checkpoint. The warning's wording and "x hours ago" text were not looked at on screen.
 - The pause-menu line was built from game state and the pause menu was opened without an error, but nobody looked at where it sits on screen; "relayed" and "connecting…" were not seen.
 - A production jar in a real launcher: the mixin on `ClientCommonPacketListenerImpl` ran in the dev clients of both loaders only.
+
+## M5: divergence and merge: 2026-11-19 — GATE PASSED
+
+Gate run on this machine, on the tree committed with this entry:
+
+| Check | Result |
+| --- | --- |
+| `./gradlew build` (unit tests included) | exit 0 |
+| `scripts/jarcheck.ps1` | exit 0 |
+| `scripts/selftest.ps1 -Suite all` | 55 of 55 PASS (new: `merge-clean`, `merge-conflict`, `merge-too-old`) |
+
+Jar: `build/libs/dropin-0.1.0+mc26.3.jar`, 1,211,208 bytes. Logs: `build/logs/m5-gate-*`, single runs `build/logs/m5-clean-2.log`, `m5-conflict-1.log`, `m5-tooold-1.log`.
+
+All three scenarios start alike (offline, file rendezvous): B gets a full copy from A and leaves; A hosts a session alone and places a block at spawn; B's copy is now behind, B gets the stale-copy warning and answers "Play anyway", so its copy forks, and places a block; then A hosts and B joins.
+- `merge-clean` (A, B Fabric): B's block is 500 blocks away. On joining, B's copy kept its session as branch `<B's head>` (`SyncClient.lastSplit()`), followed A, and sent the branch; A received the same head. Nothing merged while A's world was open. A quit and pressed Play: one merge before the world booted, checkpoint 9 with `parents2` = B's head, "25 chunks applied, 0 kept"; both blocks on A's server; the report was put in A's chat once. B joined again, its copy completed, and after A quit all 1,046 records on B's disk hashed to A's root; B's ledger has the merge and no branch is left.
+- `merge-conflict` (A Fabric, B NeoForge): both blocks in chunk 0,0. The merge kept A's chunk (A's block in the world, B's not), wrote B's `chunks/minecraft/overworld/region/c.0.0.nbt` (containing `minecraft:emerald_block`) under `dropin/backups/conflicts/<time>-DevB/`, and the chat line read "Merged DevB's offline session: 0 chunks applied, 1 kept from the main world, 3 files kept (backup saved)." Roots matched afterwards (1,052 records).
+- `merge-too-old` (A NeoForge, B Fabric): B's delta files were deleted before meeting A (what the 30-day prune does). B saved its session as the separate world "Co-op world … (DevB's branch)" (a world folder with `level.dat`, no `dropin/` marker, its far chunk with the hash B's last checkpoint had), sent no branch, and followed A. A received nothing, ran no merge, its ledger has no merge entry, its block is there; roots matched (1,026 records).
+- Found by the first `merge-clean` run and fixed: 81 chunks were "kept" although only B's far chunk was touched. They differed only in `LastUpdate` / `InhabitedTime`, which the game rewrites on every save. The merge now compares a content hash for chunk region records (DESIGN 4.10 "As built in M5").
+- Unit tests (core): merge planner rules (branch-only, both changed, deletions, three records of a chunk together, player files together, world-level files stay, idempotent re-plan, content hashes), `changedSince` and "too old", branch bundle, delta file formats and prune, `BranchStore`, merge entry and `Ledger.truncate`; sync: a forked copy preserves its branch, sends it and follows the host; a copy ahead of a host that plays an older copy becomes a branch; nothing is cut or sent over a relayed path; a merged branch is not asked for; a tampered branch is refused.
+- `Wire.PROTO` is 5: builds before M5 and M5 builds do not sync with each other (they refuse at the handshake).
+
+Not verified:
+- The manual check on two PCs, and anything over the e4mc relay: every run was on one PC over LAN. The relayed-path rule (no branch is cut or sent without a direct path) has a unit test only.
+- The player's own offline inventory: in every merge the diverged player's own player files are "kept from the main world", because that player joined main before the merge (DESIGN 4.10 by the letter). Their offline inventory, stats and advancements end up under `backups/conflicts/`, not in the world. Open question for the owner.
+- A fork whose checkpoints someone else hosted (this PC has no deltas for them): handled as "too old" in M5, not exercised.
+- Two or more pending branches at once, a branch relayed by the host to a third member, a branch merged by a member that takes over after a handoff or crash, a merge cut short and planned again (unit test only), items moved between a conflicting and a clean chunk (the known rough edges of DESIGN 4.10), map ids allocated on both sides.
+- Copies made before M5 (no `content.tsv`, two-column deltas): their region records fall back to record hashes or "too old"; not exercised in a game.
+- The real 30-day prune (the scenario deletes the delta files; `Deltas.prune` has a unit test).
+- The chat lines were checked as text in the log, not looked at on screen.

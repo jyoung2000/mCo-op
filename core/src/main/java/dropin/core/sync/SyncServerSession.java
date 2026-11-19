@@ -87,6 +87,20 @@ public final class SyncServerSession {
         default java.nio.file.Path modFile(String sha512) {
             return null;
         }
+
+        /** The preserved branches this host holds (DESIGN 4.10); null if it keeps none. */
+        default dropin.core.merge.BranchStore branches() {
+            return null;
+        }
+
+        /** Whether this host wants a branch it does not hold yet (false if its ledger already merged it). */
+        default boolean branchWanted(String head) {
+            return false;
+        }
+
+        /** A member's branch arrived in full; it is passed on to the other members as a pending branch. */
+        default void branchReceived(SyncServerSession session, String head) {
+        }
     }
 
     private final Host host;
@@ -106,10 +120,55 @@ public final class SyncServerSession {
     private volatile int peerHave;
     private volatile int peerTotal;
 
+    private final BranchLink branchLink;
+
     public SyncServerSession(Host host, Transport transport, SecureRandom random) {
         this.host = host;
         this.transport = transport;
         this.random = random;
+        this.branchLink = new BranchLink(new BranchLink.Env() {
+            @Override
+            public dropin.core.merge.BranchStore store() {
+                return host.branches();
+            }
+
+            @Override
+            public byte[] auth() {
+                return host.auth();
+            }
+
+            @Override
+            public boolean wanted(String head) {
+                return host.branchWanted(head);
+            }
+
+            @Override
+            public boolean bulk() {
+                return bulk;
+            }
+
+            @Override
+            public void send(Wire.Out message) {
+                sendSealed(message);
+            }
+
+            @Override
+            public void throttle(int bytes) throws InterruptedException {
+                host.throttle(SyncServerSession.this, bytes);
+            }
+
+            @Override
+            public void received(String head) {
+                host.branchReceived(SyncServerSession.this, head);
+            }
+        });
+    }
+
+    /** Tells the peer about the pending branches this host holds that it was not told about yet (DESIGN 4.10). */
+    public void offerBranches() {
+        if (ready()) {
+            branchLink.offer();
+        }
     }
 
     public boolean ready() {
@@ -215,6 +274,7 @@ public final class SyncServerSession {
 
     public void onClosed() {
         closed = true;
+        branchLink.closed();
     }
 
     public void close() {
@@ -250,6 +310,9 @@ public final class SyncServerSession {
         if (now != bulk) {
             bulk = now;
             sendHead();
+            if (now) {
+                branchLink.offer();
+            }
         }
         return now;
     }
@@ -308,7 +371,9 @@ public final class SyncServerSession {
                         from = to;
                     } while (from < entries.size());
                 }
+                branchLink.offer();
             }
+            case Wire.BRANCH_PUSH -> branchLink.handle(in);
             case Wire.DIFF_REQ -> {
                 List<String> regions = in.strs();
                 if (!currentBulk()) {

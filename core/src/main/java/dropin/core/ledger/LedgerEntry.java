@@ -28,8 +28,17 @@ public record LedgerEntry(long seq, String parent, String host, String name, Str
 
     public static LedgerEntry create(byte[] auth, long seq, String parent, String host, String name, String sess,
                                      long ts, String root, int changed) {
-        LedgerEntry unsigned = new LedgerEntry(seq, parent, host, name, sess, ts, root, changed, "", "");
-        return new LedgerEntry(seq, parent, host, name, sess, ts, root, changed, "",
+        return createMerge(auth, seq, parent, "", host, name, sess, ts, root, changed);
+    }
+
+    /**
+     * A merge entry (DESIGN 4.10): {@code parent} is the main world's head, {@code parents2} the head of the
+     * branch that was merged into it.
+     */
+    public static LedgerEntry createMerge(byte[] auth, long seq, String parent, String parents2, String host, String name,
+                                          String sess, long ts, String root, int changed) {
+        LedgerEntry unsigned = new LedgerEntry(seq, parent, host, name, sess, ts, root, changed, parents2, "");
+        return new LedgerEntry(seq, parent, host, name, sess, ts, root, changed, parents2,
                 HEX.formatHex(Hkdf.hmac(auth, unsigned.canonical())));
     }
 

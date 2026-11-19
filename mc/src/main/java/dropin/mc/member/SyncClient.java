@@ -1,9 +1,13 @@
 package dropin.mc.member;
 
+import dropin.core.ledger.Deltas;
 import dropin.core.ledger.Ledger;
 import dropin.core.ledger.LedgerEntry;
 import dropin.core.manifest.Manifest;
 import dropin.core.manifest.RecordKey;
+import dropin.core.merge.BranchStore;
+import dropin.core.merge.Branches;
+import dropin.core.merge.ChunkContent;
 import dropin.core.sync.SyncClientSession;
 import dropin.core.sync.SyncClientSession.Phase;
 import dropin.core.sync.SyncState;
@@ -14,6 +18,7 @@ import dropin.mc.handoff.CrashFailover;
 import dropin.mc.handoff.MemberHandoff;
 import dropin.mc.coop.CoopWorlds;
 import dropin.mc.menu.CoopActions;
+import dropin.mc.merge.ColdMerge;
 import dropin.mc.net.PathPolicy;
 import dropin.mc.net.SyncConnector;
 import dropin.mc.menu.ModConsentScreen;
@@ -62,6 +67,13 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
     private Manifest manifest;
     private SyncState state;
     private volatile RecordApplier applier;
+    private BranchStore branches;
+    private volatile SyncPipe pipe;
+    /** Records this PC wrote after its last checkpoint as host: key to the hash that checkpoint had ("" = none). */
+    private final Map<String, String> leftoverBase = new java.util.HashMap<>();
+    /** Content hash (ChunkContent) of the chunk region records of this copy, as of its last checkpoint; for merges. */
+    private Manifest content = new Manifest();
+    private static volatile String lastSplit = "";
 
     private SyncClient(Minecraft mc, CoopWorld world, String address) {
         this.mc = mc;
@@ -199,6 +211,7 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
             }
             String old = manifest.get(key);
             if (hash.isEmpty() ? old != null : !hash.equals(old)) {
+                leftoverBase.put(key, old == null ? "" : old);
                 if (hash.isEmpty()) {
                     manifest.remove(key);
                 } else {
@@ -235,6 +248,7 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
             } else {
                 manifest = new Manifest();
             }
+            content = Manifest.load(dropin.resolve("manifest").resolve("content.tsv"));
             Path stateFile = dropin.resolve("state.json");
             if (Files.isRegularFile(stateFile)) {
                 state = SyncState.load(stateFile);
@@ -247,6 +261,7 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
                 state.save(stateFile);
             }
             applier = new RecordApplier(folder);
+            branches = new BranchStore(dropin.resolve("branches"));
             reconcileLeftover(manifestFile);
             DropIn.LOGGER.info("World sync of '{}' started: {} records here, checkpoint {}", world.name(),
                     manifest.size(), ledger.headSeq());
@@ -283,6 +298,7 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
     /** One sync connection, from connect to close. Returns the phase it ended in. */
     private Phase connectOnce() throws InterruptedException {
         SyncPipe pipe = new SyncPipe("dropin-sync-client");
+        this.pipe = pipe;
         SyncClientSession session = new SyncClientSession(this, pipe, RANDOM);
         CountDownLatch closed = new CountDownLatch(1);
         pipe.endpoint(new SyncPipe.Endpoint() {
@@ -391,18 +407,23 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
     @Override
     public void apply(String key, byte[] bytes) throws IOException {
         applier.apply(key, bytes);
+        if (ChunkContent.applies(key)) {
+            content.put(key, ChunkContent.hash(key, bytes));
+        }
         applied.incrementAndGet();
     }
 
     @Override
     public void delete(String key) throws IOException {
         applier.delete(key);
+        content.remove(key);
     }
 
     @Override
     public void flush() throws IOException {
         applier.flush();
         manifest.save(dropin.resolve("manifest").resolve("current.tsv"));
+        content.save(dropin.resolve("manifest").resolve("content.tsv"));
         state = new SyncState(state.head(), state.syncedThrough(), state.complete(), status.have(), status.total());
         state.save(dropin.resolve("state.json"));
     }
@@ -414,6 +435,132 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
         state.save(dropin.resolve("state.json"));
         DropIn.LOGGER.info("The local copy of '{}' is complete through checkpoint {} (root {})", world.name(),
                 head.seq(), head.root());
+        // A branch the main world has merged by now is no longer pending here either.
+        for (String branch : branches.heads()) {
+            if (ledger.hasMerged(branch)) {
+                branches.delete(branch);
+            }
+        }
+    }
+
+    // ---- DESIGN 4.10: this copy left the main world's lineage -------------------------------------
+
+    @Override
+    public BranchStore branches() {
+        return branches;
+    }
+
+    @Override
+    public boolean branchWanted(String head) {
+        return !ledger.hasMerged(head) && !ledger.contains(head);
+    }
+
+    @Override
+    public void branchReceived(String head) {
+        DropIn.LOGGER.info("The host of '{}' passed on a preserved offline session ({}); it is merged when the world starts next",
+                world.name(), head.substring(0, 16));
+    }
+
+    @Override
+    public void beforeUpload(int bytes) throws InterruptedException {
+        SyncPipe open = pipe;
+        if (open != null) {
+            open.awaitWritable(30_000);
+        }
+    }
+
+    /**
+     * The host's world is the main one. What this copy changed since the last checkpoint both share is kept as
+     * a branch under {@code dropin/branches/<head>/}; if the deltas no longer say what that is, the whole copy
+     * is saved as a separate world instead. Then the ledger is cut back to the shared checkpoint, and the sync
+     * brings the copy to the host's state. The copy is not open: it is read through the sync's own storage.
+     */
+    @Override
+    public boolean split(LedgerEntry ancestor) throws IOException {
+        LedgerEntry head = ledger.last();
+        applier.flush();
+        Path deltas = dropin.resolve("deltas");
+        Map<String, Branches.Change> changed = ancestor == null ? null : Branches.changedSince(ancestor.seq(), head.seq(), seq -> {
+            try {
+                return Files.isRegularFile(Deltas.file(deltas, seq)) ? Deltas.readFull(deltas, seq) : null;
+            } catch (IOException | RuntimeException e) {
+                return null;
+            }
+        });
+        if (changed == null) {
+            String saved = ColdMerge.saveSeparate(mc, world, manifest, applier, head.name());
+            lastSplit = "separate:" + saved;
+            DropIn.LOGGER.warn("The copy of '{}' left the main world at a checkpoint its deltas no longer reach; it was saved as the "
+                    + "separate world '{}' and now follows the host", world.name(), saved);
+            chat(Component.translatable(K + "merge.too_old", saved));
+        } else {
+            Map<String, Branches.Change> keys = Branches.bundle(changed,
+                    key -> leftoverBase.containsKey(key) ? emptyToNull(leftoverBase.get(key)) : manifest.get(key),
+                    key -> {
+                        // As of this copy's last checkpoint; a copy from before content hashes were kept reads the record.
+                        String known = content.get(key);
+                        if (known != null || !ChunkContent.applies(key)) {
+                            return known != null ? known : manifest.get(key);
+                        }
+                        try {
+                            return emptyToNull(ChunkContent.hash(key, applier.read(key)));
+                        } catch (IOException | RuntimeException e) {
+                            return null;
+                        }
+                    });
+            BranchStore.Writer writer = branches.begin(head.hash(), ancestor.hash(), head);
+            int records = 0;
+            try {
+                for (Map.Entry<String, Branches.Change> entry : keys.entrySet()) {
+                    byte[] bytes;
+                    try {
+                        bytes = applier.read(entry.getKey());
+                    } catch (IOException | RuntimeException e) {
+                        bytes = null;
+                    }
+                    // What is on disk now: also what this PC wrote after its last checkpoint.
+                    Branches.Change now = new Branches.Change(bytes == null ? "" : Manifest.hash(bytes), entry.getValue().base(),
+                            ChunkContent.hash(entry.getKey(), bytes), entry.getValue().contentBase());
+                    writer.keys(Map.of(entry.getKey(), now));
+                    if (bytes != null && now.changed()) {
+                        writer.record(bytes);
+                        records++;
+                    }
+                }
+                writer.finish();
+            } catch (IOException | RuntimeException e) {
+                writer.abort();
+                throw e;
+            }
+            lastSplit = "branch:" + head.hash();
+            DropIn.LOGGER.info("The copy of '{}' left the main world after checkpoint {}: {} records of {}'s session are preserved as "
+                    + "branch {} and are merged when the world starts next", world.name(), ancestor.seq(), records, head.name(),
+                    head.hash().substring(0, 16));
+            chat(Component.translatable(K + "merge.preserved"));
+        }
+        ledger.truncate(ancestor == null ? 0 : ancestor.seq());
+        state = new SyncState(ancestor == null ? "" : ancestor.hash(), ancestor == null ? 0 : ancestor.seq(), state.complete(),
+                state.have(), state.total());
+        state.save(dropin.resolve("state.json"));
+        leftoverBase.clear();
+        return true;
+    }
+
+    private static String emptyToNull(String hash) {
+        return hash == null || hash.isEmpty() ? null : hash;
+    }
+
+    private void chat(Component message) {
+        mc.execute(() -> {
+            if (mc.player != null) {
+                mc.gui.hud.getChat().addClientSystemMessage(message);
+            }
+        });
+    }
+
+    /** For the self-tests: what the last split on this PC did, "branch:&lt;head&gt;" or "separate:&lt;folder&gt;"; "" if none. */
+    public static String lastSplit() {
+        return lastSplit;
     }
 
     @Override

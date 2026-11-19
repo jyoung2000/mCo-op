@@ -21,7 +21,8 @@ public final class Wire {
     /** {@code DROPIN\0\1}: the first bytes a sync client sends. A vanilla handshake cannot start like this. */
     private static final byte[] MAGIC = {0x44, 0x52, 0x4F, 0x50, 0x49, 0x4E, 0x00, 0x01};
     public static final int MAGIC_LENGTH = MAGIC.length;
-    public static final int PROTO = 4;
+    /** 5 since M5: a host before it closes the connection on a {@link #BRANCH_PUSH}. */
+    public static final int PROTO = 5;
     public static final int MAX_FRAME = 4 * 1024 * 1024;
     /** Largest piece of one record in a RECORD frame. */
     public static final int PIECE = 256 * 1024;
@@ -49,7 +50,27 @@ public final class Wire {
     public static final int PEERS = 18;
     /** Host to members when it quits (DESIGN 4.9): {str successorUuid, str finalEntryJson}. Only sent when there is a successor. */
     public static final int HANDOFF = 19;
+    /**
+     * A preserved branch on its way to another copy (DESIGN 4.10), in both directions: a diverged member sends
+     * its branch to the host, and the host passes pending branches on to the members. Bulk data: only where
+     * records may go. {u8 part, ...}, see the {@code BRANCH_*} parts. A copy says which branches it holds
+     * (OFFER), the other side asks for those it lacks (WANT), and gets BEGIN, KEYS, DATA and END for each.
+     */
     public static final int BRANCH_PUSH = 20;
+    /** {strs heads}: the complete, unmerged branches the sender holds. */
+    public static final int BRANCH_OFFER = 1;
+    /** {str head}: send me this one. */
+    public static final int BRANCH_WANT = 2;
+    /** {str head, str ancestor, str entryJson}: the branch's last checkpoint and where it left the main world. */
+    public static final int BRANCH_BEGIN = 3;
+    /** {i32 count, then for each: str key, str hash, str base}; may come several times. */
+    public static final int BRANCH_KEYS = 4;
+    /** {u8 last, bytes piece}: one record of the branch, in pieces; the receiver checks its hash. */
+    public static final int BRANCH_DATA = 5;
+    /** {str head}: every record was sent. */
+    public static final int BRANCH_END = 6;
+    /** Keys in one BRANCH_KEYS part. */
+    public static final int BRANCH_KEY_BATCH = 2000;
     public static final int BYE = 21;
     /** Owner policy and mod sync (DESIGN 4.13, 4.14). */
     public static final int POLICY = 22;

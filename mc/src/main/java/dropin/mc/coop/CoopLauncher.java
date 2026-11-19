@@ -201,6 +201,8 @@ public final class CoopLauncher {
             }
             // The copy is about to be opened by the game: a sync from an earlier session must have let go of it.
             SyncClient.stopAndWait(world.worldId(), 15_000);
+            // DESIGN 4.10: offline sessions that wait to be merged go in now, while the world is still closed.
+            dropin.mc.merge.ColdMerge.run(mc, world, folder, uuid, name, host.sess());
             mc.execute(() -> {
                 HostSession.start(mc, world, rendezvous, host.sess(), uuid, name);
                 passThrough = true;
@@ -238,6 +240,8 @@ public final class CoopLauncher {
         String uuid = mc.getUser().getProfileId().toString();
         String name = mc.getUser().getName();
         String levelId = folder.getFileName().toString();
+        SyncClient.stopAndWait(world.worldId(), 15_000);
+        dropin.mc.merge.ColdMerge.run(mc, world, folder, uuid, name, sess);
         mc.execute(() -> {
             HostSession.start(mc, world, CoopWorlds.rendezvous(world), sess, uuid, name);
             passThrough = true;

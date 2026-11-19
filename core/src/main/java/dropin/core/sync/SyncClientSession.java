@@ -114,6 +114,36 @@ public final class SyncClientSession {
         /** What the host knows about every member right now (DESIGN 4.9, crash); kept for when the host vanishes. */
         default void peers(List<Election.Peer> peers) {
         }
+
+        /**
+         * This copy and the host's are on different lineages (DESIGN 4.10). The copy preserves what it changed
+         * since the common ancestor as a branch (or, if that is not possible any more, saves itself as a separate
+         * world) and cuts its ledger back to the ancestor; the session then brings it to the host's state like
+         * any copy that is behind. Only called while bulk data may flow.
+         *
+         * @param ancestor the last checkpoint both ledgers share, null if they share none
+         * @return false if this copy cannot do that; it is then left exactly as it is
+         */
+        default boolean split(LedgerEntry ancestor) throws IOException {
+            return false;
+        }
+
+        /** The preserved branches this copy holds (DESIGN 4.10); null if it keeps none. */
+        default dropin.core.merge.BranchStore branches() {
+            return null;
+        }
+
+        /** Whether this copy wants a branch it does not hold yet (false if its ledger already merged it). */
+        default boolean branchWanted(String head) {
+            return false;
+        }
+
+        default void branchReceived(String head) {
+        }
+
+        /** Called before {@code bytes} of a branch go to the host (back-pressure). */
+        default void beforeUpload(int bytes) throws InterruptedException {
+        }
     }
 
     private final Local local;
@@ -155,10 +185,55 @@ public final class SyncClientSession {
     private long applied;
     private long rejected;
 
+    /** The host's whole ledger is being fetched to find the common ancestor (DESIGN 4.10). */
+    private boolean resolving;
+    /** While resolving: batches of the first, partial ledger answer are still arriving. */
+    private boolean skipRest;
+    /** The lineages differ, but the copy is only cut over once bulk data may flow. */
+    private boolean splitWaiting;
+    private final List<LedgerEntry> theirs = new ArrayList<>();
+    private final BranchLink branchLink;
+
     public SyncClientSession(Local local, Transport transport, SecureRandom random) {
         this.local = local;
         this.transport = transport;
         this.random = random;
+        this.branchLink = new BranchLink(new BranchLink.Env() {
+            @Override
+            public dropin.core.merge.BranchStore store() {
+                return local.branches();
+            }
+
+            @Override
+            public byte[] auth() {
+                return local.auth();
+            }
+
+            @Override
+            public boolean wanted(String head) {
+                return local.branchWanted(head);
+            }
+
+            @Override
+            public boolean bulk() {
+                return bulk && ledgerDone;
+            }
+
+            @Override
+            public void send(Wire.Out message) {
+                SyncClientSession.this.send(message);
+            }
+
+            @Override
+            public void throttle(int bytes) throws InterruptedException {
+                local.beforeUpload(bytes);
+            }
+
+            @Override
+            public void received(String head) {
+                local.branchReceived(head);
+            }
+        });
     }
 
     public Phase phase() {
@@ -194,10 +269,14 @@ public final class SyncClientSession {
             }
         } catch (IOException | GeneralSecurityException | RuntimeException e) {
             fail(e.getMessage() == null ? e.toString() : e.getMessage());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            fail("interrupted");
         }
     }
 
     public void onClosed() {
+        branchLink.closed();
         if (!closed) {
             closed = true;
             flushQuietly();
@@ -259,7 +338,7 @@ public final class SyncClientSession {
         }
     }
 
-    private void dispatch(Wire.In in) throws IOException {
+    private void dispatch(Wire.In in) throws IOException, InterruptedException {
         switch (in.type) {
             case Wire.HEAD -> onHead(in.str(), in.i64(), in.str(), in.u8() != 0);
             case Wire.LEDGER_RESP -> onLedger(in.u8() != 0, in.strs());
@@ -282,8 +361,9 @@ public final class SyncClientSession {
                 local.handoff(successor, finalEntry, finalEntry.hash().equals(local.ledger().head()));
             }
             case Wire.PEERS -> local.peers(Election.read(in));
-            case Wire.BRANCH_PUSH, Wire.MOD_DATA -> {
-                // Later milestones.
+            case Wire.BRANCH_PUSH -> branchLink.handle(in);
+            case Wire.MOD_DATA -> {
+                // Mod files travel on their own connection (PolicyClientSession).
             }
             case Wire.SPEED_REQ -> {
                 // The host measures this player's upload speed to know who could host best (DESIGN 4.9).
@@ -309,8 +389,15 @@ public final class SyncClientSession {
         if (!headSeen) {
             headSeen = true;
             send(new Wire.Out(Wire.LEDGER_REQ).i64(local.ledger().headSeq()));
+        } else if (splitWaiting) {
+            if (bulk) {
+                // The ledger may have grown since it was fetched: ask again, then cut over.
+                splitWaiting = false;
+                resolve(false);
+            }
         } else if (ledgerDone && phase != Phase.DIVERGED) {
             if (bulk && !was) {
+                branchLink.offer();
                 startDiff();
             } else if (!bulk) {
                 phase = Phase.WAITING_DIRECT;
@@ -320,11 +407,27 @@ public final class SyncClientSession {
     }
 
     private void onLedger(boolean more, List<String> entries) throws IOException {
+        if (resolving) {
+            if (skipRest) {
+                skipRest = more;
+                return;
+            }
+            for (String json : entries) {
+                theirs.add(LedgerEntry.fromJson(json));
+            }
+            if (!more) {
+                resolved();
+            }
+            return;
+        }
+        if (ledgerDone) {
+            return;
+        }
         for (String json : entries) {
             LedgerEntry entry = LedgerEntry.fromJson(json);
             if (!accept(entry)) {
-                if (pending.isEmpty() && local.ledger().size() > 0) {
-                    diverged();
+                if (local.ledger().size() > 0) {
+                    resolve(more);
                     return;
                 }
                 throw new IOException("The host sent a ledger entry that does not verify");
@@ -333,12 +436,74 @@ public final class SyncClientSession {
         if (more) {
             return;
         }
-        ledgerDone = true;
         if (pending.isEmpty() && !serverHead.equals(local.ledger().head())) {
             // The host's head is not ahead of this copy's head on the same chain.
-            diverged();
+            resolve(false);
             return;
         }
+        ledgerDone = true;
+        branchLink.offer();
+        if (bulk) {
+            startDiff();
+        } else {
+            phase = Phase.WAITING_DIRECT;
+            report();
+        }
+    }
+
+    /**
+     * The host's ledger does not continue this copy's (DESIGN 4.7, 4.10): fetch all of it to find the last
+     * checkpoint the two share.
+     *
+     * @param more batches of the ledger answer that showed it are still on their way
+     */
+    private void resolve(boolean more) {
+        resolving = true;
+        skipRest = more;
+        theirs.clear();
+        pending.clear();
+        send(new Wire.Out(Wire.LEDGER_REQ).i64(0));
+    }
+
+    private void resolved() throws IOException {
+        String parentHash = "";
+        long parentSeq = 0;
+        for (LedgerEntry entry : theirs) {
+            if (Ledger.rejection(entry, parentHash, parentSeq, local.auth()) != null) {
+                throw new IOException("The host sent a ledger that does not verify");
+            }
+            parentHash = entry.hash();
+            parentSeq = entry.seq();
+        }
+        List<String> mine = local.ledger().hashes();
+        int shared = 0;
+        while (shared < mine.size() && shared < theirs.size() && mine.get(shared).equals(theirs.get(shared).hash())) {
+            shared++;
+        }
+        if (shared < mine.size()) {
+            // The main world is the lineage with a live host: this copy leaves its own.
+            if (!bulk) {
+                resolving = false;
+                splitWaiting = true;
+                theirs.clear();
+                phase = Phase.WAITING_DIRECT;
+                report();
+                return;
+            }
+            if (!local.split(shared == 0 ? null : theirs.get(shared - 1))) {
+                diverged();
+                return;
+            }
+            if (local.ledger().size() != shared) {
+                throw new IOException("The copy's ledger was not cut back to the common ancestor");
+            }
+        }
+        pending.clear();
+        pending.addAll(theirs.subList(shared, theirs.size()));
+        theirs.clear();
+        resolving = false;
+        ledgerDone = true;
+        branchLink.offer();
         if (bulk) {
             startDiff();
         } else {
