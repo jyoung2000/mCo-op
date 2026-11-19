@@ -339,7 +339,7 @@ public class CoopWorldsScreen extends Screen {
             CoopStatus.Status status = CoopStatus.lookup(world);
             this.minecraft.execute(() -> {
                 if (status.kind() == CoopStatus.Kind.PLAYING) {
-                    CoopLauncher.remember(world, status.hostUuid(), status.hostName());
+                    CoopLauncher.rememberHost(world, status.hostUuid(), status.hostName());
                     CoopLauncher.remember(world, this.minecraft.getUser().getProfileId().toString(), this.minecraft.getUser().getName());
                     dropin.mc.mods.JoinGate.join(this.minecraft, world, status.address(), this);
                 } else {

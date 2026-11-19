@@ -221,6 +221,13 @@ class SyncTest {
             handoffApplied = applied;
         }
 
+        List<Election.Peer> peers;
+
+        @Override
+        public void peers(List<Election.Peer> now) {
+            peers = now;
+        }
+
         SyncClientSession.Status status() {
             return statuses.get(statuses.size() - 1);
         }
@@ -538,6 +545,23 @@ class SyncTest {
         link.server.speedTestIfDue(60_000);
         assertTrue(link.tasks.isEmpty());
         assertEquals(measured, link.server.uploadKBps());
+        assertEquals(SyncClientSession.Phase.LIVE, link.client.phase());
+    }
+
+    @Test
+    void theHostsPeerListReachesAMember() throws IOException {
+        FakeHost host = hostWithWorld();
+        FakeLocal local = new FakeLocal(KEYS);
+        Link link = new Link(host, local).start();
+        assertNull(local.peers);
+
+        List<Election.Peer> peers = List.of(new Election.Peer("member-uuid", link.server.syncedSeq(), 2_048),
+                new Election.Peer("other-uuid", 0, 0));
+        link.server.peers(peers);
+        link.run();
+
+        assertEquals(peers, local.peers);
+        assertEquals(List.of("member-uuid"), Election.order(local.peers, "host-uuid"));
         assertEquals(SyncClientSession.Phase.LIVE, link.client.phase());
     }
 

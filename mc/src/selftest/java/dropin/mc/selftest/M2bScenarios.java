@@ -767,6 +767,15 @@ final class M2bScenarios {
                 .action("title screen", () -> mc.gui.setScreen(new TitleScreen()));
         pause(runner, "B's host announcement is withdrawn", 100)
                 .action("press Play", () -> pressPlay(mc, state))
+                // Since M4 (DESIGN 4.4 step 3): B's session went on after A's copy was last updated and B is gone,
+                // so A is warned before it opens its older copy.
+                .step("warned: the copy is behind B's session", WORLD_TICKS,
+                        () -> dropin.mc.coop.CoopLauncher.staleWarning() != null)
+                .action("Play anyway", () -> {
+                    String last = dropin.mc.coop.CoopLauncher.staleWarning().name();
+                    require(last.equals("DevB"), "the warning is about the session of '" + last + "', expected DevB");
+                    dropin.mc.coop.CoopLauncher.answerStale(true);
+                })
                 .step("A is hosting", WORLD_TICKS + SHORT_TICKS, () -> hosting(ctx))
                 .action("with policy version 2: X and Y", () -> {
                     WorldPolicy.Held held = HostSync.current().held();

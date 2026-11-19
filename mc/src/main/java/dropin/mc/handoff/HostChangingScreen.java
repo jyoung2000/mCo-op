@@ -89,7 +89,7 @@ public final class HostChangingScreen extends GenericMessageScreen {
                     done = true;
                     DropIn.LOGGER.info("Co-op world '{}': {} is the new host after {} ms, reconnecting to {}", world.name(),
                             status.hostName(), System.currentTimeMillis() - started, status.address());
-                    CoopLauncher.remember(world, status.hostUuid(), status.hostName());
+                    CoopLauncher.rememberHost(world, status.hostUuid(), status.hostName());
                     CoopLauncher.join(this.minecraft, world, status.address());
                     return;
                 }

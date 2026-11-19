@@ -148,6 +148,23 @@ class PkarrTest {
     }
 
     @Test
+    void theRecordCarriesTheFirstSixteenBytesOfTheNewestCheckpoint() {
+        String hash = "0123456789abcdef".repeat(4);
+        RendezvousRecord record = hostRecord().withHead(hash, 42);
+        assertEquals(hash.substring(0, RendezvousRecord.HEAD_CHARS), record.head());
+        assertEquals(42, record.seq());
+        assertEquals(record, RendezvousRecord.fromJson(record.toJson()));
+        // The last record of a session keeps it: that is what a stale copy is compared with (DESIGN 4.4).
+        assertEquals(record.head(), record.with(RendezvousRecord.IDLE, "", "", 9).head());
+        assertEquals(record.head(), record.handoffTo("11111111-2222-3333-4444-555555555555", 9).head());
+        // No checkpoint yet: no head, no seq.
+        RendezvousRecord none = hostRecord().withHead("", 7);
+        assertEquals("", none.head());
+        assertEquals(0, none.seq());
+        assertEquals("", hostRecord().withHead(null, 7).head());
+    }
+
+    @Test
     void recordJsonRoundTripsAndOmitsEmptyOptionalFields() {
         RendezvousRecord record = hostRecord();
         assertEquals(record, RendezvousRecord.fromJson(record.toJson()));

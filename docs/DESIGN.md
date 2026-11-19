@@ -218,7 +218,7 @@ A second connection through the same tunnel, separate from the game connection, 
 - **Fallback if pipeline surgery is flaky or clashes with another mod:** start a second `QuiclimeSession(syncInitializer, group)` (the constructor takes any `ChannelHandler`). Simpler, but it doubles the load on the relay and allocates a second domain, so it is the fallback, not the default.
 - **Client side.** `SyncClient.connect(addr)`: resolve like the game does. If the result is a `SmugglersInetSocketAddress`, build a Netty `Bootstrap` with `DialtoneChannel`, `DialtoneAmbientSession.INSTANCE.group` and `new DialtoneAddress(ticket)` (mirror `ConnectionMixin.java:48-95`). Otherwise plain NIO to host:port. Send the magic, then handshake.
 - **Handshake.** C→S `HELLO{proto, worldId, playerUuid, nonceC}`; S→C `CHALLENGE{nonceS}`; C→S `HMAC(auth, nonceC‖nonceS‖"c")`; S→C `HMAC(auth, nonceC‖nonceS‖"s")`. Session key = HKDF(`enc`, nonceC‖nonceS). Every later frame is AEAD-sealed with a counter nonce.
-- **Messages.** `HEAD`, `LEDGER_REQ/RESP`, `DIFF_REQ/RESP` (root → region hashes → chunk hashes), `GET(keys[])`, `RECORD(key, bytes)`, `CHECKPOINT(entry, changedKeys)`, `PEERS(list with syncedSeq)`, `HANDOFF`, `BRANCH_PUSH` (§4.10), `BYE`.
+- **Messages.** `HEAD`, `LEDGER_REQ/RESP`, `DIFF_REQ/RESP` (root → region hashes → chunk hashes), `GET(keys[])`, `RECORD(key, bytes)`, `CHECKPOINT(entry, changedKeys)`, `PEERS(list of uuid, syncedSeq, uploadKBps)`, `HANDOFF`, `BRANCH_PUSH` (§4.10), `BYE`.
 - **Flow control.** Receiver-driven `GET` windows (64 records outstanding). Host-side rate cap per connection, in `config/dropin/coop.json`: `relayRateKBps` (default 128) for opted-in bulk sync over a relay, and `directRateKBps` (default 2048, 0 = no cap) for a direct connection over the internet, so the host's upload is left for everything else on that PC (owner's decision, 2026-11-18). A peer on the same PC or home network (loopback, private and link-local addresses) is not capped. Records travel uncompressed (owner's decision, 2026-11-18). Pause bulk when host TPS drops below 18.
 - **Path policy.** `bulkSyncOverRelay=false` by default. On a non-direct path only `HEAD`, `CHECKPOINT` metadata and `PEERS` flow, and the UI says "Waiting for a direct connection to sync world data." Opt-in allows it with a cap (default 128 KB/s).
 
@@ -250,7 +250,17 @@ UUIDs must be stable, so this assumes real (online-mode) accounts.
 4. Successor disconnects, opens its local copy (now identical), publishes, PUTs `st:"host"` with the new `addr`.
 5. Everyone else shows "Host is changing…", polls the rendezvous until the new `addr` pings, reconnects. Expect 10–30 s.
 
-**Crash (host vanishes):** the host broadcasts `PEERS` (with each peer's `syncedSeq`) every checkpoint. On unexpected disconnect, each client confirms the old `addr` no longer pings, then the peer with the highest `syncedSeq` (ties: lowest UUID) takes over from its last applied checkpoint. Others poll the rendezvous; if nothing appears in 45 s, the next peer in that order takes over. Up to one checkpoint interval of play is lost.
+**Crash (host vanishes):** the host broadcasts `PEERS` at every checkpoint and whenever the list changes: for each connected member its UUID, its `syncedSeq` and its measured upload speed in KB/s (0 = not measured). On unexpected disconnect, each client confirms the old `addr` no longer pings, then the peer first in the order takes over from its last applied checkpoint. The order (M4, may still be changed by the owner): highest `syncedSeq`, then the fastest upload step (the same steps as the successor of a graceful handoff, `Successor.speedStep`), then lowest UUID. Others poll the rendezvous; if nothing appears in 45 s, the next peer in that order takes over, and so on, 45 s per place. Up to one checkpoint interval of play is lost.
+
+Rules of the crash case as built in M4:
+
+- A member whose `syncedSeq` is 0 or whose copy is not complete is not in the order and never takes over.
+- If the old address does not answer but the record says `idle`, the host quit on purpose without a handoff: the members see the normal "disconnected" screen and nobody takes over.
+- If the record says `handoff` to someone else, that successor gets the first 45 s and everyone's turn moves back by one place.
+- Nobody takes over while the rendezvous cannot be reached (two members could not see each other's claim).
+- The member that takes over runs the claim of §4.3 first, so two members whose turns fall together cannot both host. A member that finds a new live host joins it.
+- If the copy of the member that takes over already holds part of a newer checkpoint, its first checkpoint as host records what is on disk.
+- The record carries `head` (the first 16 bytes of the newest checkpoint's hash, in hex) and `seq`. They are written when the record is (state changes and the heartbeat), so after a crash they can be up to one heartbeat old, and the warning of §4.4 step 3 can miss the checkpoints made since.
 
 ### 4.10 Divergence and merge
 

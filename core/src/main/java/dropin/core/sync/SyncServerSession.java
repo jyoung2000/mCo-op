@@ -147,6 +147,16 @@ public final class SyncServerSession {
     }
 
     /**
+     * Tells the peer what this host knows about every member (DESIGN 4.9, crash): the list the members order
+     * themselves by if this host vanishes. Not bulk data: it also goes over a relayed path.
+     */
+    public void peers(java.util.List<Election.Peer> peers) {
+        if (ready()) {
+            sendSealed(Election.write(new Wire.Out(Wire.PEERS), peers));
+        }
+    }
+
+    /**
      * Asks the peer to send {@link Wire#SPEED_BYTES} bytes and times the answer, unless a test ran less than
      * {@code everyMs} ago or one is running. The result is {@link #uploadKBps()}.
      */

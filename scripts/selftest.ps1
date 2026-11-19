@@ -177,6 +177,23 @@ $suites['integrity'] = @(
        Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'neoforge' 'c')) }
 )
 
+# MILESTONES M4: crash failover (DESIGN 4.9) and the stale-copy warning (DESIGN 4.4). 'Kill' names a file in
+# run/shared and the roles (by index) whose games are killed the hard way when it appears; they never report.
+$suites['m4'] = @(
+    # A's game is killed; B (first in the order) hosts its copy; C is back by itself; a block placed before
+    # the last checkpoint is still there. C runs NeoForge.
+    @{ Id = 'crash-failover'; Scenario = 'crash-failover'; TimeoutSec = 900
+       Kill = @{ Marker = 'kill-a'; Index = @(0) }
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'neoforge' 'c')) },
+    # A and B (first in the order) are killed together; C takes over once B's 45 s have passed.
+    @{ Id = 'crash-fallthrough'; Scenario = 'crash-fallthrough'; TimeoutSec = 900
+       Kill = @{ Marker = 'kill-a'; Index = @(0, 1) }
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'neoforge' 'c')) },
+    # B's copy is one session behind and nobody is online: the warning; Cancel leaves the copy untouched.
+    @{ Id = 'stale-warning'; Scenario = 'stale-warning'; TimeoutSec = 900
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
+)
+
 # Measurements, not gates: run by name only, never by "all".
 $measureSuites = @{
     perf = @(
@@ -492,7 +509,28 @@ function Invoke-ClientScenario($scenario) {
     $nextRelaunch = 0
     $relaunchProblems = @()
     $consumed = @{}
+    # 'Kill': when its marker file appears, the games of the listed roles are killed and stay dead (a crash).
+    $killed = @{}
+    $killDone = -not $scenario.Kill
     while ((Get-Date) -lt $deadline) {
+        if (-not $killDone -and (Test-Path (Join-Path $sharedDir $scenario.Kill.Marker))) {
+            $killDone = $true
+            $victims = @($scenario.Kill.Index)
+            # Every game first, so that none of them sees the others die and acts on it.
+            foreach ($i in $victims) {
+                $gamePid = 0
+                $pidFile = Join-Path (Get-GameDir $roles[$i].Slot) 'dropin-selftest\pid'
+                if ((Test-Path $pidFile) -and [int]::TryParse((Get-Content -Raw $pidFile).Trim(), [ref]$gamePid)) {
+                    $game = Get-Process -Id $gamePid -ErrorAction SilentlyContinue
+                    if ($game -and $game.ProcessName -like 'java*') { Stop-Process -Id $gamePid -Force -ErrorAction SilentlyContinue }
+                }
+            }
+            foreach ($i in $victims) {
+                Stop-Game $procs[$i] $roles[$i]
+                $killed[$i] = $true
+            }
+            $settleUntil = $null
+        }
         $pending = $nextRelaunch -lt $relaunches.Count
         if ($pending) {
             $relaunch = $relaunches[$nextRelaunch]
@@ -526,7 +564,12 @@ function Invoke-ClientScenario($scenario) {
                 $idleUntil = $null
             }
         }
-        $results = @($roles | ForEach-Object { Read-Result $_ })
+        if (-not $killDone) { $pending = $true }
+        $results = @()
+        for ($i = 0; $i -lt $roles.Count; $i++) {
+            # A killed game has nothing to report; it counts as done.
+            if ($killed.ContainsKey($i)) { $results += @{ passed = $true } } else { $results += , (Read-Result $roles[$i]) }
+        }
         $missing = @($results | Where-Object { $null -eq $_ }).Count
         $failed = @($results | Where-Object { $null -ne $_ -and -not $_.passed }).Count
         $running = @($procs | Where-Object { -not $_.HasExited }).Count
@@ -555,7 +598,12 @@ function Invoke-ClientScenario($scenario) {
         $waiting = $relaunches[$nextRelaunch]
         $problems += ('{0} was never written, so the restart as {1} did not happen' -f $(if ($waiting.GameFile) { $waiting.GameFile } else { $waiting.Marker }), $waiting.Role)
     }
-    foreach ($role in $roles) {
+    if (-not $killDone) {
+        $problems += ('{0} was never written, so the kill did not happen' -f $scenario.Kill.Marker)
+    }
+    for ($i = 0; $i -lt $roles.Count; $i++) {
+        if ($killed.ContainsKey($i)) { continue }
+        $role = $roles[$i]
         $result = Read-Result $role
         if ($null -eq $result) {
             $problems += ('{0}: no result (timeout or crash)' -f $role.Role)

@@ -48,13 +48,69 @@ public final class CoopLauncher {
             return false;
         }
         mc.gui.setScreen(new GenericMessageScreen(Component.translatable("text.dropin_coop.looking")));
-        Thread thread = new Thread(() -> launch(mc, flows, world.get(), levelId, onCancel), "dropin-coop-launch");
+        Thread thread = new Thread(() -> launch(mc, flows, world.get(), levelId, onCancel, false), "dropin-coop-launch");
         thread.setDaemon(true);
         thread.start();
         return true;
     }
 
-    private static void launch(Minecraft mc, WorldOpenFlows flows, CoopWorld world, String levelId, Runnable onCancel) {
+    private static volatile RendezvousRecord staleWarning;
+    private static volatile it.unimi.dsi.fastutil.booleans.BooleanConsumer staleAnswer;
+
+    /** The record the "your copy is behind" warning on screen is about, or null if none is shown. */
+    public static RendezvousRecord staleWarning() {
+        return staleWarning;
+    }
+
+    /** Answers the "your copy is behind" warning, as its buttons do. Client thread. */
+    public static void answerStale(boolean playAnyway) {
+        it.unimi.dsi.fastutil.booleans.BooleanConsumer answer = staleAnswer;
+        if (answer != null) {
+            answer.accept(playAnyway);
+        }
+    }
+
+    /**
+     * DESIGN 4.4 launch flow step 3: the last session's record names a checkpoint this copy's ledger does not
+     * hold, and that session's host does not answer. Reads the ledger file of the closed copy only.
+     *
+     * @return the record of the session this copy is behind, or null if it is not behind (or nothing is known)
+     */
+    private static RendezvousRecord behind(Rendezvous rendezvous, CoopWorld world, java.nio.file.Path folder, Env env) {
+        try {
+            Optional<RendezvousRecord> found = rendezvous.lookup();
+            if (found.isEmpty() || found.get().head().isEmpty() || found.get().isState(RendezvousRecord.STARTING)) {
+                return null;
+            }
+            RendezvousRecord record = found.get();
+            dropin.core.ledger.Ledger ledger = dropin.core.ledger.Ledger.load(world.keys().auth(),
+                    folder.resolve(dropin.core.world.CoopWorldStore.MARKER_DIR).resolve("ledger.jsonl"));
+            if (ledger.knows(record.head())) {
+                return null;
+            }
+            // A live host is joined and brings this copy up to date: nothing to warn about.
+            return record.isState(RendezvousRecord.HOST) && env.ping(record) ? null : record;
+        } catch (Exception e) {
+            DropIn.LOGGER.warn("Could not compare the copy of '{}' with the last session: {}", world.name(), e.toString());
+            return null;
+        }
+    }
+
+    /** "3 hours ago", from a time in epoch seconds. */
+    public static Component ago(long epochSeconds) {
+        long minutes = Math.max(0, System.currentTimeMillis() / 1000 - epochSeconds) / 60;
+        if (minutes < 1) {
+            return Component.translatable("text.dropin_coop.ago.now");
+        } else if (minutes < 120) {
+            return Component.translatable("text.dropin_coop.ago.minutes", minutes);
+        } else if (minutes < 48 * 60) {
+            return Component.translatable("text.dropin_coop.ago.hours", minutes / 60);
+        }
+        return Component.translatable("text.dropin_coop.ago.days", minutes / (24 * 60));
+    }
+
+    private static void launch(Minecraft mc, WorldOpenFlows flows, CoopWorld world, String levelId, Runnable onCancel,
+                               boolean staleAccepted) {
         String uuid = mc.getUser().getProfileId().toString();
         String name = mc.getUser().getName();
         Rendezvous rendezvous = CoopWorlds.rendezvous(world);
@@ -64,7 +120,7 @@ public final class CoopLauncher {
             CoopStatus.Status status = CoopStatus.lookup(world);
             if (status.kind() == CoopStatus.Kind.PLAYING) {
                 DropIn.LOGGER.info("Co-op world '{}': continuing the download from {}", world.name(), status.hostName());
-                remember(world, status.hostUuid(), status.hostName());
+                rememberHost(world, status.hostUuid(), status.hostName());
                 join(mc, world, status.address());
             } else {
                 int percent = SyncClient.savedState(folder).percent();
@@ -80,6 +136,34 @@ public final class CoopLauncher {
             return;
         }
         Env env = new Env();
+        RendezvousRecord newer = staleAccepted ? null : behind(rendezvous, world, folder, env);
+        if (newer != null) {
+            // Before anything is claimed or opened: Cancel must leave this copy exactly as it is.
+            DropIn.LOGGER.info("Co-op world '{}': this copy is behind the last session ({}, checkpoint {}) and nobody is online",
+                    world.name(), newer.name(), newer.seq());
+            mc.execute(() -> {
+                it.unimi.dsi.fastutil.booleans.BooleanConsumer answer = playAnyway -> {
+                    staleWarning = null;
+                    staleAnswer = null;
+                    if (!playAnyway) {
+                        DropIn.LOGGER.info("Co-op world '{}': not opened, the copy stays as it is", world.name());
+                        onCancel.run();
+                        return;
+                    }
+                    DropIn.LOGGER.info("Co-op world '{}': playing on the older copy; the changes are merged later", world.name());
+                    mc.gui.setScreen(new GenericMessageScreen(Component.translatable("text.dropin_coop.looking")));
+                    Thread thread = new Thread(() -> launch(mc, flows, world, levelId, onCancel, true), "dropin-coop-launch");
+                    thread.setDaemon(true);
+                    thread.start();
+                };
+                staleWarning = newer;
+                staleAnswer = answer;
+                mc.gui.setScreen(new net.minecraft.client.gui.screens.ConfirmScreen(answer, Component.translatable("menu.dropin_coop.title"),
+                        Component.translatable("text.dropin_coop.stale.message", newer.name(), ago(newer.ts())),
+                        Component.translatable("text.dropin_coop.stale.play_anyway"), net.minecraft.network.chat.CommonComponents.GUI_CANCEL));
+            });
+            return;
+        }
         HostClaim.Result result;
         try {
             result = HostClaim.claim(rendezvous, env, uuid, name);
@@ -94,7 +178,7 @@ public final class CoopLauncher {
         if (result instanceof HostClaim.Join join) {
             String address = env.liveAddress != null ? env.liveAddress : join.host().addr();
             DropIn.LOGGER.info("Co-op world '{}': {} is hosting, joining {}", world.name(), join.host().name(), address);
-            remember(world, join.host().host(), join.host().name());
+            rememberHost(world, join.host().host(), join.host().name());
             remember(world, uuid, name);
             join(mc, world, address);
         } else if (result instanceof HostClaim.Host host) {
@@ -146,7 +230,13 @@ public final class CoopLauncher {
             mc.execute(() -> mc.gui.setScreen(problem));
             return false;
         }
-        String sess = new Env().newSession();
+        openAsHost(mc, world, folder, new Env().newSession(), onCancel);
+        return true;
+    }
+
+    private static void openAsHost(Minecraft mc, CoopWorld world, java.nio.file.Path folder, String sess, Runnable onCancel) {
+        String uuid = mc.getUser().getProfileId().toString();
+        String name = mc.getUser().getName();
         String levelId = folder.getFileName().toString();
         mc.execute(() -> {
             HostSession.start(mc, world, CoopWorlds.rendezvous(world), sess, uuid, name);
@@ -157,7 +247,57 @@ public final class CoopLauncher {
                 passThrough = false;
             }
         });
-        return true;
+    }
+
+    /** How {@link #hostAfterCrash} ended. */
+    public enum Takeover {
+        /** This game opens its copy and hosts it. */
+        HOSTING,
+        /** Someone else turned out to be hosting already; this game joins them. */
+        JOINED,
+        /** This PC may not host the world; a screen says why. */
+        REFUSED,
+        /** The rendezvous could not be reached, so nobody could find this game: nothing was done. */
+        UNREACHABLE
+    }
+
+    /**
+     * DESIGN 4.9 (crash): the host vanished and it is this player's turn. Claims the world as DESIGN 4.3 says
+     * (so two members whose turns overlap do not both host), then opens the local copy, which is at its last
+     * applied checkpoint, and hosts it. Not on the client thread.
+     */
+    public static Takeover hostAfterCrash(Minecraft mc, CoopWorld world, java.nio.file.Path folder) throws InterruptedException {
+        String uuid = mc.getUser().getProfileId().toString();
+        String name = mc.getUser().getName();
+        Runnable onCancel = () -> mc.gui.setScreen(new TitleScreen());
+        net.minecraft.client.gui.screens.Screen problem = dropin.mc.policy.HostGate.memberProblem(mc, world, folder, onCancel);
+        if (problem != null) {
+            DropIn.LOGGER.info("Co-op world '{}': this PC may not take over as host ({})", world.name(), problem.getClass().getSimpleName());
+            mc.execute(() -> mc.gui.setScreen(problem));
+            return Takeover.REFUSED;
+        }
+        Env env = new Env();
+        HostClaim.Result result = HostClaim.claim(CoopWorlds.rendezvous(world), env, uuid, name);
+        if (result instanceof HostClaim.Join join) {
+            String address = env.liveAddress != null ? env.liveAddress : join.host().addr();
+            DropIn.LOGGER.info("Co-op world '{}': {} is hosting already, joining {}", world.name(), join.host().name(), address);
+            rememberHost(world, join.host().host(), join.host().name());
+            join(mc, world, address);
+            return Takeover.JOINED;
+        }
+        HostClaim.Host host = (HostClaim.Host) result;
+        if (!host.announced()) {
+            return Takeover.UNREACHABLE;
+        }
+        remember(world, uuid, name);
+        openAsHost(mc, world, folder, host.sess(), onCancel);
+        return Takeover.HOSTING;
+    }
+
+    /** As {@link #remember}, and notes who hosts the session this game is about to join (for the status line and failover). */
+    public static void rememberHost(CoopWorld world, String uuid, String name) {
+        remember(world, uuid, name);
+        dropin.mc.handoff.CrashFailover.host(world.worldId(), uuid, name);
     }
 
     /**

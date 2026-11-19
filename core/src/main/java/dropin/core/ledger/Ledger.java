@@ -111,6 +111,23 @@ public final class Ledger {
         return hash.isEmpty() || hashes.contains(hash);
     }
 
+    /**
+     * True if this ledger holds an entry whose hash starts with {@code prefix}: the short head a host announces
+     * (DESIGN 4.3). A copy whose ledger does not know the announced head is behind that session (DESIGN 4.4).
+     * An empty prefix (nothing announced) is always known.
+     */
+    public synchronized boolean knows(String prefix) {
+        if (prefix == null || prefix.isEmpty()) {
+            return true;
+        }
+        for (String hash : hashes) {
+            if (hash.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public synchronized List<LedgerEntry> entriesAfter(long seq) {
         List<LedgerEntry> result = new ArrayList<>();
         for (LedgerEntry entry : entries) {

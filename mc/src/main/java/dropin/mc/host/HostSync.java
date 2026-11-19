@@ -222,6 +222,7 @@ public final class HostSync implements SyncServerSession.Host {
                         peer.session().speedTestIfDue(SPEED_TEST_EVERY_MS);
                     }
                 }
+                broadcastPeers(false);
                 Thread.sleep(500);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -325,6 +326,7 @@ public final class HostSync implements SyncServerSession.Host {
                     peer.session().checkpoint(entry, changed);
                 }
             }
+            broadcastPeers(true);
             needFullScan = false;
             DropIn.LOGGER.info("Checkpoint {} of '{}': {} records changed{}, root {}, save {} ms, {} ms", entry.seq(),
                     world.name(), changed.size(), full ? " (full scan)" : "", entry.root(), saveMs,
@@ -610,6 +612,60 @@ public final class HostSync implements SyncServerSession.Host {
     public void quitDecided(String successorUuid) {
         expectedSuccessor = successorUuid;
         quitDecided = true;
+    }
+
+    private volatile String peersSent = "";
+
+    /**
+     * DESIGN 4.9 (crash): every member is told what this host knows about all of them, at each checkpoint and
+     * whenever the list changed (someone joined, left, finished a checkpoint or was measured). If this host
+     * vanishes, the members order themselves by the last list they got.
+     *
+     * @param always false: only if the list differs from the one sent last
+     */
+    private void broadcastPeers(boolean always) {
+        List<dropin.core.sync.Election.Peer> list = new ArrayList<>();
+        List<SyncServerSession> ready = new ArrayList<>();
+        StringBuilder key = new StringBuilder();
+        for (Peer peer : peers) {
+            SyncServerSession session = peer.session();
+            if (!session.ready() || session.playerUuid().isEmpty()) {
+                continue;
+            }
+            ready.add(session);
+            key.append(System.identityHashCode(session)).append(' ');
+            if (!session.playerUuid().equals(hostUuid)) {
+                list.add(new dropin.core.sync.Election.Peer(session.playerUuid(), session.syncedSeq(), session.uploadKBps()));
+            }
+        }
+        String now = key.append(list).toString();
+        if (!always && now.equals(peersSent)) {
+            return;
+        }
+        peersSent = now;
+        for (SyncServerSession session : ready) {
+            session.peers(list);
+        }
+    }
+
+    /** When the newest checkpoint was taken (epoch seconds); 0 if there is none yet. */
+    public long lastCheckpointSeconds() {
+        LedgerEntry last = ledger.last();
+        return last == null ? 0 : last.ts();
+    }
+
+    /** How much of the world the member that is furthest behind holds (0 to 100); -1 if nobody is connected. */
+    public int slowestPeerPercent() {
+        int slowest = -1;
+        long seq = ledger.headSeq();
+        for (Peer peer : peers) {
+            SyncServerSession session = peer.session();
+            if (session.ready() && !session.playerUuid().isEmpty() && !session.playerUuid().equals(hostUuid)) {
+                int percent = session.syncedSeq() >= seq && seq > 0 ? 100 : Math.min(99, session.peerPercent());
+                slowest = slowest < 0 ? percent : Math.min(slowest, percent);
+            }
+        }
+        return slowest;
     }
 
     /** Who could take over at this checkpoint, and how far the best other copy is. */

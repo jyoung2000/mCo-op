@@ -42,7 +42,10 @@ public final class Wire {
     public static final int GET = 15;
     public static final int RECORD = 16;
     public static final int CHECKPOINT = 17;
-    /** Reserved for later milestones (DESIGN 4.6): not sent yet. */
+    /**
+     * Host to members, at each checkpoint and when the list changes (DESIGN 4.9, crash): what the host knows about
+     * every member, {i32 count, then for each: str uuid, i64 syncedSeq, i32 uploadKBps}. See {@link Election}.
+     */
     public static final int PEERS = 18;
     /** Host to members when it quits (DESIGN 4.9): {str successorUuid, str finalEntryJson}. Only sent when there is a successor. */
     public static final int HANDOFF = 19;

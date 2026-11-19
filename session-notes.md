@@ -560,3 +560,34 @@ Committed. Gate on the final tree: build 0, jarcheck 0, `-Suite all` 48 of 48 (l
 ## 2026-11-18, later: owner's four sync decisions (committed)
 
 Owner asked for and decided: mod folders of the world root are replicated (`RecordKey.fileAllowed`, 64 MB limit for mod files via `fileAllowed(path, size)` in both scans); `SyncServerSession.Host.sessionError` logged by `HostSync`; records stay uncompressed; `directRateKBps` (default 2048, 0 = off, home network not capped, `PathPolicy.local`); successor = fastest upload step, then longest connected (`Successor.speedStep`, upload test `SPEED_REQ`/`SPEED_DATA`, `Wire.PROTO` 4). Dev switches added: `dropin.dev.forcePath=internet`, `dropin.dev.directRateKBps`, `dropin.dev.speedDelayMs`. Gate 49 of 49 (logs `build/logs/gate3-*`). Not verified list: `docs/VERIFICATION.md`, last entry. Next: M4 crash failover (should use the same speed order; DESIGN 4.9 crash paragraph still says highest syncedSeq, lowest UUID).
+
+## M4: crash failover, stale-copy warning, status line (2026-11-18)
+
+State: built; the three `m4` scenarios pass one by one (logs `build/logs/m4-*`); gate result and "Not verified" list in `docs/VERIFICATION.md`, entry "M4".
+
+Decisions (mine unless marked; the owner may change any of them):
+
+- Election order (decided by the session that started this one, flagged for the owner): highest `syncedSeq`, then fastest upload step (`Successor.speedStep`), then lowest UUID. `Election.order` in `core`; DESIGN 4.9 crash paragraph rewritten to match.
+- `PEERS` body: `i32 count`, then per member `str uuid, i64 syncedSeq, i32 uploadKBps`. Sent at every checkpoint and whenever the list changes. `Wire.PROTO` stays 4: an older member ignores the message.
+- Turn of place n in the order: n x 45 s after the loss (`Election.STEP_MS`). A member with `syncedSeq` 0 or an incomplete copy is never in the order.
+- After the 5 s ping of the old address fails: an `idle` record means a plain quit, so the vanilla "disconnected" screen is shown and nobody takes over (the m1/m2/m2b scenarios keep proving that a plain quit drops members). A `handoff` record to someone else moves every turn back by 45 s.
+- No takeover while the rendezvous cannot be reached. The member that takes over runs `HostClaim.claim` first.
+- The failover only starts when the connection that ended is the one to the co-op host (address compared), the player did not leave and no handoff was announced.
+- The host now writes `head` (first 16 bytes of the newest ledger hash, hex) and `seq` into its record (DESIGN 4.3 said so, the code did not). Only at state changes and the heartbeat, so after a crash the stale warning can miss the newest checkpoints.
+- Stale warning: shown before anything is claimed or opened; "Play anyway" hosts the older copy (merge is M5).
+- Status line: in the pause menu (y = 24), not a HUD. A member sees host name, own copy %, direct/relayed, checkpoint age; the host sees the slowest member's %.
+- Script: `Kill = @{ Marker; Index = @(...) }` per scenario; killed roles never report and are left out of the result. In `crash-fallthrough` A and B are killed on the same marker, so B never acts.
+
+26.3 signatures read (`mc/build/moddev/artifacts/vanilla-26.3-1-sources.jar`; same names in the NeoForge-patched sources):
+
+- `ClientCommonPacketListenerImpl`: `public void onDisconnect(DisconnectionDetails details)` (calls `this.minecraft.disconnect(this.createDisconnectScreen(details), this.isTransferring)`), `protected Screen createDisconnectScreen(DisconnectionDetails details)`, `protected final Minecraft minecraft;`, `protected final @Nullable ServerData serverData;`
+- `ServerData`: `public String ip;`
+- `PauseScreen`: `private final boolean showPauseMenu;`, `protected void init()`, `public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a)`
+- `ConfirmScreen(BooleanConsumer callback, Component title, Component message, Component yesButtonComponent, Component noButtonComponent)`
+- `GuiGraphicsExtractor`: `public void centeredText(Font font, Component text, int x, int y, int color)`
+- `Screen`: `public boolean shouldCloseOnEsc()`, `public void removed()`, `protected void repositionElements()`
+- `DisconnectedScreen(Screen parent, Component title, DisconnectionDetails details)`
+
+Files touched: core `sync/Election.java` (new), `sync/Wire.java` (comment), `sync/SyncServerSession.java`, `sync/SyncClientSession.java`, `ledger/Ledger.java`, `pkarr/RendezvousRecord.java` and tests `ElectionTest` (new), `SyncTest`, `LedgerTest`, `PkarrTest`; mc `handoff/CrashFailover.java`, `handoff/HostLostScreen.java`, `menu/SessionLine.java`, `mixin/mc/ClientCommonPacketListenerImplMixin.java` (all new), `host/HostSync.java`, `coop/HostSession.java`, `coop/CoopLauncher.java`, `member/SyncClient.java`, `handoff/HostChangingScreen.java`, `menu/CoopWorldsScreen.java`, `mixin/mc/MinecraftDisconnectMixin.java`, `mixin/mc/PauseScreenMixin.java`, `dropin.mixins.json`, `en_us.json`; selftest `M4Scenarios.java` (new), `Scenarios.java`; `scripts/selftest.ps1`; docs.
+
+Next: M5 (divergence and merge), which "Play anyway" relies on. Open points for the owner: the election order; whether `head` should be re-announced at every checkpoint; a HUD line besides the pause menu; the manual cable-pull check of M4.

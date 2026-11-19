@@ -50,6 +50,24 @@ class LedgerTest {
     }
 
     @Test
+    void aLedgerKnowsTheShortHeadsOfItsOwnEntriesOnly() throws IOException {
+        Ledger ledger = chain(3, "host-a");
+        Ledger longer = chain(3, "host-a");
+        LedgerEntry newer = next(longer, "host-b");
+        longer.append(newer);
+        for (String hash : ledger.hashes()) {
+            assertTrue(ledger.knows(hash.substring(0, 32)), "an own entry's 16-byte head is not known");
+            assertTrue(ledger.knows(hash));
+        }
+        assertTrue(ledger.knows(""), "nothing announced is never 'behind'");
+        assertTrue(ledger.knows(null));
+        // The copy that stopped at entry 3 is behind a session that went on to entry 4.
+        assertFalse(ledger.knows(newer.hash().substring(0, 32)));
+        assertTrue(longer.knows(newer.hash().substring(0, 32)));
+        assertFalse(new Ledger(AUTH, null).knows(newer.hash().substring(0, 32)));
+    }
+
+    @Test
     void entryRoundTripsThroughJson() throws IOException {
         LedgerEntry entry = chain(2, "host-a").last();
         LedgerEntry back = LedgerEntry.fromJson(entry.toJson());

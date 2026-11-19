@@ -2,6 +2,8 @@ package dropin.mixin.mc;
 
 import dropin.mc.menu.CoopActions;
 import dropin.mc.menu.InviteScreen;
+import dropin.mc.menu.SessionLine;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.AlertScreen;
 import net.minecraft.client.gui.screens.PauseScreen;
@@ -26,6 +28,26 @@ public abstract class PauseScreenMixin extends Screen {
 
     protected PauseScreenMixin(Component title) {
         super(title);
+    }
+
+    private Component dropin$line;
+    private long dropin$lineAt;
+
+    /** MILESTONES M4: in a co-op session the pause menu says who hosts, how complete the copy is, the path and the checkpoint age. */
+    @Inject(method = "extractRenderState", at = @At("TAIL"))
+    private void dropin$sessionLine(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a, CallbackInfo ci) {
+        if (!this.showPauseMenu) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (now - this.dropin$lineAt >= 500) {
+            this.dropin$lineAt = now;
+            SessionLine.Info info = SessionLine.info(this.minecraft);
+            this.dropin$line = info == null ? null : SessionLine.text(info);
+        }
+        if (this.dropin$line != null) {
+            graphics.centeredText(this.font, this.dropin$line, this.width / 2, 24, -1);
+        }
     }
 
     @Inject(method = "init", at = @At("TAIL"))

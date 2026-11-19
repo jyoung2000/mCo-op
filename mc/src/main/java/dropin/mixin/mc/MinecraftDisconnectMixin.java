@@ -16,6 +16,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class MinecraftDisconnectMixin {
     @Inject(method = "disconnectFromWorld", at = @At("HEAD"), cancellable = true)
     private void dropin$handoff(Component message, CallbackInfo ci) {
+        // DESIGN 4.9 (crash): a member that leaves by itself has not lost its host.
+        dropin.mc.handoff.CrashFailover.leaving((Minecraft) (Object) this);
         if (HostHandoff.intercept((Minecraft) (Object) this, message)) {
             ci.cancel();
         }

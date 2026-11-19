@@ -110,6 +110,10 @@ public final class SyncClientSession {
          */
         default void handoff(String successorUuid, LedgerEntry finalEntry, boolean applied) {
         }
+
+        /** What the host knows about every member right now (DESIGN 4.9, crash); kept for when the host vanishes. */
+        default void peers(List<Election.Peer> peers) {
+        }
     }
 
     private final Local local;
@@ -277,7 +281,8 @@ public final class SyncClientSession {
                 }
                 local.handoff(successor, finalEntry, finalEntry.hash().equals(local.ledger().head()));
             }
-            case Wire.PEERS, Wire.BRANCH_PUSH, Wire.MOD_DATA -> {
+            case Wire.PEERS -> local.peers(Election.read(in));
+            case Wire.BRANCH_PUSH, Wire.MOD_DATA -> {
                 // Later milestones.
             }
             case Wire.SPEED_REQ -> {

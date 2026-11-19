@@ -10,9 +10,11 @@ import dropin.core.sync.SyncState;
 import dropin.core.world.CoopWorld;
 import dropin.core.world.CoopWorldStore;
 import dropin.mc.DropIn;
+import dropin.mc.handoff.CrashFailover;
 import dropin.mc.handoff.MemberHandoff;
 import dropin.mc.coop.CoopWorlds;
 import dropin.mc.menu.CoopActions;
+import dropin.mc.net.PathPolicy;
 import dropin.mc.net.SyncConnector;
 import dropin.mc.menu.ModConsentScreen;
 import dropin.mc.net.SyncPipe;
@@ -70,6 +72,7 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
     /** Starts syncing the local copy of {@code world} from the host the game is connecting to at {@code address}. */
     public static void start(Minecraft mc, CoopWorld world, String address) {
         SyncClient client = new SyncClient(mc, world, address);
+        CrashFailover.joining(world, address);
         SyncClient old = ACTIVE.put(world.worldId(), client);
         if (old != null) {
             old.stop = true;
@@ -296,7 +299,7 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
         });
         waitingTold = false;
         try {
-            SyncConnector.connect(address, pipe);
+            direct = PathPolicy.direct(SyncConnector.connect(address, pipe));
         } catch (IOException e) {
             DropIn.LOGGER.warn("World sync of '{}' could not connect: {}", world.name(), e.toString());
             pipe.close();
@@ -473,9 +476,32 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
         }
     }
 
+    /** DESIGN 4.9 (crash): the host's list of members, kept for the moment the host vanishes. */
+    @Override
+    public void peers(java.util.List<dropin.core.sync.Election.Peer> peers) {
+        CrashFailover.peers(world.worldId(), peers);
+    }
+
+    /** Whether the running sync connection of a world goes straight to the host; null if there is none yet. */
+    public static Boolean direct(String worldId) {
+        SyncClient client = ACTIVE.get(worldId);
+        return client == null ? null : client.direct;
+    }
+
+    /** The newest checkpoint the running sync of a world has applied in full, or null. */
+    public static LedgerEntry lastCheckpoint(String worldId) {
+        SyncClient client = ACTIVE.get(worldId);
+        Ledger held = client == null ? null : client.ledger;
+        return held == null ? null : held.last();
+    }
+
+    private volatile Boolean direct;
+
     @Override
     public void handoff(String successorUuid, LedgerEntry finalEntry, boolean applied) {
         stop = true;
+        // The game connection closes right after this: that is the handoff, not a lost host.
+        CrashFailover.expected();
         MemberHandoff.received(mc, world, successorUuid, finalEntry, applied);
     }
 

@@ -398,3 +398,31 @@ Not verified:
 - The log line of `HostSync.sessionError` in a running game (the callback is unit-tested; nothing in a game run made a connection fail).
 - Real mods' own folders (only test files were used), files that a mod keeps open or rewrites constantly, files over 64 MB.
 - Crash failover is milestone M4 and not built; when the host's game dies without a handoff nobody takes over yet, by speed or otherwise.
+
+## M4: crash failover, stale-copy warning, status line: 2026-11-18 — GATE PASSED
+
+Gate run on this machine, on the tree committed with this entry:
+
+| Check | Result |
+| --- | --- |
+| `./gradlew build` (unit tests included) | exit 0 |
+| `scripts/jarcheck.ps1` | exit 0 |
+| `scripts/selftest.ps1 -Suite all` | 52 of 52 PASS (new: `crash-failover`, `crash-fallthrough`, `stale-warning`) |
+
+Jar: `build/libs/dropin-0.1.0+mc26.3.jar`, 1,163,659 bytes. Logs: `build/logs/m4-gate2-*`.
+
+- `crash-failover` (A, B Fabric, C NeoForge, LAN): A placed a block; checkpoint 4 with it was on B and C; both had the host's list with the order B, C (C answers the upload test 2 s late). The script killed A's game process. B took over 4,609 ms after losing A, at checkpoint 4 with the root A had reported, and the block was in B's world. C was back in B's session 7,075 ms after losing A, with no input, and saw the block. The pause-menu line read "Host: DevA | Your copy: 100% | direct | Checkpoint: 0 s ago" before the kill; afterwards B's said it hosts and C's named DevB.
+- `crash-fallthrough`: the script killed A and B (first in the order) together. C (NeoForge) took over 47,088 ms after losing A, that is after B's 45 s, at checkpoint 4, with the block.
+- `stale-warning`: B's copy was at checkpoint 2; A's second session, without B, ended on 5; nobody online. B pressed Play and got the warning about DevA's session. Cancel: nothing opened, and all 38 files of B's copy had the same size, time and SHA-256 as before. Play anyway: B hosted its older copy, without the block of A's second session.
+- Unit tests (core): the election order (highest `syncedSeq`, then upload step, then lowest UUID; the host, duplicates and members without a checkpoint left out), the 45 s per place, the `PEERS` message between a host and a member session and its limits, `Ledger.knows`, the record's `head`.
+- A scenario was changed on purpose: `mod-change-live` (m2b). After the owner's mod change ends B's session, the owner's copy is behind B's session and nobody is online, so the owner now gets the new warning. The scenario requires the warning (about DevB) and answers "Play anyway"; nothing else in it changed. It failed in the first full run (51 of 52) for this reason; the table above is the second full run.
+
+Not verified:
+- The manual check of M4 (pull the network cable or kill the host on a second machine): everything ran on one PC over the LAN path.
+- Failover through the e4mc relay or between machines; the 5 s ping of a dead address behind a router (here it is refused at once); a host that hangs but still answers the ping (no failover happens then, by design).
+- More than two members, two members whose turns fall together (the claim of DESIGN 4.3 is relied on, not exercised in a crash), a member at an older checkpoint than another, a member with an incomplete copy.
+- The `handoff` record case (host dies in the middle of a handoff), an unreachable rendezvous, and a failover over the real pkarr rendezvous: the self-tests use the file rendezvous.
+- A crash between two checkpoints with changes in between: the test kills right after a checkpoint, so the loss of up to one interval was not measured.
+- The stale warning after a crash: `head` is written at state changes and the heartbeat only, so it can be older than the last checkpoint. The warning's wording and "x hours ago" text were not looked at on screen.
+- The pause-menu line was built from game state and the pause menu was opened without an error, but nobody looked at where it sits on screen; "relayed" and "connecting…" were not seen.
+- A production jar in a real launcher: the mixin on `ClientCommonPacketListenerImpl` ran in the dev clients of both loaders only.

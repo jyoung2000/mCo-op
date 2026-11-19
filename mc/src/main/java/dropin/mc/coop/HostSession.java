@@ -180,8 +180,9 @@ public final class HostSession implements Runnable {
     private void announceLast(String state, String successorUuid) {
         try {
             long now = System.currentTimeMillis() / 1000;
-            rendezvous.publish(RendezvousRecord.HANDOFF.equals(state) ? base.handoffTo(successorUuid, now)
-                    : base.with(RendezvousRecord.IDLE, "", "", now));
+            RendezvousRecord last = headed(base);
+            rendezvous.publish(RendezvousRecord.HANDOFF.equals(state) ? last.handoffTo(successorUuid, now)
+                    : last.with(RendezvousRecord.IDLE, "", "", now));
             announcedState = state;
             announcedAddr = "";
             DropIn.LOGGER.info("Co-op world '{}' announced as {}{}", world.name(), state,
@@ -189,6 +190,16 @@ public final class HostSession implements Runnable {
         } catch (Exception e) {
             DropIn.LOGGER.warn("Could not announce co-op world '{}' ({}): {}", world.name(), state, e.toString());
         }
+    }
+
+    /**
+     * DESIGN 4.3: every record of a session carries its newest checkpoint, so a player whose copy is older can
+     * be told so when nobody is online (DESIGN 4.4 launch flow step 3).
+     */
+    private RendezvousRecord headed(RendezvousRecord record) {
+        dropin.mc.host.HostSync sync = hostSync != null ? hostSync : dropin.mc.host.HostSync.current();
+        dropin.core.ledger.LedgerEntry head = sync == null ? null : sync.head();
+        return head == null ? record : record.withHead(head.hash(), head.seq());
     }
 
     private static long policyVersion() {
@@ -255,7 +266,7 @@ public final class HostSession implements Runnable {
 
     private boolean publish(String state, String addr, String lan) {
         try {
-            RendezvousRecord record = base.with(state, addr, lan, System.currentTimeMillis() / 1000);
+            RendezvousRecord record = headed(base).with(state, addr, lan, System.currentTimeMillis() / 1000);
             if (RendezvousRecord.HOST.equals(state)) {
                 record = record.withPlayers(connected);
             }

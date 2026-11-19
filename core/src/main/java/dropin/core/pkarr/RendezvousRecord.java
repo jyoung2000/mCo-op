@@ -89,6 +89,19 @@ public record RendezvousRecord(int v, String st, String addr, String lan, String
         return new RendezvousRecord(v, st, addr, lan, host, name, sess, head, seq, ts, next, policyVersion, modManifestHash, pl);
     }
 
+    /** Hex characters of a ledger head in the record: its first 16 bytes. */
+    public static final int HEAD_CHARS = 32;
+
+    /**
+     * This record with the session's newest checkpoint (DESIGN 4.3: heartbeat and clean exit carry head and seq).
+     *
+     * @param headHash the full hash of the newest ledger entry; empty if there is none
+     */
+    public RendezvousRecord withHead(String headHash, long headSeq) {
+        String shortHead = headHash == null ? "" : headHash.substring(0, Math.min(HEAD_CHARS, headHash.length()));
+        return new RendezvousRecord(v, st, addr, lan, host, name, sess, shortHead, shortHead.isEmpty() ? 0 : headSeq, ts, next, pv, mh, pl);
+    }
+
     public static RendezvousRecord of(String st, String host, String name, String sess, long ts) {
         return new RendezvousRecord(VERSION, st, "", "", host, name, sess, "", 0, ts, "");
     }
