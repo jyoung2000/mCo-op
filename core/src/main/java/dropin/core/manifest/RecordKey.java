@@ -1,5 +1,6 @@
 package dropin.core.manifest;
 
+import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -15,7 +16,8 @@ public final class RecordKey {
     public static final Set<String> KINDS = Set.of("region", "entities", "poi");
     /** Largest file of a mod's own folder in the world's root that is replicated (bytes). */
     public static final long MAX_MOD_FILE = 64L * 1024 * 1024;
-    private static final Pattern DIMENSION = Pattern.compile("[a-z0-9_.-]+:[a-z0-9_.-]+(/[a-z0-9_.-]+)*");
+    private static final Pattern RESERVED = Pattern.compile("CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³]|CONIN\\$|CONOUT\\$");
+    private static final Pattern DIMENSION =Pattern.compile("[a-z0-9_.-]+:[a-z0-9_.-]+(/[a-z0-9_.-]+)*");
 
     /** @param dim dimension id, for example {@code minecraft:overworld} */
     public record Chunk(String dim, String kind, int cx, int cz) {
@@ -92,6 +94,43 @@ public final class RecordKey {
      * on the receiving side: a path that is absolute, escapes the folder or is not on the list is refused.
      */
     public static boolean fileAllowed(String path) {
+        if (!allowedExact(path)) {
+            return false;
+        }
+        String[] segments = path.split("/", -1);
+        for (String segment : segments) {
+            if (!portableSegment(segment)) {
+                return false;
+            }
+        }
+        String lower = path.toLowerCase(Locale.ROOT);
+        if (!lower.equals(path)) {
+            // NTFS and APFS ignore case, so "Dropin/ledger.jsonl", "r.0.0.MCA" or "Level.dat" would reach the
+            // file the exact name is refused or treated specially for. The game itself writes only lower case.
+            String[] lowerSegments = lower.split("/", -1);
+            if (!allowedExact(lower) || gameFile(lowerSegments)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * A segment Windows stores under the name it is given: not ending in a dot or a space (Windows drops
+     * those, so "dropin." is "dropin") and not a reserved device name (CON, NUL, COM1 and so on, with or
+     * without an extension).
+     */
+    private static boolean portableSegment(String segment) {
+        char end = segment.charAt(segment.length() - 1);
+        if (end == '.' || end == ' ') {
+            return false;
+        }
+        int dot = segment.indexOf('.');
+        String stem = (dot < 0 ? segment : segment.substring(0, dot)).toUpperCase(Locale.ROOT).strip();
+        return !RESERVED.matcher(stem).matches();
+    }
+
+    private static boolean allowedExact(String path) {
         if (path.isEmpty() || path.startsWith("/") || path.contains("\\") || path.contains(":") || path.indexOf('\0') >= 0) {
             return false;
         }

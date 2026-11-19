@@ -465,3 +465,18 @@ Owner decision: the diverged player's offline inventory belongs in the world. `M
 - `selftest.ps1 -Suite m5 -Only merge-clean`: PASS (63 s). Merge checkpoint 8: 25 chunks and 3 files applied, 0 kept. Log `build/logs/ownfiles-clean.log`.
 
 Not verified: the full `-Suite all` and `jarcheck` were not rerun for this change; the restored inventory was checked through the merge report and the conflict folder, not by looking at B's items in game; whatever B did on main between joining and the merge is lost to the world (it is in `backups/merged/`).
+
+## Robustness fixes from the post-M5 review (2026-11-19)
+
+Four defects found by a code review, fixed:
+
+1. **Merge cut short.** `ColdMerge` checks every branch record it will apply (hash) before touching the world, and leaves `dropin/rescan` while merging, so a merge that stops between writing the world and saving the manifest makes the next host compare every record (`HostSync.takeRescan`). A rescan marker left by a restore is kept.
+2. **Member sync outliving the wait.** `RecordApplier` refuses all work after `close()` (a late frame can no longer reopen region files). `SyncClient.stopAndWait` now returns whether the sync let go (its thread and its connection's thread ended, applier closed), waits up to 60 s, and every caller refuses to open the copy otherwise (`CoopLauncher.syncReleased` shows "text.dropin_coop.sync_busy"; handoff and crash takeover fail like other takeover errors). A new sync waits for the old one to let go instead of 15 s.
+3. **Case-insensitive file systems.** `RecordKey.fileAllowed` also checks the lower-cased path, refuses a game path in another case (`Level.dat`, `Players/...`), segments ending in a dot or space, and Windows device names.
+4. **Torn ledger line.** `Ledger.load` drops an unfinished last line (no line end, does not parse or verify) and rewrites the file; appends are forced to disk; delta files are written through a temp file.
+
+- `./gradlew :core:test :mc:test` and compile of every module: exit 0. New tests: `ManifestTest.filePolicyIgnoresCaseLikeWindowsDoes`, `LedgerTest.anAppendCutShortIsDroppedOnLoad` (12 and 9 tests in those classes, 0 failures).
+- `./gradlew build`: exit 0; jar `build/libs/dropin-0.1.0+mc26.3.jar` (1,214,805 bytes). `scripts/jarcheck.ps1`: exit 0.
+- `selftest.ps1 -Suite all`: 55/55 PASS (`build/logs/fix4-gate.log`), which also covers the offline-player-files change above.
+
+Not verified: no scenario forces a merge to stop half way, a sync thread to hang past 60 s, a mixed-case path from a peer, or a torn ledger in a running game (each is covered by unit tests or code reading only); the "sync busy" screen was never shown; behaviour on a case-sensitive Linux file system.

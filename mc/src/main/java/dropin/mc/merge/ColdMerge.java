@@ -161,8 +161,20 @@ public final class ColdMerge {
         }
         pending.sort(Comparator.comparingLong(branch -> branch.entry().ts()));
         Manifest manifest = Manifest.load(manifestFile);
+        // Records reach the world before the manifest and the ledger are saved. Should the merge stop in between
+        // (a crash, a record the game cannot write), this marker makes the next host compare every record with
+        // the manifest (HostSync.takeRescan), so what did reach the world is still sent to everyone. A marker a
+        // restore left (DESIGN 4.16) is not ours to remove.
+        Path rescan = dropin.resolve("rescan");
+        boolean hadRescan = Files.exists(rescan);
+        if (!hadRescan) {
+            Files.writeString(rescan, "");
+        }
         for (BranchStore.Branch branch : pending) {
             done.add(mergeOne(world, folder, dropin, store, ledger, manifest, manifestFile, branch, uuid, name, sess));
+        }
+        if (!hadRescan) {
+            Files.deleteIfExists(rescan);
         }
     }
 
@@ -187,6 +199,14 @@ public final class ColdMerge {
                     return manifest.get(key);
                 }
             }, branch.entry().host());
+            // Every record this merge needs must be there and whole before the world is touched: a damaged
+            // branch then fails here, leaving the world exactly as it was, instead of half way through.
+            for (String key : plan.apply()) {
+                String hash = branch.keys().get(key).hash();
+                if (!hash.isEmpty()) {
+                    store.record(branch.head(), hash);
+                }
+            }
             for (String key : plan.conflicts()) {
                 // The main world's record stays; the branch's is kept for manual recovery.
                 Change change = branch.keys().get(key);

@@ -643,3 +643,9 @@ core: `ledger/Deltas.java`, `ledger/Ledger.java` (`entries`, `hasMerged`, `trunc
 - New unit test `theBranchOwnersFilesComeFromTheBranchEvenIfMainChangedThem`; `M5Scenarios` now requires `filesKept == 0` and `filesApplied >= 1` in merge-clean and merge-conflict, and no `files/players` in the conflict backup.
 - merge-clean and merge-conflict PASS; full `-Suite all` not rerun.
 - Files: `core/.../merge/MergePlanner.java`, `mc/.../merge/ColdMerge.java`, `mc/src/selftest/.../M5Scenarios.java`, `core/src/test/.../merge/MergeTest.java`, `docs/DESIGN.md`, `docs/VERIFICATION.md`, `session-notes.md`.
+
+## Post-M5 review fixes (2026-11-19)
+
+- Fixed review findings 1–4 (see VERIFICATION "Robustness fixes from the post-M5 review"). Gate: build, jarcheck, `-Suite all` 55/55.
+- Still open from that review: (5) two hosts after a false failover — the live host's heartbeat should check the record before overwriting it; (6) server shutdown can wait behind a full scan (`HostSync` scan ignores `stopping`); (7) is covered by the rescan marker of fix 1 in practice.
+- Files: `core/.../manifest/RecordKey.java`, `core/.../ledger/Ledger.java`, `core/.../ledger/Deltas.java`, `mc/.../merge/ColdMerge.java`, `mc/.../member/RecordApplier.java`, `mc/.../member/SyncClient.java`, `mc/.../net/SyncPipe.java`, `mc/.../coop/CoopLauncher.java`, `mc/.../handoff/MemberHandoff.java`, `mc/.../handoff/HostLostScreen.java`, `en_us.json`, tests `ManifestTest`, `LedgerTest`.

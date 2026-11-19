@@ -121,6 +121,37 @@ class LedgerTest {
     }
 
     @Test
+    void anAppendCutShortIsDroppedOnLoad(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("dropin").resolve("ledger.jsonl");
+        Ledger ledger = new Ledger(AUTH, file);
+        for (int i = 0; i < 3; i++) {
+            ledger.append(next(ledger, "host-a"));
+        }
+        String complete = Files.readString(file);
+        String fourth = next(ledger, "host-a").toJson();
+
+        // Power lost half way through the fourth line: the three whole entries load, the file is repaired.
+        Files.writeString(file, complete + fourth.substring(0, fourth.length() / 2));
+        Ledger loaded = Ledger.load(AUTH, file);
+        assertEquals(ledger.hashes(), loaded.hashes());
+        assertEquals(complete, Files.readString(file));
+        loaded.append(next(loaded, "host-b"));
+        assertEquals(4, Ledger.load(AUTH, file).size());
+
+        // A whole entry that only lost its line end is kept, and the line end is written back.
+        Files.writeString(file, complete + fourth);
+        loaded = Ledger.load(AUTH, file);
+        assertEquals(4, loaded.size());
+        assertEquals(complete + fourth + "\n", Files.readString(file));
+
+        // Damage before the last line is still an error, as is a whole last line that does not verify.
+        Files.writeString(file, complete.substring(0, 20) + "\n" + complete);
+        assertThrows(IOException.class, () -> Ledger.load(AUTH, file));
+        Files.writeString(file, complete);
+        assertThrows(IOException.class, () -> Ledger.load(OTHER, file));
+    }
+
+    @Test
     void compareTellsEqualAheadBehindAndDiverged() throws IOException {
         Ledger base = chain(3, "host-a");
         List<String> three = base.hashes();

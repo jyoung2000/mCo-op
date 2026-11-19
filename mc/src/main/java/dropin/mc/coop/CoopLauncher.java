@@ -200,7 +200,16 @@ public final class CoopLauncher {
                 return;
             }
             // The copy is about to be opened by the game: a sync from an earlier session must have let go of it.
-            SyncClient.stopAndWait(world.worldId(), 15_000);
+            if (!syncReleased(mc, world, onCancel)) {
+                if (host.announced()) {
+                    try {
+                        rendezvous.publish(RendezvousRecord.of(RendezvousRecord.IDLE, uuid, name, host.sess(), System.currentTimeMillis() / 1000));
+                    } catch (Exception e) {
+                        DropIn.LOGGER.warn("Could not withdraw the host announcement of '{}': {}", world.name(), e.toString());
+                    }
+                }
+                return;
+            }
             // DESIGN 4.10: offline sessions that wait to be merged go in now, while the world is still closed.
             dropin.mc.merge.ColdMerge.run(mc, world, folder, uuid, name, host.sess());
             mc.execute(() -> {
@@ -240,7 +249,9 @@ public final class CoopLauncher {
         String uuid = mc.getUser().getProfileId().toString();
         String name = mc.getUser().getName();
         String levelId = folder.getFileName().toString();
-        SyncClient.stopAndWait(world.worldId(), 15_000);
+        if (!syncReleased(mc, world, onCancel)) {
+            return;
+        }
         dropin.mc.merge.ColdMerge.run(mc, world, folder, uuid, name, sess);
         mc.execute(() -> {
             HostSession.start(mc, world, CoopWorlds.rendezvous(world), sess, uuid, name);
@@ -299,6 +310,20 @@ public final class CoopLauncher {
     }
 
     /** As {@link #remember}, and notes who hosts the session this game is about to join (for the status line and failover). */
+    /**
+     * A member sync of this copy must have let go of it (no thread left that could write it) before the game
+     * opens it. If it did not within a minute, a screen says so and this returns false: the world is not opened.
+     * Not on the client thread.
+     */
+    public static boolean syncReleased(Minecraft mc, CoopWorld world, Runnable onCancel) {
+        if (SyncClient.stopAndWait(world.worldId(), 60_000)) {
+            return true;
+        }
+        mc.execute(() -> mc.gui.setScreen(new AlertScreen(onCancel, Component.translatable("menu.dropin_coop.title"),
+                Component.translatable("text.dropin_coop.sync_busy"))));
+        return false;
+    }
+
     public static void rememberHost(CoopWorld world, String uuid, String name) {
         remember(world, uuid, name);
         dropin.mc.handoff.CrashFailover.host(world.worldId(), uuid, name);

@@ -168,6 +168,23 @@ class ManifestTest {
     }
 
     @Test
+    void filePolicyIgnoresCaseLikeWindowsDoes() {
+        // A mod's own folder may use capitals; nothing may reach a refused or game path through another case.
+        for (String ok : List.of("SomeMod/Config.json", "serverconfig/MyMod-server.toml", "README.txt")) {
+            assertTrue(RecordKey.fileAllowed(ok), ok);
+        }
+        for (String no : List.of("Dropin/ledger.jsonl", "DROPIN/manifest/manifest.tsv", "Session.lock", "somemod/X.TMP",
+                "Level.dat", "LEVEL.DAT", "Level.dat_old", "Icon.png", "Players/data/x.dat", "Data/raids.dat",
+                "Dimensions/minecraft/overworld/data/x.dat", "dimensions/minecraft/overworld/Region/r.0.0.mca",
+                "Region/r.0.0.mca", "somemod/r.0.0.MCA", "somemod/c.1.2.Mcc",
+                // Windows drops a trailing dot or space and reserves device names.
+                "dropin./ledger.jsonl", "dropin /ledger.jsonl", "level.dat.", "somemod/con", "somemod/NUL.txt",
+                "COM1/x.dat", "somemod/lpt9.log")) {
+            assertFalse(RecordKey.fileAllowed(no), no);
+        }
+    }
+
+    @Test
     void badChunkKeysAreRefused() {
         for (String bad : List.of("c|minecraft:overworld|region|0", "c|minecraft:overworld|blocks|0|0",
                 "c|../x:y|region|0|0", "c|minecraft:a/../b|region|0|0", "c|minecraft:overworld|region|x|0", "f|level.dat")) {

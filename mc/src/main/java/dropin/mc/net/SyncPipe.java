@@ -124,6 +124,20 @@ public final class SyncPipe extends ChannelInboundHandlerAdapter implements Tran
         finish();
     }
 
+    /**
+     * After {@link #close()}: waits until the pipe's thread has run what was queued and ended.
+     *
+     * @return true if it has ended
+     */
+    public boolean awaitStopped(long millis) throws InterruptedException {
+        return executor.awaitTermination(Math.max(0, millis), java.util.concurrent.TimeUnit.MILLISECONDS);
+    }
+
+    /** True once the pipe is closed and its thread has ended. */
+    public boolean isStopped() {
+        return executor.isTerminated();
+    }
+
     /** Blocks while the channel's send buffer is full, so bulk data never piles up in memory. */
     public void awaitWritable(long maxMillis) throws InterruptedException {
         long deadline = System.currentTimeMillis() + maxMillis;

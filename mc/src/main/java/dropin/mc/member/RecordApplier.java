@@ -39,6 +39,8 @@ public final class RecordApplier implements AutoCloseable {
     private final Path root;
     private final String levelId;
     private final Map<String, RegionFileStorage> storages = new HashMap<>();
+    /** Once closed, nothing is read or written any more: a late frame must never reopen the region files. */
+    private boolean closed;
 
     public RecordApplier(Path worldFolder) {
         this.root = worldFolder.toAbsolutePath().normalize();
@@ -46,6 +48,7 @@ public final class RecordApplier implements AutoCloseable {
     }
 
     public synchronized void apply(String key, byte[] bytes) throws IOException {
+        ensureOpen();
         if (RecordKey.isChunk(key)) {
             RecordKey.Chunk chunk = RecordKey.parseChunk(key);
             CompoundTag tag = ChunkBytes.parse(bytes);
@@ -64,6 +67,7 @@ public final class RecordApplier implements AutoCloseable {
     }
 
     public synchronized void delete(String key) throws IOException {
+        ensureOpen();
         if (RecordKey.isChunk(key)) {
             RecordKey.Chunk chunk = RecordKey.parseChunk(key);
             storage(chunk.dim(), chunk.kind()).write(new ChunkPos(chunk.cx(), chunk.cz()), null);
@@ -81,6 +85,7 @@ public final class RecordApplier implements AutoCloseable {
 
     /** The bytes of any record of this copy, or null if the copy has no such record. */
     public synchronized byte[] read(String key) throws IOException {
+        ensureOpen();
         if (RecordKey.isChunk(key)) {
             return readChunk(key);
         }
@@ -89,6 +94,7 @@ public final class RecordApplier implements AutoCloseable {
     }
 
     public synchronized void flush() throws IOException {
+        ensureOpen();
         for (RegionFileStorage storage : storages.values()) {
             storage.flush();
         }
@@ -96,6 +102,7 @@ public final class RecordApplier implements AutoCloseable {
 
     @Override
     public synchronized void close() throws IOException {
+        closed = true;
         IOException failure = null;
         for (RegionFileStorage storage : storages.values()) {
             try {
@@ -119,7 +126,19 @@ public final class RecordApplier implements AutoCloseable {
         return file;
     }
 
+    /** Whether {@link #close()} was called. */
+    public synchronized boolean isClosed() {
+        return closed;
+    }
+
+    private void ensureOpen() throws IOException {
+        if (closed) {
+            throw new IOException("The copy at " + root + " was let go of");
+        }
+    }
+
     private RegionFileStorage storage(String dim, String kind) throws IOException {
+        ensureOpen();
         String id = dim + "|" + kind;
         RegionFileStorage storage = storages.get(id);
         if (storage == null) {

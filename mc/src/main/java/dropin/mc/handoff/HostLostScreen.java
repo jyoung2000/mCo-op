@@ -200,7 +200,9 @@ public final class HostLostScreen extends Screen {
         message = Component.translatable(K + "taking_over");
         try {
             // The copy is about to be opened by the game: the sync must have closed its files.
-            SyncClient.stopAndWait(world.worldId(), 15_000);
+            if (!SyncClient.stopAndWait(world.worldId(), 60_000)) {
+                throw new IllegalStateException("the sync of this copy did not let go of it");
+            }
             Path dropin = folder.resolve(CoopWorldStore.MARKER_DIR);
             LedgerEntry last = Ledger.load(world.keys().auth(), dropin.resolve("ledger.jsonl")).last();
             if (last == null) {

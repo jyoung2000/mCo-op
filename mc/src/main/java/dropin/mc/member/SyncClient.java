@@ -90,8 +90,11 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
             old.stop = true;
         }
         Thread thread = new Thread(() -> {
-            if (old != null) {
-                old.join(15_000);
+            // Two syncs must never write one copy at once.
+            if (old != null && !old.awaitReleased(60_000)) {
+                DropIn.LOGGER.error("The earlier sync of '{}' still holds the copy; this one does not start", world.name());
+                ACTIVE.remove(world.worldId(), client);
+                return;
             }
             client.run();
         }, "dropin-coop-member-sync");
@@ -106,24 +109,54 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
         return client == null ? null : client.status;
     }
 
-    /** Stops the sync of a world and waits until its files are closed (before the world is opened here). */
-    public static void stopAndWait(String worldId, long millis) {
+    /**
+     * Stops the sync of a world and waits until it has let go of the copy: its thread ended, its connection's
+     * thread ended (no late frame can write any more) and the region files are closed. Call it before the game
+     * opens the copy, and do not open it if this returns false.
+     *
+     * @return true if no sync holds the copy any more
+     */
+    public static boolean stopAndWait(String worldId, long millis) {
         SyncClient client = ACTIVE.get(worldId);
-        if (client != null) {
-            client.stop = true;
-            client.join(millis);
+        if (client == null) {
+            return true;
         }
+        client.stop = true;
+        boolean released = client.awaitReleased(millis);
+        if (!released) {
+            DropIn.LOGGER.error("The sync of '{}' did not let go of the copy within {} s", client.world.name(), millis / 1000);
+        }
+        return released;
     }
 
-    private void join(long millis) {
-        Thread running = thread;
-        if (running != null && running != Thread.currentThread()) {
-            try {
-                running.join(millis);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+    private boolean awaitReleased(long millis) {
+        stop = true;
+        long deadline = System.currentTimeMillis() + millis;
+        try {
+            Thread running = thread;
+            if (running != null && running != Thread.currentThread()) {
+                running.join(Math.max(1, deadline - System.currentTimeMillis()));
+                if (running.isAlive()) {
+                    return false;
+                }
             }
+            SyncPipe last = pipe;
+            if (last != null) {
+                last.close();
+                if (!last.awaitStopped(deadline - System.currentTimeMillis())) {
+                    return false;
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
         }
+        RecordApplier open = applier;
+        if (open != null && !open.isClosed()) {
+            return false;
+        }
+        ACTIVE.remove(world.worldId(), this);
+        return true;
     }
 
     /**
@@ -285,12 +318,30 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
         } finally {
             if (applier != null) {
                 try {
+                    // From here on a late frame fails instead of reopening the region files.
                     applier.close();
                 } catch (IOException e) {
                     DropIn.LOGGER.error("Could not close the local copy of '{}'", world.name(), e);
                 }
             }
-            ACTIVE.remove(world.worldId(), this);
+            // The connection's thread may still be working through queued frames (the ledger, the manifest).
+            SyncPipe last = pipe;
+            boolean pipeDone = true;
+            if (last != null) {
+                last.close();
+                try {
+                    pipeDone = last.awaitStopped(30_000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    pipeDone = last.isStopped();
+                }
+            }
+            if (pipeDone) {
+                ACTIVE.remove(world.worldId(), this);
+            } else {
+                // Stays registered, so stopAndWait keeps refusing to hand the copy to the game until it ends.
+                DropIn.LOGGER.error("The sync connection of '{}' is still busy after it was stopped", world.name());
+            }
             thread = null;
         }
     }

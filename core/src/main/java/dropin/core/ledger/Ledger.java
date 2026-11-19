@@ -34,17 +34,37 @@ public final class Ledger {
         this.file = file;
     }
 
-    /** Reads {@code ledger.jsonl}. A missing file is an empty ledger; a broken chain is an error. */
+    /**
+     * Reads {@code ledger.jsonl}. A missing file is an empty ledger; a broken chain is an error, except for a
+     * last line with no line end that does not parse or verify: that is an append cut short (power lost, the
+     * game killed), so it is dropped and the file is rewritten without it. The checkpoint it would have been
+     * is simply not there, as if the session had stopped just before it.
+     */
     public static Ledger load(byte[] auth, Path file) throws IOException {
         Ledger ledger = new Ledger(auth, null);
+        boolean torn = false;
         if (Files.isRegularFile(file)) {
-            for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
-                if (!line.isBlank()) {
-                    try {
-                        ledger.append(LedgerEntry.fromJson(line));
-                    } catch (RuntimeException e) {
-                        throw new IOException("Ledger " + file + " is damaged at entry " + (ledger.size() + 1), e);
+            String text = Files.readString(file, StandardCharsets.UTF_8);
+            String[] lines = text.split("\n", -1);
+            // After the last "\n", split leaves "" for a complete file, or the unfinished last line.
+            for (int i = 0; i < lines.length; i++) {
+                String line = lines[i];
+                if (line.isBlank()) {
+                    continue;
+                }
+                boolean unfinished = i == lines.length - 1;
+                try {
+                    ledger.append(LedgerEntry.fromJson(line.strip()));
+                } catch (RuntimeException e) {
+                    if (unfinished) {
+                        torn = true;
+                        break;
                     }
+                    throw new IOException("Ledger " + file + " is damaged at entry " + (ledger.size() + 1), e);
+                }
+                if (unfinished) {
+                    // A complete entry whose line end was lost: keep it, and write the line end back.
+                    torn = true;
                 }
             }
         }
@@ -52,7 +72,25 @@ public final class Ledger {
         loaded.entries.addAll(ledger.entries);
         loaded.hashes.addAll(ledger.hashes);
         loaded.head = ledger.head;
+        if (torn) {
+            loaded.rewrite(loaded.entries);
+        }
         return loaded;
+    }
+
+    private void rewrite(List<LedgerEntry> kept) throws IOException {
+        StringBuilder text = new StringBuilder();
+        for (LedgerEntry entry : kept) {
+            text.append(entry.toJson()).append('\n');
+        }
+        Files.createDirectories(file.getParent());
+        Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
+        Files.writeString(tmp, text, StandardCharsets.UTF_8);
+        try {
+            Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+        } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+            Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     /** Why the entry cannot follow the current head, or null if it can. */
@@ -82,8 +120,16 @@ public final class Ledger {
         }
         if (file != null) {
             Files.createDirectories(file.getParent());
-            Files.writeString(file, entry.toJson() + "\n", StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            // Forced to disk, so a checkpoint the game reported is not lost with the power; a cut-short append
+            // is dropped by load().
+            try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(file,
+                    StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.APPEND)) {
+                java.nio.ByteBuffer bytes = java.nio.ByteBuffer.wrap((entry.toJson() + "\n").getBytes(StandardCharsets.UTF_8));
+                while (bytes.hasRemaining()) {
+                    channel.write(bytes);
+                }
+                channel.force(true);
+            }
         }
         entries.add(entry);
         head = entry.hash();
@@ -168,18 +214,7 @@ public final class Ledger {
             return;
         }
         if (file != null) {
-            StringBuilder text = new StringBuilder();
-            for (LedgerEntry entry : kept) {
-                text.append(entry.toJson()).append('\n');
-            }
-            Files.createDirectories(file.getParent());
-            Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
-            Files.writeString(tmp, text, StandardCharsets.UTF_8);
-            try {
-                Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
-            } catch (java.nio.file.AtomicMoveNotSupportedException e) {
-                Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            }
+            rewrite(kept);
         }
         entries.clear();
         entries.addAll(kept);

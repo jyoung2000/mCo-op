@@ -106,7 +106,9 @@ public final class MemberHandoff {
     private static void takeOver(Minecraft mc, CoopWorld world, LedgerEntry finalEntry) {
         try {
             // The copy is about to be opened by the game: the sync must have closed its files.
-            SyncClient.stopAndWait(world.worldId(), 15_000);
+            if (!SyncClient.stopAndWait(world.worldId(), 60_000)) {
+                throw new IllegalStateException("the sync of this copy did not let go of it");
+            }
             Path folder = SyncClient.ensureFolder(mc, world);
             Manifest manifest = Manifest.load(folder.resolve(CoopWorldStore.MARKER_DIR).resolve("manifest").resolve("current.tsv"));
             if (!manifest.root().equals(finalEntry.root())) {

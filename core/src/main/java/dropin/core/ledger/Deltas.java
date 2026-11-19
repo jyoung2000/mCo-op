@@ -47,7 +47,7 @@ public final class Deltas {
         Files.createDirectories(deltasDir);
         StringBuilder text = new StringBuilder();
         changed.forEach((key, hash) -> text.append(key).append('\t').append(hash).append('\n'));
-        Files.writeString(file(deltasDir, seq), text, StandardCharsets.UTF_8);
+        writeAtomically(file(deltasDir, seq), text);
     }
 
     /** @param base the hash each changed key had before; a key missing from it counts as "no record before" */
@@ -71,7 +71,18 @@ public final class Deltas {
             }
             text.append('\n');
         });
-        Files.writeString(file(deltasDir, seq), text, StandardCharsets.UTF_8);
+        writeAtomically(file(deltasDir, seq), text);
+    }
+
+    /** Through a temp file, so a delta is either all there or not there (a cut-short one would mislead a merge). */
+    private static void writeAtomically(Path target, CharSequence text) throws IOException {
+        Path tmp = target.resolveSibling(target.getFileName() + ".tmp");
+        Files.writeString(tmp, text, StandardCharsets.UTF_8);
+        try {
+            Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+        } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+            Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     public static Map<String, String> read(Path deltasDir, long seq) throws IOException {
