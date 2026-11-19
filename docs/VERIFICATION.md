@@ -372,3 +372,29 @@ Not verified:
 - Two PCs: every run had all games on this one PC, so real latency, packet loss and a slow link are not covered. The picture itself was not looked at; positions and status were read from the game.
 - Other programs (browser, Steam, video) running beside it; only sockets and threads were counted.
 - Open, not decided: records are sent uncompressed; folders that mods add to a world's root are not copied; no bandwidth cap on direct connections; with C2ME every checkpoint compares all chunks (330 ms for about 1,100 records); `SyncServerSession` closes without a log line on an error.
+
+## Mod folders in the world root, sync error log line, direct rate cap, fastest player takes over: 2026-11-18
+
+Gate run on this machine, on the tree committed with this entry:
+
+| Check | Result |
+| --- | --- |
+| `./gradlew build` (unit tests included) | exit 0 |
+| `scripts/jarcheck.ps1` | exit 0 |
+| `scripts/selftest.ps1 -Suite all` | 49 of 49 PASS (new: `sync-extras`) |
+
+Jar: `build/libs/dropin-0.1.0+mc26.3.jar`, 1,137,782 bytes.
+
+- `sync-extras` (A, B Fabric, C NeoForge, LAN): `serverconfig/testmod-server.toml` and `testmod/deep/state.dat`, written into the host's world root, are in B's and C's copies with the host's content. With both members treated as "over the internet" (`dropin.dev.forcePath=internet`) and a cap of 256 KB/s, 18,080,056 bytes of records were sent and the most in any one second was 276,607 bytes. B connected first and answered the upload test 2 s late (`dropin.dev.speedDelayMs`): measured 126 KB/s, C 98,814 KB/s, and C is the one who would take over.
+- Unit tests (core): the file rule (mod folders allowed; region files, `dropin/`, locks, temp files and paths that leave the folder refused; 64 MB limit for mod files only), the successor order (fastest step first, about-equal speeds and "fast enough" speeds do not decide, an unmeasured peer ranks last, no full copy is never chosen), the cap's delay, the upload test between a host and a member session, and that a frame the host cannot read is reported and ends the connection.
+- Records are sent uncompressed: nothing was changed, DESIGN 4.6 now says so.
+- A test was changed on purpose: `ManifestTest.filePolicyFollowsTheDesign` used to require that `mods/evil.jar`, `options.txt` and a top-level file `data` in a world's root are NOT replicated. By the owner's decision they now are (they stay inside the world folder).
+- The cap used to round every record under about 2 KB down to no wait at all; waits are now carried over between records.
+
+Not verified:
+- The default cap (2048 KB/s) on a real internet connection, and that home-network players are recognised as such: the run forced "internet" on one PC. The cap is per connection, not for all members together.
+- The upload test over a real link: on one PC it measures the PC. It is a single 256 KB burst and includes one round trip, so it is rough for fast links.
+- A real handoff decided by speed (the test asked the host who would take over; `handoff-3` still hands over for real, to the longest connected of two equal players).
+- The log line of `HostSync.sessionError` in a running game (the callback is unit-tested; nothing in a game run made a connection fail).
+- Real mods' own folders (only test files were used), files that a mod keeps open or rewrites constantly, files over 64 MB.
+- Crash failover is milestone M4 and not built; when the host's game dies without a handoff nobody takes over yet, by speed or otherwise.

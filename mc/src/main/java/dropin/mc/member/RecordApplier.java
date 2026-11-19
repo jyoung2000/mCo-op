@@ -168,7 +168,7 @@ public final class RecordApplier implements AutoCloseable {
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                     String relative = root.relativize(file).toString().replace('\\', '/');
-                    if (RecordKey.fileAllowed(relative)) {
+                    if (RecordKey.fileAllowed(relative, attrs.size())) {
                         manifest.put(RecordKey.file(relative), Manifest.hash(Files.readAllBytes(file)));
                     }
                     return FileVisitResult.CONTINUE;

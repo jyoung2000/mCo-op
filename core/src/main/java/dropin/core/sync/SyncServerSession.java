@@ -79,6 +79,10 @@ public final class SyncServerSession {
         default void membersOffered(SyncServerSession session, String json) {
         }
 
+        /** A frame of this connection could not be handled; the connection is closed right after this call. */
+        default void sessionError(SyncServerSession session, Exception error) {
+        }
+
         /** The jar of the host's current signed mod list with this SHA-512, or null. */
         default java.nio.file.Path modFile(String sha512) {
             return null;
@@ -142,6 +146,31 @@ public final class SyncServerSession {
         }
     }
 
+    /**
+     * Asks the peer to send {@link Wire#SPEED_BYTES} bytes and times the answer, unless a test ran less than
+     * {@code everyMs} ago or one is running. The result is {@link #uploadKBps()}.
+     */
+    public void speedTestIfDue(long everyMs) {
+        long now = System.currentTimeMillis();
+        if (!ready() || speedStarted != 0 || (speedAskedAt != 0 && now - speedAskedAt < everyMs)) {
+            return;
+        }
+        speedAskedAt = now;
+        speedGot = 0;
+        speedStarted = System.nanoTime();
+        sendSealed(new Wire.Out(Wire.SPEED_REQ).i32(Wire.SPEED_BYTES));
+    }
+
+    /** The peer's upload speed as last measured (KB/s); 0 before the first test finished. */
+    public int uploadKBps() {
+        return uploadKBps;
+    }
+
+    private volatile long speedAskedAt;
+    private volatile long speedStarted;
+    private volatile long speedGot;
+    private volatile int uploadKBps;
+
     /** RECORD frames sent on this connection. */
     public long recordFrames() {
         return recordFrames;
@@ -166,6 +195,7 @@ public final class SyncServerSession {
                 dispatch(new Wire.In(message));
             }
         } catch (IOException | GeneralSecurityException | RuntimeException e) {
+            host.sessionError(this, e);
             close();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -324,6 +354,18 @@ public final class SyncServerSession {
             case Wire.PROGRESS -> {
                 peerHave = in.i32();
                 peerTotal = in.i32();
+            }
+            case Wire.SPEED_DATA -> {
+                boolean last = in.u8() != 0;
+                speedGot += in.bytes().length;
+                long started = speedStarted;
+                if (last && started != 0) {
+                    if (speedGot >= Wire.SPEED_BYTES) {
+                        long nanos = Math.max(1, System.nanoTime() - started);
+                        uploadKBps = (int) Math.max(1, Math.min(Integer.MAX_VALUE, speedGot * 1_000_000_000L / 1024 / nanos));
+                    }
+                    speedStarted = 0;
+                }
             }
             case Wire.BYE -> close();
             default -> throw new IOException("Unexpected sync message " + in.type);

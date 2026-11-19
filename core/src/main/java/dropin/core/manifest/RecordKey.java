@@ -13,6 +13,8 @@ import java.util.regex.Pattern;
  */
 public final class RecordKey {
     public static final Set<String> KINDS = Set.of("region", "entities", "poi");
+    /** Largest file of a mod's own folder in the world's root that is replicated (bytes). */
+    public static final long MAX_MOD_FILE = 64L * 1024 * 1024;
     private static final Pattern DIMENSION = Pattern.compile("[a-z0-9_.-]+:[a-z0-9_.-]+(/[a-z0-9_.-]+)*");
 
     /** @param dim dimension id, for example {@code minecraft:overworld} */
@@ -104,25 +106,43 @@ public final class RecordKey {
                 || path.equals("level.dat_old")) {
             return false;
         }
-        if (segments.length == 1) {
-            return path.equals("level.dat") || path.equals("icon.png");
-        }
-        switch (segments[0]) {
-            case "data", "players", "datapacks", "resourcepacks":
-                return true;
-            case "dimensions":
-                // dimensions/<namespace>/<name...>/data/**, never the three region-type folders
-                for (int i = 1; i < segments.length - 1; i++) {
-                    if (KINDS.contains(segments[i])) {
-                        return false;
-                    }
-                    if (i >= 3 && segments[i].equals("data")) {
-                        return true;
-                    }
+        if (segments[0].equals("dimensions")) {
+            // dimensions/<namespace>/<name...>/data/**, never the three region-type folders
+            for (int i = 1; i < segments.length - 1; i++) {
+                if (KINDS.contains(segments[i])) {
+                    return false;
                 }
-                return false;
-            default:
-                return false;
+                if (i >= 3 && segments[i].equals("data")) {
+                    return true;
+                }
+            }
+            return false;
         }
+        if (gameFile(segments)) {
+            return true;
+        }
+        // Anything else in the world's root is what a mod keeps there (for example serverconfig/). Region
+        // files are never file records: they may be open, and chunks travel as chunk records.
+        return !KINDS.contains(segments[0]) && !last.endsWith(".mca") && !last.endsWith(".mcc");
+    }
+
+    /** The files the game itself keeps in a world's root. */
+    private static boolean gameFile(String[] segments) {
+        if (segments.length == 1) {
+            return segments[0].equals("level.dat") || segments[0].equals("icon.png");
+        }
+        return switch (segments[0]) {
+            case "data", "players", "datapacks", "resourcepacks", "dimensions" -> true;
+            default -> false;
+        };
+    }
+
+    /**
+     * {@link #fileAllowed(String)} for a file of a known size: a file a mod keeps in the world's root is
+     * replicated only up to {@link #MAX_MOD_FILE} bytes (a backup folder must not travel with every world).
+     * The host's scan and a member's scan both use this, so they agree on what a copy holds.
+     */
+    public static boolean fileAllowed(String path, long size) {
+        return fileAllowed(path) && (size <= MAX_MOD_FILE || gameFile(path.split("/", -1)));
     }
 }

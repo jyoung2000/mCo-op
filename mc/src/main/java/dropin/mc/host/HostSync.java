@@ -97,6 +97,9 @@ public final class HostSync implements SyncServerSession.Host {
                        long changed) {
     }
 
+    private final int devDirectRate;
+    private static final long SPEED_TEST_EVERY_MS = 5 * 60_000L;
+
     private record Peer(SyncServerSession session, SyncPipe pipe) {
     }
 
@@ -163,6 +166,8 @@ public final class HostSync implements SyncServerSession.Host {
                 .orElseGet(() -> (long) CoopWorlds.configInt("checkpointSeconds", 60));
         this.intervalMs = Math.max(5, seconds) * 1000;
         this.devDelayMs = DropIn.switches().read("dropin.dev.syncDelayMs").map(Long::parseLong).orElse(0L);
+        // Development only (DESIGN 4.12): the direct cap without writing a config file.
+        this.devDirectRate = DropIn.switches().read("dropin.dev.directRateKBps").map(Integer::parseInt).orElse(-1);
     }
 
     /** The sync state of the co-op world this game hosts, or null. */
@@ -212,6 +217,10 @@ public final class HostSync implements SyncServerSession.Host {
                 }
                 for (Peer peer : peers) {
                     peer.session().refresh();
+                    // DESIGN 4.9: who could host best. Only where bulk data may flow, never through a relay unasked.
+                    if (peer.session().syncedSeq() > 0 && bulkAllowed(peer.session())) {
+                        peer.session().speedTestIfDue(SPEED_TEST_EVERY_MS);
+                    }
                 }
                 Thread.sleep(500);
             } catch (InterruptedException e) {
@@ -466,7 +475,7 @@ public final class HostSync implements SyncServerSession.Host {
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
                 String relative = root.relativize(file).toString().replace('\\', '/');
-                if (!RecordKey.fileAllowed(relative)) {
+                if (!RecordKey.fileAllowed(relative, attrs.size())) {
                     return FileVisitResult.CONTINUE;
                 }
                 String key = RecordKey.file(relative);
@@ -615,7 +624,8 @@ public final class HostSync implements SyncServerSession.Host {
                 continue;
             }
             connected++;
-            candidates.add(new Successor.Candidate(session.playerUuid(), session.syncedSeq(), session.connectedAt()));
+            candidates.add(new Successor.Candidate(session.playerUuid(), session.syncedSeq(), session.connectedAt(),
+                    session.uploadKBps()));
             if (session.peerPercent() > bestPercent) {
                 bestPercent = session.peerPercent();
                 bestUuid = session.playerUuid();
@@ -1059,14 +1069,64 @@ public final class HostSync implements SyncServerSession.Host {
         }
         if (!PathPolicy.direct(peer.pipe().channel())) {
             // Opted-in bulk sync over a relay is capped (DESIGN 4.6).
-            int rate = Math.max(1, CoopWorlds.configInt("relayRateKBps", 128));
-            Thread.sleep(bytes * 1000L / (rate * 1024L));
+            pace(session, bytes, Math.max(1, rate("relayRateKBps", 128)));
+        } else if (!PathPolicy.local(peer.pipe().channel())) {
+            // A direct connection over the internet: leave room on the host's upload for everything else
+            // on this PC (DESIGN 4.6). 0 switches the cap off. Players on the same network are not capped.
+            pace(session, bytes, devDirectRate >= 0 ? devDirectRate : rate("directRateKBps", 2048));
         }
         // Bulk transfer must not slow the game down: wait while the server is behind (below about 18 TPS).
         for (int waited = 0; !stopping && waited < 5000 && server.getAverageTickTimeNanos() > 55_000_000L; waited += 100) {
             Thread.sleep(100);
         }
         peer.pipe().awaitWritable(30_000);
+    }
+
+    /** Bytes sent to a connection that its rate cap has not been waited for yet (records are often tiny). */
+    private final Map<SyncServerSession, long[]> owed = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<String, long[]> rates = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Waits so that this connection stays under {@code rateKBps}; 0 or less = no cap. */
+    private void pace(SyncServerSession session, int bytes, int rateKBps) throws InterruptedException {
+        if (rateKBps <= 0) {
+            return;
+        }
+        long[] debt = owed.computeIfAbsent(session, key -> new long[1]);
+        debt[0] += bytes;
+        long ms = debt[0] * 1000L / (rateKBps * 1024L);
+        if (ms > 0) {
+            debt[0] -= ms * rateKBps * 1024L / 1000L;
+            Thread.sleep(ms);
+        }
+    }
+
+    /** A rate of {@code config/dropin/coop.json}, read again at most every five seconds (this runs per record). */
+    private int rate(String name, int fallback) {
+        long now = System.currentTimeMillis();
+        long[] cached = rates.get(name);
+        if (cached == null || now - cached[1] > 5000) {
+            cached = new long[]{CoopWorlds.configInt(name, fallback), now};
+            rates.put(name, cached);
+        }
+        return (int) cached[0];
+    }
+
+    @Override
+    public void sessionError(SyncServerSession session, Exception error) {
+        DropIn.LOGGER.warn("The sync connection of {} to '{}' ended on an error", session.playerUuid().isEmpty()
+                ? "a player that has not said who it is" : memberName(session.playerUuid()) + " (" + session.playerUuid() + ")",
+                world.name(), error);
+    }
+
+    /** The upload speed last measured for a connected player (KB/s); 0 if none was measured. */
+    public int uploadKBps(String uuid) {
+        int best = 0;
+        for (Peer peer : peers) {
+            if (peer.session().ready() && peer.session().playerUuid().equals(uuid)) {
+                best = Math.max(best, peer.session().uploadKBps());
+            }
+        }
+        return best;
     }
 
     @Override

@@ -461,6 +461,19 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
 
     /** DESIGN 4.9: the host is leaving. This sync ends; the handoff code takes the game from here. */
     @Override
+    public void speedTestAsked() {
+        // Development only (DESIGN 4.12): makes this player look slow, so a self-test can see who is chosen.
+        long delay = DropIn.switches().read("dropin.dev.speedDelayMs").map(Long::parseLong).orElse(0L);
+        if (delay > 0) {
+            try {
+                Thread.sleep(delay);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    @Override
     public void handoff(String successorUuid, LedgerEntry finalEntry, boolean applied) {
         stop = true;
         MemberHandoff.received(mc, world, successorUuid, finalEntry, applied);

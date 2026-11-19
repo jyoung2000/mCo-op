@@ -42,6 +42,13 @@ class SyncTest {
         final List<SyncServerSession> sessions = new ArrayList<>();
         final List<Long> acks = new ArrayList<>();
         boolean bulk = true;
+        final List<Exception> errors = new ArrayList<>();
+
+        @Override
+        public void sessionError(SyncServerSession session, Exception error) {
+            errors.add(error);
+        }
+
         Function<String, byte[]> corrupt = key -> null;
         int reads;
 
@@ -514,6 +521,36 @@ class SyncTest {
         assertEquals(SyncClientSession.Phase.WAITING_DIRECT, link.client.phase());
         assertEquals(frames, link.server.recordFrames());
         assertArrayEquals(bytes("level 2"), local.records.get("f|level.dat"));
+    }
+
+    @Test
+    void theHostMeasuresAMembersUploadSpeed() throws IOException {
+        FakeHost host = hostWithWorld();
+        Link link = new Link(host, new FakeLocal(KEYS)).start();
+        assertEquals(0, link.server.uploadKBps());
+
+        link.server.speedTestIfDue(60_000);
+        link.run();
+        int measured = link.server.uploadKBps();
+        assertTrue(measured > 0, "no speed was measured");
+
+        // Not due again yet: nothing is asked, the figure stays.
+        link.server.speedTestIfDue(60_000);
+        assertTrue(link.tasks.isEmpty());
+        assertEquals(measured, link.server.uploadKBps());
+        assertEquals(SyncClientSession.Phase.LIVE, link.client.phase());
+    }
+
+    @Test
+    void aFrameTheHostCannotReadIsReportedAndEndsTheConnection() throws IOException {
+        FakeHost host = hostWithWorld();
+        Link link = new Link(host, new FakeLocal(KEYS)).start();
+        assertTrue(host.errors.isEmpty());
+
+        link.server.onFrame(new byte[]{1, 2, 3});
+
+        assertEquals(1, host.errors.size());
+        assertFalse(link.server.ready());
     }
 
     @Test

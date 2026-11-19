@@ -138,17 +138,31 @@ class ManifestTest {
     }
 
     @Test
+    void aModsFileIsLimitedInSizeAndAGameFileIsNot() {
+        assertTrue(RecordKey.fileAllowed("somemod/state.dat", RecordKey.MAX_MOD_FILE));
+        assertFalse(RecordKey.fileAllowed("somemod/backup.zip", RecordKey.MAX_MOD_FILE + 1));
+        assertFalse(RecordKey.fileAllowed("big.bin", RecordKey.MAX_MOD_FILE + 1));
+        assertTrue(RecordKey.fileAllowed("level.dat", RecordKey.MAX_MOD_FILE + 1));
+        assertTrue(RecordKey.fileAllowed("data/huge.dat", RecordKey.MAX_MOD_FILE + 1));
+        assertTrue(RecordKey.fileAllowed("dimensions/minecraft/overworld/data/huge.dat", RecordKey.MAX_MOD_FILE + 1));
+        assertFalse(RecordKey.fileAllowed("dropin/ledger.jsonl", 10));
+    }
+
+    @Test
     void filePolicyFollowsTheDesign() {
         for (String ok : List.of("level.dat", "icon.png", "data/raids.dat", "players/data/x.dat",
                 "players/advancements/x.json", "datapacks/pack/pack.mcmeta", "resourcepacks/a.zip",
-                "dimensions/minecraft/overworld/data/chunks.dat", "dimensions/mod/deep/dim/data/x.dat")) {
+                "dimensions/minecraft/overworld/data/chunks.dat", "dimensions/mod/deep/dim/data/x.dat",
+                // What a mod keeps in the world's root travels too (owner's decision, 2026-11-18).
+                "serverconfig/somemod-server.toml", "somemod/deep/state.dat", "mods/evil.jar", "options.txt", "data")) {
             assertTrue(RecordKey.fileAllowed(ok), ok);
         }
         for (String no : List.of("", "session.lock", "level.dat_old", "dropin/world.json", "dropin/ledger.jsonl",
                 "data/x.tmp", "../level.dat", "data/../../x", "/etc/passwd", "C:/x", "data\\x", "data//x",
                 "dimensions/minecraft/overworld/region/r.0.0.mca", "dimensions/minecraft/overworld/entities/r.0.0.mca",
-                "dimensions/minecraft/overworld/poi/r.0.0.mca", "dimensions/minecraft/data/x", "mods/evil.jar",
-                "options.txt", "data")) {
+                "dimensions/minecraft/overworld/poi/r.0.0.mca", "dimensions/minecraft/data/x",
+                "region/r.0.0.mca", "entities/r.0.0.mca", "poi/x", "somemod/r.0.0.mca", "somemod/c.1.2.mcc",
+                "somemod/session.lock", "somemod/x.tmp", "somemod/../level.dat")) {
             assertFalse(RecordKey.fileAllowed(no), no);
         }
     }

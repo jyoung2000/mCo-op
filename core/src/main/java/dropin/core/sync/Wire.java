@@ -21,7 +21,7 @@ public final class Wire {
     /** {@code DROPIN\0\1}: the first bytes a sync client sends. A vanilla handshake cannot start like this. */
     private static final byte[] MAGIC = {0x44, 0x52, 0x4F, 0x50, 0x49, 0x4E, 0x00, 0x01};
     public static final int MAGIC_LENGTH = MAGIC.length;
-    public static final int PROTO = 3;
+    public static final int PROTO = 4;
     public static final int MAX_FRAME = 4 * 1024 * 1024;
     /** Largest piece of one record in a RECORD frame. */
     public static final int PIECE = 256 * 1024;
@@ -56,6 +56,12 @@ public final class Wire {
     public static final int MOD_DATA = 26;
     /** Member to host: how much of the world this copy holds, {i32 have, i32 total} (for "Sam 62%", DESIGN 4.9). */
     public static final int PROGRESS = 27;
+    /** Host to member: send me this many bytes, {i32 bytes}. The host times the answer (DESIGN 4.9). */
+    public static final int SPEED_REQ = 28;
+    /** Member to host: {u8 last, bytes} until the asked number of bytes went out. The content means nothing. */
+    public static final int SPEED_DATA = 29;
+    /** The size of one upload test, and the most a member answers with. */
+    public static final int SPEED_BYTES = 256 * 1024;
 
     public static final int RECORD_LAST = 1;
     public static final int RECORD_ABSENT = 2;

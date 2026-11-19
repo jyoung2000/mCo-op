@@ -118,6 +118,10 @@ final class Scenarios {
         if (savePoints != null) {
             return savePoints;
         }
+        StepRunner extras = ExtrasScenarios.build(key, ctx);
+        if (extras != null) {
+            return extras;
+        }
         StepRunner motion = MotionScenarios.build(key, ctx);
         if (motion != null) {
             return motion;

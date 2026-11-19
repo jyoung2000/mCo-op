@@ -37,6 +37,24 @@ public final class PathPolicy {
         return channel instanceof SocketChannel;
     }
 
+    /**
+     * Whether the peer of a direct connection is on this PC or this home network, where sending fast takes
+     * nothing from the internet connection.
+     */
+    public static boolean local(Channel channel) {
+        // Development only (DESIGN 4.12): lets the self-test exercise the internet cap on one PC.
+        if (DropIn.switches().read("dropin.dev.forcePath").orElse("").equals("internet")) {
+            return false;
+        }
+        if (channel != null && channel.remoteAddress() instanceof java.net.InetSocketAddress remote && remote.getAddress() != null) {
+            java.net.InetAddress address = remote.getAddress();
+            byte[] raw = address.getAddress();
+            boolean uniqueLocalV6 = raw.length == 16 && (raw[0] & 0xfe) == 0xfc;
+            return address.isLoopbackAddress() || address.isSiteLocalAddress() || address.isLinkLocalAddress() || uniqueLocalV6;
+        }
+        return false;
+    }
+
     public static boolean bulkAllowed(Channel channel) {
         return direct(channel) || CoopWorlds.configFlag("bulkSyncOverRelay", false);
     }

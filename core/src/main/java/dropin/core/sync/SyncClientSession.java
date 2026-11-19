@@ -50,6 +50,10 @@ public final class SyncClientSession {
 
     /** The member's copy of the world. */
     public interface Local {
+        /** The host asked for an upload test; the bytes go out when this returns. */
+        default void speedTestAsked() {
+        }
+
         String worldId();
 
         byte[] auth();
@@ -275,6 +279,18 @@ public final class SyncClientSession {
             }
             case Wire.PEERS, Wire.BRANCH_PUSH, Wire.MOD_DATA -> {
                 // Later milestones.
+            }
+            case Wire.SPEED_REQ -> {
+                // The host measures this player's upload speed to know who could host best (DESIGN 4.9).
+                int bytes = Math.max(0, Math.min(in.i32(), Wire.SPEED_BYTES));
+                local.speedTestAsked();
+                byte[] piece = new byte[Wire.PIECE];
+                int sent = 0;
+                do {
+                    int length = Math.min(piece.length, bytes - sent);
+                    sent += length;
+                    send(new Wire.Out(Wire.SPEED_DATA).u8(sent >= bytes ? 1 : 0).bytes(piece, 0, length));
+                } while (sent < bytes);
             }
             case Wire.BYE -> onClosed();
             default -> throw new IOException("Unexpected sync message " + in.type);

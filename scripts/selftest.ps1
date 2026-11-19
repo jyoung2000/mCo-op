@@ -169,6 +169,11 @@ $suites['integrity'] = @(
     # checkpoint and must be the same; again after A handed the world to B; then every closed copy is read back
     # from disk in full. C runs NeoForge.
     @{ Id = 'integrity'; Scenario = 'integrity'; TimeoutSec = 1200
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'neoforge' 'c')) },
+    # What a mod keeps in the world's root reaches B and C; the downloads stay under the direct rate cap; and of
+    # two complete copies the player with the faster upload (C) is the one who would take over, not the one
+    # connected longest (B). C runs NeoForge.
+    @{ Id = 'sync-extras'; Scenario = 'sync-extras'; TimeoutSec = 900
        Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'neoforge' 'c')) }
 )
 

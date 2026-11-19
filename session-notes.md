@@ -556,3 +556,7 @@ Not done:
 ## Integrity session, 2026-11-18: final state (replaces the "usage limit" section above)
 
 Committed. Gate on the final tree: build 0, jarcheck 0, `-Suite all` 48 of 48 (logs `build/logs/gate2-*`). `motion` and `motion.online` PASS; the earlier relay failures were the test's measurement (the server's path lacked its starting point), shown by the logged worst samples, all 0 to 50 ms after the start. Details and the not-verified list: `docs/VERIFICATION.md`, last entry. Next: owner decisions listed there under "Open".
+
+## 2026-11-18, later: owner's four sync decisions (committed)
+
+Owner asked for and decided: mod folders of the world root are replicated (`RecordKey.fileAllowed`, 64 MB limit for mod files via `fileAllowed(path, size)` in both scans); `SyncServerSession.Host.sessionError` logged by `HostSync`; records stay uncompressed; `directRateKBps` (default 2048, 0 = off, home network not capped, `PathPolicy.local`); successor = fastest upload step, then longest connected (`Successor.speedStep`, upload test `SPEED_REQ`/`SPEED_DATA`, `Wire.PROTO` 4). Dev switches added: `dropin.dev.forcePath=internet`, `dropin.dev.directRateKBps`, `dropin.dev.speedDelayMs`. Gate 49 of 49 (logs `build/logs/gate3-*`). Not verified list: `docs/VERIFICATION.md`, last entry. Next: M4 crash failover (should use the same speed order; DESIGN 4.9 crash paragraph still says highest syncedSeq, lowest UUID).
