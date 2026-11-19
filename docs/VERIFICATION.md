@@ -480,3 +480,14 @@ Four defects found by a code review, fixed:
 - `selftest.ps1 -Suite all`: 55/55 PASS (`build/logs/fix4-gate.log`), which also covers the offline-player-files change above.
 
 Not verified: no scenario forces a merge to stop half way, a sync thread to hang past 60 s, a mixed-case path from a peer, or a torn ledger in a running game (each is covered by unit tests or code reading only); the "sync busy" screen was never shown; behaviour on a case-sensitive Linux file system.
+
+## Two hosts at once, and the slow quit (2026-11-19)
+
+5. **Two hosts after a false failover.** New `core/.../pkarr/HostRival` (unit-tested): a record of another session, `host` no older than 10 min or `starting` no older than 60 s, published *after* this session claimed the world, is a rival. A record from before this session started (a crashed host's last record that a slow relay still serves) never is, so crash takeovers are not affected. `HostSession` looks the record up before every publish; with a rival it does not publish, also not "idle"/"handoff" when it closes, logs once and tells its players in chat (`text.dropin_coop.host.rival`). It announces again once the rival's record is gone. It does not close the world by itself (my choice; the design does not say).
+6. **Slow quit.** A background full scan stops when the server stops (what it drained is marked dirty again). The final checkpoint of a stopping server no longer does a full scan that is owed once (after a restore, a first host): it records what was written in this session, leaves `dropin/rescan` for the next host start on this PC, and does not hand the world over. When another mod hides its chunk writes (C2ME), the final checkpoint still does the full scan, because that is the only way the session's changes are found.
+
+- `./gradlew :core:test :mc:test` and compile of every module: exit 0; `HostRivalTest` 3 tests, 0 failures.
+- `./gradlew build`: exit 0; jar `build/libs/dropin-0.1.0+mc26.3.jar` (1,217,146 bytes). `scripts/jarcheck.ps1`: exit 0.
+- `selftest.ps1 -Suite all`: 54/55 PASS (`build/logs/fix56-gate.log`). `crash-failover` FAILED because client C's Gradle could not acquire the fabric-loom cache lock while three clients started at once ("Exception acquiring lock Lock for cache=...fabric-loom"), so C never launched; not a test of the change. Rerun alone: `-Suite m4 -Only crash-failover` PASS (82.6 s, `build/logs/fix56-crash-rerun.log`).
+
+Not verified: no scenario creates two hosts at once (the rival path was never taken in a game, and the chat line was never shown); no scenario quits during an owed full scan, so the deferral path and the "no handoff" consequence were not run; the world staying open next to a rival is a judgement call for the owner.

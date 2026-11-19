@@ -649,3 +649,10 @@ core: `ledger/Deltas.java`, `ledger/Ledger.java` (`entries`, `hasMerged`, `trunc
 - Fixed review findings 1–4 (see VERIFICATION "Robustness fixes from the post-M5 review"). Gate: build, jarcheck, `-Suite all` 55/55.
 - Still open from that review: (5) two hosts after a false failover — the live host's heartbeat should check the record before overwriting it; (6) server shutdown can wait behind a full scan (`HostSync` scan ignores `stopping`); (7) is covered by the rescan marker of fix 1 in practice.
 - Files: `core/.../manifest/RecordKey.java`, `core/.../ledger/Ledger.java`, `core/.../ledger/Deltas.java`, `mc/.../merge/ColdMerge.java`, `mc/.../member/RecordApplier.java`, `mc/.../member/SyncClient.java`, `mc/.../net/SyncPipe.java`, `mc/.../coop/CoopLauncher.java`, `mc/.../handoff/MemberHandoff.java`, `mc/.../handoff/HostLostScreen.java`, `en_us.json`, tests `ManifestTest`, `LedgerTest`.
+
+## Review findings 5 and 6 (2026-11-19)
+
+- (5) `HostRival` + `HostSession.yieldsToRival`: a host never overwrites a rival session's newer record; tells its players; does not close the world (owner may want an automatic step-down instead).
+- (6) `HostSync.checkpoint(save, last)`: background full scan aborts on stop; final checkpoint defers an owed full scan via `dropin/rescan` and skips the handoff; not with C2ME-style unseen writes.
+- Gate: build, jarcheck, `-Suite all` 54/55 with `crash-failover` failing on a Gradle loom-cache lock at client start; rerun alone PASS. The review list is now done (7 was covered by fix 1).
+- Files: `core/.../pkarr/HostRival.java` (new), `core/src/test/.../pkarr/HostRivalTest.java` (new), `mc/.../coop/HostSession.java`, `mc/.../host/HostSync.java`, `en_us.json`.

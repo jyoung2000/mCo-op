@@ -133,7 +133,11 @@ public final class HostSession implements Runnable {
                     if (conflict) {
                         conflictTries++;
                     }
-                    if (publish(state, wanted, lan)) {
+                    if (yieldsToRival(server)) {
+                        // Not overwritten; looked at again at the next heartbeat or change.
+                        published = key;
+                        lastPublish = now;
+                    } else if (publish(state, wanted, lan)) {
                         conflictTries = 0;
                         published = key;
                         lastPublish = now;
@@ -159,9 +163,9 @@ public final class HostSession implements Runnable {
         } finally {
             // DESIGN 4.9: when the server is stopping, the world sync publishes the last record ("handoff" or "idle").
             dropin.mc.host.HostSync sync = hostSync;
-            if (sync == null || !sync.announceIfNotStopping(() -> publish(RendezvousRecord.IDLE, "", ""))) {
+            if (sync == null || !sync.announceIfNotStopping(() -> publishIdleUnlessRival())) {
                 if (sync == null) {
-                    publish(RendezvousRecord.IDLE, "", "");
+                    publishIdleUnlessRival();
                 }
             }
             E4mcClient.domainListener = previousListener;
@@ -178,6 +182,10 @@ public final class HostSession implements Runnable {
 
     /** The session's last record, published from the stopping server (DESIGN 4.3 clean exit, 4.9 step 3). */
     private void announceLast(String state, String successorUuid) {
+        if (yieldsToRival(null)) {
+            DropIn.LOGGER.warn("Co-op world '{}' closes without announcing {}: another session holds the record", world.name(), state);
+            return;
+        }
         try {
             long now = System.currentTimeMillis() / 1000;
             RendezvousRecord last = headed(base);
@@ -262,6 +270,55 @@ public final class HostSession implements Runnable {
         } catch (Exception e) {
             return "127.0.0.1";
         }
+    }
+
+    private void publishIdleUnlessRival() {
+        if (!yieldsToRival(null)) {
+            publish(RendezvousRecord.IDLE, "", "");
+        }
+    }
+
+    /** The other session this one yields the record to, "" if none. */
+    private volatile String rivalSess = "";
+
+    /**
+     * True if another live session started after this one and holds the rendezvous record (a friend who could not
+     * reach this host took the world over): its record is then not overwritten, and this session's players are
+     * told once. False if the record cannot be read (the offline rule of DESIGN 4.3: announce anyway).
+     *
+     * @param server this session's server, to tell its players; null to only look
+     */
+    private boolean yieldsToRival(IntegratedServer server) {
+        java.util.Optional<RendezvousRecord> rival;
+        try {
+            rival = dropin.core.pkarr.HostRival.rival(rendezvous.lookup(), base.sess(), base.ts(), System.currentTimeMillis() / 1000);
+        } catch (Exception e) {
+            return false;
+        }
+        if (rival.isEmpty()) {
+            if (!rivalSess.isEmpty()) {
+                DropIn.LOGGER.info("Co-op world '{}': the other session is gone from the record; announcing again", world.name());
+                rivalSess = "";
+            }
+            return false;
+        }
+        RendezvousRecord other = rival.get();
+        if (!other.sess().equals(rivalSess)) {
+            rivalSess = other.sess();
+            DropIn.LOGGER.warn("Co-op world '{}' is also hosted by {} (session {}, {}) since this session started; this session stops "
+                    + "announcing itself", world.name(), other.name(), other.sess(), other.st());
+            if (server != null) {
+                String name = other.name();
+                server.execute(() -> server.getPlayerList().broadcastSystemMessage(
+                        net.minecraft.network.chat.Component.translatable("text.dropin_coop.host.rival", name), false));
+            }
+        }
+        return true;
+    }
+
+    /** The session this host yields the rendezvous to, "" if none (for the self-tests and the status line). */
+    public String rivalSession() {
+        return rivalSess;
     }
 
     private boolean publish(String state, String addr, String lan) {

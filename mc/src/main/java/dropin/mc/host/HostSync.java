@@ -126,6 +126,8 @@ public final class HostSync implements SyncServerSession.Host {
     private final long devDelayMs;
     private volatile boolean needFullScan;
     private volatile boolean stopping;
+    /** The final checkpoint left the full scan it owed for the next host start on this PC (see checkpoint). */
+    private volatile boolean deferredFullScan;
     private volatile boolean finished;
     private final Object policyLock = new Object();
     private volatile WorldPolicy.Held held;
@@ -257,6 +259,16 @@ public final class HostSync implements SyncServerSession.Host {
      * @return the new entry, or null if nothing changed
      */
     public LedgerEntry checkpoint(boolean save) throws IOException, InterruptedException {
+        return checkpoint(save, false);
+    }
+
+    /**
+     * @param last the final checkpoint of a stopping server. A full scan that is still owed then is not done:
+     *             on a large world it would keep the player on "Saving world" for minutes. The final checkpoint
+     *             records what was written in this session, {@code dropin/rescan} makes the next host start on
+     *             this PC compare everything, and the world is not handed over (a handoff needs a complete copy).
+     */
+    private LedgerEntry checkpoint(boolean save, boolean last) throws IOException, InterruptedException {
         AtomicLong saveNanos = new AtomicLong();
         if (save && !server.isSameThread()) {
             CompletableFuture<Void> saved = server.submit(() -> {
@@ -281,9 +293,20 @@ public final class HostSync implements SyncServerSession.Host {
             if (finished) {
                 return null;
             }
-            boolean full = needFullScan || unseenWrites();
+            boolean unseen = unseenWrites();
+            boolean full = needFullScan || unseen;
             started = System.currentTimeMillis();
             Set<String> chunkKeys = ChunkStores.drain(root);
+            Set<String> drained = new java.util.HashSet<>(chunkKeys);
+            // Only a scan owed once (a restore, a first host) can wait. When another mod hides which chunks it wrote,
+            // the full scan is the only way this session's changes are found, so the final checkpoint still does it.
+            if (full && last && !unseen) {
+                full = false;
+                deferredFullScan = true;
+                Files.writeString(dropin.resolve("rescan"), "");
+                DropIn.LOGGER.warn("Final checkpoint of '{}': the full comparison of the world is left for the next time it is "
+                        + "hosted on this PC, so quitting does not wait for it; the world is not handed over", world.name());
+            }
             if (full) {
                 chunkKeys.addAll(allChunkKeys());
                 for (String key : manifest.keys()) {
@@ -297,6 +320,11 @@ public final class HostSync implements SyncServerSession.Host {
             // The content hashes (without the fields the game rewrites on every save) of the changed chunks.
             Map<String, String> contentNow = new HashMap<>();
             for (String key : chunkKeys) {
+                if (stopping && !last) {
+                    // The server is stopping: the final checkpoint takes over; what this scan drained stays owed.
+                    ChunkStores.markDirty(root, drained);
+                    return null;
+                }
                 try {
                     byte[] bytes = readChunk(key);
                     String hash = bytes == null ? "" : Manifest.hash(bytes);
@@ -573,13 +601,13 @@ public final class HostSync implements SyncServerSession.Host {
             if (server.getPlayerList() != null) {
                 server.saveEverything(true, true, false);
             }
-            sync.checkpoint(false);
+            sync.checkpoint(false, true);
             long seq = sync.ledger.headSeq();
             // DESIGN 4.9 step 1: 30 s for a handoff. A host that already heard "nobody has a full copy" and quits
             // anyway waits only the short time of a plain quit.
             boolean hopeless = sync.quitDecided && sync.expectedSuccessor == null;
             sync.awaitPeers(seq, sync.returning || handoffDisabled() || hopeless ? QUIT_WAIT_MS : HANDOFF_WAIT_MS);
-            if (sync.returning || !handoffDisabled()) {
+            if ((sync.returning || !handoffDisabled()) && !sync.deferredFullScan) {
                 sync.handOver(seq);
             }
         } catch (InterruptedException e) {

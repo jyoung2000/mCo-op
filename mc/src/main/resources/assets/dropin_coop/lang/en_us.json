@@ -17,6 +17,7 @@
   "text.dropin_coop.merge.pending": "%s played an offline session. Its changes are merged the next time the world is started.",
   "text.dropin_coop.merge.report": "Merged %s's offline session: %s chunks applied.",
   "text.dropin_coop.merge.report_kept": "Merged %s's offline session: %s chunks applied, %s kept from the main world (backup saved).",
+  "text.dropin_coop.host.rival": "%s is now hosting this world too, because a friend could not reach you. To play together again, quit this session and join theirs; what you play here is kept as an offline session and merged later.",
   "text.dropin_coop.sync_busy": "The download of this world is still finishing on this PC, so it was not opened. Wait a moment and try again.",
   "text.dropin_coop.merge.report_kept_files": "Merged %s's offline session: %s chunks applied, %s kept from the main world, %s files kept (backup saved).",
   "text.dropin_coop.sync.incomplete": "Copy %s%% downloaded",
