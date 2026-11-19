@@ -55,6 +55,21 @@ public class CoopWorldsScreen extends Screen {
     private static final int GRAY = 0xFFA0A0A0;
     private static final Identifier JOIN_SPRITE = Identifier.withDefaultNamespace("world_list/join");
     private static final Identifier JOIN_HIGHLIGHTED_SPRITE = Identifier.withDefaultNamespace("world_list/join_highlighted");
+    /** The Discord logo in pixels: '#' Discord blurple, 'o' white. */
+    private static final String[] DISCORD_ICON = {
+            "...#....#...",
+            ".##########.",
+            "############",
+            "###oo##oo###",
+            "###oo##oo###",
+            "############",
+            "############",
+            ".####..####.",
+            "..##....##.."};
+    private static final int DISCORD_BLURPLE = 0xFF5865F2;
+    private static final Component CREDIT = Component.translatable("menu.dropin_coop.credit", "yessirski");
+    private int pages = 1;
+
     private static final String[] INFO_ICON = {
             "....##....",
             "....##....",
@@ -171,6 +186,7 @@ public class CoopWorldsScreen extends Screen {
 
         int perPage = Math.max(1, (this.height - LIST_TOP - 44) / ROW_PITCH);
         int pages = Math.max(1, (worlds.size() + perPage - 1) / perPage);
+        this.pages = pages;
         page = Math.min(page, pages - 1);
         for (int i = 0; i < perPage && page * perPage + i < worlds.size(); i++) {
             CoopWorld world = worlds.get(page * perPage + i);
@@ -394,6 +410,30 @@ public class CoopWorldsScreen extends Screen {
                     glyph.button().isHoveredOrFocused() ? 0xFFFFFFA0 : 0xFFE0E0E0);
         }
         graphics.centeredText(this.font, notice, this.width / 2, this.height - 38, -9216);
+        credit(graphics);
+    }
+
+    /**
+     * "made by yessirski" with the Discord logo, in the bottom-left corner; at the top-left when the page arrows
+     * would be in the way.
+     */
+    private void credit(GuiGraphicsExtractor graphics) {
+        int iconWidth = DISCORD_ICON[0].length();
+        int width = iconWidth + 3 + this.font.width(CREDIT);
+        int x = 4;
+        int y = this.height - 13;
+        if (pages > 1 && x + width > this.width / 2 - 126) {
+            y = 6;
+        }
+        for (int row = 0; row < DISCORD_ICON.length; row++) {
+            for (int column = 0; column < iconWidth; column++) {
+                char c = DISCORD_ICON[row].charAt(column);
+                if (c != '.') {
+                    graphics.fill(x + column, y + row, x + column + 1, y + row + 1, c == 'o' ? 0xFFFFFFFF : DISCORD_BLURPLE);
+                }
+            }
+        }
+        graphics.text(this.font, CREDIT, x + iconWidth + 3, y + 1, GRAY);
     }
 
     private static void pixels(GuiGraphicsExtractor graphics, String[] rows, int x, int y, int color) {

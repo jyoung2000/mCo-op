@@ -662,3 +662,7 @@ core: `ledger/Deltas.java`, `ledger/Ledger.java` (`entries`, `hasMerged`, `trunc
 - Owner asked for it. `HostSession` checks for a rival every 60 s (`dropin.dev.rivalCheckSeconds` in dev) and before publishes; on a rival it broadcasts `text.dropin_coop.host.rival` and runs `HostHandoff.quitForRival` (no handoff via `HostSync.yieldToRival`, alert `host.rival_closed`).
 - New m4 scenario `second-host` (one client). Gate 55/56 with `handoff-no-full-copy` flaking (host fell into the void); rerun alone PASS.
 - Files: `mc/.../coop/HostSession.java`, `mc/.../handoff/HostHandoff.java`, `mc/.../host/HostSync.java`, `en_us.json`, `mc/src/selftest/.../M4Scenarios.java`, `scripts/selftest.ps1`, `CLAUDE.md`, docs.
+
+## Credit on the Co-op Worlds screen (2026-11-19)
+
+- Owner asked for "made by yessirski" with the Discord icon on the co-op menu: bottom-left corner of `CoopWorldsScreen` (top-left when the page arrows would overlap), the logo drawn as pixels in Discord blurple, text from `menu.dropin_coop.credit`. Checked with `-Suite m1 -Only menu` (PASS) and its screenshot `run/a/screenshots/dropin-coop-menu.png`. Full gate not rerun (drawing only).

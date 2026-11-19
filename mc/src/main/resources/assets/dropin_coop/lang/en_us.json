@@ -1,5 +1,6 @@
 {
   "menu.dropin_coop.title": "Co-op Worlds",
+  "menu.dropin_coop.credit": "made by %s",
   "text.dropin_coop.badge": "[Co-op]",
   "text.dropin_coop.looking": "Looking for your friends…",
   "text.dropin_coop.empty": "No co-op worlds yet. Import one of your worlds, or join with an invite.",
