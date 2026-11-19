@@ -656,3 +656,9 @@ core: `ledger/Deltas.java`, `ledger/Ledger.java` (`entries`, `hasMerged`, `trunc
 - (6) `HostSync.checkpoint(save, last)`: background full scan aborts on stop; final checkpoint defers an owed full scan via `dropin/rescan` and skips the handoff; not with C2ME-style unseen writes.
 - Gate: build, jarcheck, `-Suite all` 54/55 with `crash-failover` failing on a Gradle loom-cache lock at client start; rerun alone PASS. The review list is now done (7 was covered by fix 1).
 - Files: `core/.../pkarr/HostRival.java` (new), `core/src/test/.../pkarr/HostRivalTest.java` (new), `mc/.../coop/HostSession.java`, `mc/.../host/HostSync.java`, `en_us.json`.
+
+## Second host closes the first one's world (2026-11-19)
+
+- Owner asked for it. `HostSession` checks for a rival every 60 s (`dropin.dev.rivalCheckSeconds` in dev) and before publishes; on a rival it broadcasts `text.dropin_coop.host.rival` and runs `HostHandoff.quitForRival` (no handoff via `HostSync.yieldToRival`, alert `host.rival_closed`).
+- New m4 scenario `second-host` (one client). Gate 55/56 with `handoff-no-full-copy` flaking (host fell into the void); rerun alone PASS.
+- Files: `mc/.../coop/HostSession.java`, `mc/.../handoff/HostHandoff.java`, `mc/.../host/HostSync.java`, `en_us.json`, `mc/src/selftest/.../M4Scenarios.java`, `scripts/selftest.ps1`, `CLAUDE.md`, docs.

@@ -114,6 +114,41 @@ public final class HostHandoff {
         }
     }
 
+    /** The name of the other host this game last closed its world for; "" if none (for the self-tests). */
+    private static volatile String lastRivalClosed = "";
+
+    public static String lastRivalClosed() {
+        return lastRivalClosed;
+    }
+
+    /**
+     * Another player started hosting this world while this game hosts it (a friend could not reach this host and
+     * took over). Closes the hosted world without a handoff, so the world does not go on as two sessions, and says
+     * why. What was played here is kept: the final checkpoint is taken as on any quit, and the copy is merged into
+     * the other session's world later (DESIGN 4.10). Client thread.
+     */
+    public static void quitForRival(Minecraft mc, String rivalName) {
+        if (mc.getSingleplayerServer() == null) {
+            return;
+        }
+        HostSync sync = HostSync.current();
+        if (sync != null) {
+            sync.yieldToRival();
+        }
+        DropIn.LOGGER.warn("Closing the hosted co-op world: {} is hosting it now", rivalName);
+        lastRivalClosed = rivalName;
+        state = State.IDLE;
+        passThrough = true;
+        try {
+            mc.disconnectFromWorld(Component.translatable("text.dropin_coop.host.rival_closing"));
+        } finally {
+            passThrough = false;
+        }
+        mc.gui.setScreen(new net.minecraft.client.gui.screens.AlertScreen(
+                () -> mc.gui.setScreen(new dropin.mc.menu.CoopWorldsScreen(new net.minecraft.client.gui.screens.TitleScreen())),
+                Component.translatable("menu.dropin_coop.title"), Component.translatable("text.dropin_coop.host.rival_closed", rivalName)));
+    }
+
     private static void quit(Minecraft mc, HostSync sync, String successorUuid, Component message) {
         state = State.IDLE;
         if (mc.getSingleplayerServer() == null) {

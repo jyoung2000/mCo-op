@@ -34,6 +34,8 @@ public final class HostSession implements Runnable {
     private static final int CONFLICT_RETRIES = 15;
     private static final long MEMBERS_MS = 5_000;
     private static final long DOMAIN_WAIT_MS = 30_000;
+    /** How often the host looks for a second host of its world, besides before every publish. */
+    private static final long RIVAL_CHECK_MS = 60_000;
 
     private static volatile HostSession current;
 
@@ -116,6 +118,9 @@ public final class HostSession implements Runnable {
             long lastPublish = 0;
             long lastTry = 0;
             long lastMembers = 0;
+            long lastRivalCheck = System.currentTimeMillis();
+            long rivalCheckMs = DropIn.switches().read("dropin.dev.rivalCheckSeconds").map(seconds -> Long.parseLong(seconds) * 1000)
+                    .orElse(RIVAL_CHECK_MS);
             while (!cancelled && mc.getSingleplayerServer() == server && server.isRunning()) {
                 long now = System.currentTimeMillis();
                 String wanted = domain;
@@ -145,6 +150,10 @@ public final class HostSession implements Runnable {
                         announcedAddr = wanted;
                         DropIn.LOGGER.info("Co-op world '{}' announced as {}: domain='{}' lan='{}'", world.name(), state, wanted, lan);
                     }
+                }
+                if (rivalSess.isEmpty() && now - lastRivalCheck >= rivalCheckMs) {
+                    lastRivalCheck = now;
+                    yieldsToRival(server);
                 }
                 if (now - lastMembers >= MEMBERS_MS) {
                     lastMembers = now;
@@ -283,8 +292,8 @@ public final class HostSession implements Runnable {
 
     /**
      * True if another live session started after this one and holds the rendezvous record (a friend who could not
-     * reach this host took the world over): its record is then not overwritten, and this session's players are
-     * told once. False if the record cannot be read (the offline rule of DESIGN 4.3: announce anyway).
+     * reach this host took the world over): its record is then not overwritten, this session's players are told,
+     * and the world is closed (once). False if the record cannot be read (the offline rule of DESIGN 4.3: announce anyway).
      *
      * @param server this session's server, to tell its players; null to only look
      */
@@ -308,9 +317,11 @@ public final class HostSession implements Runnable {
             DropIn.LOGGER.warn("Co-op world '{}' is also hosted by {} (session {}, {}) since this session started; this session stops "
                     + "announcing itself", world.name(), other.name(), other.sess(), other.st());
             if (server != null) {
+                // Two sessions of one world must not both go on: this one closes (its play is kept and merged later).
                 String name = other.name();
                 server.execute(() -> server.getPlayerList().broadcastSystemMessage(
                         net.minecraft.network.chat.Component.translatable("text.dropin_coop.host.rival", name), false));
+                mc.execute(() -> dropin.mc.handoff.HostHandoff.quitForRival(mc, name));
             }
         }
         return true;

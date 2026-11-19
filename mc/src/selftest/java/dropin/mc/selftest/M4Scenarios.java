@@ -84,6 +84,7 @@ final class M4Scenarios {
             case "crash-fallthrough:c" -> nextC(ctx);
             case "stale-warning:a" -> staleA(ctx);
             case "stale-warning:b" -> staleB(ctx);
+            case "second-host:a" -> secondHostA(ctx);
             default -> null;
         };
     }
@@ -313,6 +314,38 @@ final class M4Scenarios {
                     ctx.writeShared("a-done", Long.toString(last.seq()));
                 })
                 .step("B checked", 2 * PEER_TICKS, () -> ctx.sharedExists("b-checked"));
+    }
+
+    /** The session the "second host" of {@code second-host} announces. */
+    private static final String RIVAL_SESS = "5ec0d405700aaaaa";
+
+    /**
+     * A hosts; then another player's session announces itself as host of the same world (what a friend who could
+     * not reach A and took over would publish). A must close its world without a handoff, say why, and leave the
+     * other session's record alone. The other session is only a record here: nothing answers at its address.
+     */
+    private static StepRunner secondHostA(Context ctx) {
+        Minecraft mc = ctx.mc();
+        State state = new State();
+        return hostA(ctx, state, Map.of("dropin.dev.rivalCheckSeconds", "5"), 0)
+                .action("another player starts hosting the world", () -> {
+                    long now = System.currentTimeMillis() / 1000 + 1;
+                    dropin.mc.coop.CoopWorlds.rendezvous(state.world).publish(RendezvousRecord.of(RendezvousRecord.HOST,
+                            "0000aaaa-0000-0000-0000-00000000beef", "Rival", RIVAL_SESS, now)
+                            .with(RendezvousRecord.HOST, "", "127.0.0.1:1", now));
+                })
+                .step("A closed its world and says why", WORLD_TICKS, () -> mc.getSingleplayerServer() == null && mc.level == null
+                        && "Rival".equals(dropin.mc.handoff.HostHandoff.lastRivalClosed())
+                        && mc.gui.screen() instanceof net.minecraft.client.gui.screens.AlertScreen)
+                .action("no handoff, and the record is still the other session's", () -> {
+                    require(HostSync.lastHandedTo() == null || HostSync.lastHandedTo().isEmpty(),
+                            "A handed the world to " + HostSync.lastHandedTo());
+                    RendezvousRecord now = dropin.mc.coop.CoopWorlds.rendezvous(state.world).lookup().orElseThrow();
+                    require(now.sess().equals(RIVAL_SESS) && now.isState(RendezvousRecord.HOST),
+                            "the record was overwritten: " + now.st() + " of session " + now.sess());
+                    DropIn.LOGGER.info("Self-test: A closed its world for the second host; the record is still {} of {}",
+                            now.st(), now.sess());
+                });
     }
 
     /** B: its copy is one session behind and nobody is online. Cancel changes nothing; "Play anyway" hosts the older copy. */

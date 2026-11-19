@@ -128,6 +128,13 @@ public final class HostSync implements SyncServerSession.Host {
     private volatile boolean stopping;
     /** The final checkpoint left the full scan it owed for the next host start on this PC (see checkpoint). */
     private volatile boolean deferredFullScan;
+    /** This session closes because another session hosts the world now: no handoff, a short wait. */
+    private volatile boolean yieldedToRival;
+
+    /** Another session hosts this world now; this one is about to close (HostHandoff.quitForRival). */
+    public void yieldToRival() {
+        yieldedToRival = true;
+    }
     private volatile boolean finished;
     private final Object policyLock = new Object();
     private volatile WorldPolicy.Held held;
@@ -605,9 +612,9 @@ public final class HostSync implements SyncServerSession.Host {
             long seq = sync.ledger.headSeq();
             // DESIGN 4.9 step 1: 30 s for a handoff. A host that already heard "nobody has a full copy" and quits
             // anyway waits only the short time of a plain quit.
-            boolean hopeless = sync.quitDecided && sync.expectedSuccessor == null;
+            boolean hopeless = sync.quitDecided && sync.expectedSuccessor == null || sync.yieldedToRival;
             sync.awaitPeers(seq, sync.returning || handoffDisabled() || hopeless ? QUIT_WAIT_MS : HANDOFF_WAIT_MS);
-            if ((sync.returning || !handoffDisabled()) && !sync.deferredFullScan) {
+            if ((sync.returning || !handoffDisabled()) && !sync.deferredFullScan && !sync.yieldedToRival) {
                 sync.handOver(seq);
             }
         } catch (InterruptedException e) {

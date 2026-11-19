@@ -191,7 +191,11 @@ $suites['m4'] = @(
        Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'neoforge' 'c')) },
     # B's copy is one session behind and nobody is online: the warning; Cancel leaves the copy untouched.
     @{ Id = 'stale-warning'; Scenario = 'stale-warning'; TimeoutSec = 900
-       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+    # A hosts; another player's session then announces itself as host of the same world (a friend who could not
+    # reach A took over): A closes its world without a handoff, says why, and leaves that record alone.
+    @{ Id = 'second-host'; Scenario = 'second-host'; TimeoutSec = 600
+       Roles = @((New-Role 'a' 'fabric' 'a')) }
 )
 
 # MILESTONES M5: divergence and merge (DESIGN 4.10). A and B each play a session alone on the same copy, then
