@@ -17,7 +17,8 @@ import java.util.function.Function;
  * <li>both changed it: the main world's record stays, the branch's record is backed up, and it is counted;</li>
  * <li>the three records of one chunk (region, entities, POI) are decided together: if the main world changed
  * any of them, all three stay;</li>
- * <li>a player's own files are decided together in the same way;</li>
+ * <li>a player's own files are decided together in the same way, except the files of the player who played
+ * the branch, which are always taken from it;</li>
  * <li>world-level files always stay as the main world has them.</li>
  * </ul>
  * A record the main world already holds exactly as the branch has it is neither applied nor a conflict, so a
@@ -56,6 +57,19 @@ public final class MergePlanner {
      *                    content hash leaves out counts as unchanged, on either side.
      */
     public static Plan plan(Map<String, Change> branch, Function<String, String> mainNow, Function<String, String> mainContent) {
+        return plan(branch, mainNow, mainContent, null);
+    }
+
+    /**
+     * @param owner the UUID of the player who played the branch (its ledger entry's host), or null. That
+     *              player's own files are taken from the branch even if the main world changed them too: they
+     *              join the main world before the merge runs, so the main world's copy of their files holds
+     *              only that short visit, while the branch holds the offline session. The main world's copy
+     *              is replaced like any applied record (and so backed up under {@code backups/merged/}).
+     */
+    public static Plan plan(Map<String, Change> branch, Function<String, String> mainNow, Function<String, String> mainContent,
+                            String owner) {
+        String ownerGroup = owner == null || owner.isEmpty() ? null : "p|" + owner;
         Map<String, List<String>> groups = new LinkedHashMap<>();
         for (String key : branch.keySet()) {
             if (Branches.worldLevel(key)) {
@@ -101,7 +115,7 @@ public final class MergePlanner {
             if (differ.isEmpty()) {
                 continue;
             }
-            if (mainChanged) {
+            if (mainChanged && !group.getKey().equals(ownerGroup)) {
                 conflicts.addAll(differ);
                 if (chunk) {
                     chunksKept++;

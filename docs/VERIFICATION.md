@@ -449,9 +449,19 @@ All three scenarios start alike (offline, file rendezvous): B gets a full copy f
 
 Not verified:
 - The manual check on two PCs, and anything over the e4mc relay: every run was on one PC over LAN. The relayed-path rule (no branch is cut or sent without a direct path) has a unit test only.
-- The player's own offline inventory: in every merge the diverged player's own player files are "kept from the main world", because that player joined main before the merge (DESIGN 4.10 by the letter). Their offline inventory, stats and advancements end up under `backups/conflicts/`, not in the world. Open question for the owner.
+- The player's own offline inventory: in every merge the diverged player's own player files are "kept from the main world", because that player joined main before the merge (DESIGN 4.10 by the letter). Their offline inventory, stats and advancements end up under `backups/conflicts/`, not in the world. Open question for the owner. *Resolved 2026-11-19, see "M5 follow-up: the offline player's own files" below.*
 - A fork whose checkpoints someone else hosted (this PC has no deltas for them): handled as "too old" in M5, not exercised.
 - Two or more pending branches at once, a branch relayed by the host to a third member, a branch merged by a member that takes over after a handoff or crash, a merge cut short and planned again (unit test only), items moved between a conflicting and a clean chunk (the known rough edges of DESIGN 4.10), map ids allocated on both sides.
 - Copies made before M5 (no `content.tsv`, two-column deltas): their region records fall back to record hashes or "too old"; not exercised in a game.
 - The real 30-day prune (the scenario deletes the delta files; `Deltas.prune` has a unit test).
 - The chat lines were checked as text in the log, not looked at on screen.
+
+## M5 follow-up: the offline player's own files (2026-11-19)
+
+Owner decision: the diverged player's offline inventory belongs in the world. `MergePlanner.plan(..., owner)` now always takes the files of the branch's player (the host of the branch head entry) from the branch; main's copy is replaced and saved under `backups/merged/`. Other players keep the old rule.
+
+- `./gradlew :core:test --tests "dropin.core.merge.*" :mc:compileSelftestJava` (JDK 25): exit 0; `MergeTest` 24 tests, 0 failures, including the new `theBranchOwnersFilesComeFromTheBranchEvenIfMainChangedThem`.
+- `selftest.ps1 -Suite m5 -Only merge-conflict`: PASS (71 s). Merge checkpoint 9: 0 chunks and 4 files applied, 1 chunk and 0 files kept; no `files/players` under the conflict backup (new check in the scenario). Log `build/logs/ownfiles-conflict.log`.
+- `selftest.ps1 -Suite m5 -Only merge-clean`: PASS (63 s). Merge checkpoint 8: 25 chunks and 3 files applied, 0 kept. Log `build/logs/ownfiles-clean.log`.
+
+Not verified: the full `-Suite all` and `jarcheck` were not rerun for this change; the restored inventory was checked through the merge report and the conflict folder, not by looking at B's items in game; whatever B did on main between joining and the merge is lost to the world (it is in `backups/merged/`).

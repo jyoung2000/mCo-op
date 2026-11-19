@@ -186,7 +186,7 @@ public final class ColdMerge {
                 } catch (IOException | RuntimeException e) {
                     return manifest.get(key);
                 }
-            });
+            }, branch.entry().host());
             for (String key : plan.conflicts()) {
                 // The main world's record stays; the branch's is kept for manual recovery.
                 Change change = branch.keys().get(key);

@@ -151,6 +151,35 @@ class MergeTest {
     }
 
     @Test
+    void theBranchOwnersFilesComeFromTheBranchEvenIfMainChangedThem() {
+        // The owner joined the main world before the merge, so main changed their files too; their offline
+        // session wins. Another player who played on both sides keeps the main world's files.
+        String data = "f|players/data/" + PLAYER + ".dat";
+        String stats = "f|players/stats/" + PLAYER + ".json";
+        String other = "f|players/data/99999999-2222-3333-4444-555555555555.dat";
+        Map<String, Change> branch = new LinkedHashMap<>();
+        branch.put(data, new Change(h("inventory b"), h("inventory")));
+        branch.put(stats, new Change(h("stats b"), h("stats")));
+        branch.put(other, new Change(h("other b"), h("other")));
+        Map<String, String> main = Map.of(data, h("inventory main"), stats, h("stats main"), other, h("other main"));
+
+        MergePlanner.Plan plan = MergePlanner.plan(branch, main::get, main::get, PLAYER);
+
+        assertEquals(List.of(data, stats), plan.apply());
+        assertEquals(List.of(other), plan.conflicts());
+        assertEquals(2, plan.filesApplied());
+        assertEquals(1, plan.filesKept());
+
+        // A file the branch did not change stays as the main world has it, owner or not.
+        Map<String, Change> onlyStats = new LinkedHashMap<>();
+        onlyStats.put(stats, new Change(h("stats b"), h("stats")));
+        onlyStats.put(data, new Change(h("inventory"), h("inventory")));
+        plan = MergePlanner.plan(onlyStats, main::get, main::get, PLAYER);
+        assertEquals(List.of(stats), plan.apply());
+        assertTrue(plan.conflicts().isEmpty());
+    }
+
+    @Test
     void worldLevelFilesStayAsTheMainWorldHasThem() {
         Map<String, Change> branch = new LinkedHashMap<>();
         branch.put("f|level.dat", new Change(h("level b"), h("level")));

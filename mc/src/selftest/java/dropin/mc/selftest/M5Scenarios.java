@@ -187,6 +187,7 @@ final class M5Scenarios {
                         ColdMerge.Report report = report(world, state, ctx);
                         require(report.chunksApplied() >= 1, "no chunk of B's session was applied");
                         require(report.chunksKept() == 0, report.chunksKept() + " chunks were kept from the main world, expected none");
+                        ownFilesFromTheBranch(report);
                         command(mc, "forceload add 500 500");
                     })
                     .step("both edits are in the world", SHORT_TICKS,
@@ -202,6 +203,9 @@ final class M5Scenarios {
                         require(Files.isRegularFile(chunk), "B's version of the chunk is not at " + chunk);
                         require(contains(Files.readAllBytes(chunk), "minecraft:emerald_block"), chunk + " does not have B's block");
                         require(report.message().getString().contains(" 1 kept"), "the chat report is '" + report.message().getString() + "'");
+                        ownFilesFromTheBranch(report);
+                        Path playerFiles = report.conflicts().resolve("files").resolve("players");
+                        require(!Files.exists(playerFiles), "B's own player files were backed up instead of merged: " + playerFiles);
                         DropIn.LOGGER.info("Self-test: B's version of the chunk is in {}", chunk);
                     })
                     .step("A's version of the chunk is in the world", SHORT_TICKS, () -> {
@@ -224,6 +228,12 @@ final class M5Scenarios {
     }
 
     /** The one merge A ran before the world booted, checked against A's ledger. */
+    /** B joined the main world before the merge, yet B's offline player files must land in the world (none kept). */
+    private static void ownFilesFromTheBranch(ColdMerge.Report report) {
+        require(report.filesApplied() >= 1, "none of B's own player files were applied");
+        require(report.filesKept() == 0, report.filesKept() + " files were kept from the main world, expected none");
+    }
+
     private static ColdMerge.Report report(Path world, State state, Context ctx) throws IOException {
         List<ColdMerge.Report> reports = ColdMerge.reports();
         require(reports.size() == 1, reports.size() + " merges ran, expected 1");

@@ -636,3 +636,10 @@ Read this section to resume. Work items follow `docs/MILESTONES.md` M5. State is
 ### Files touched so far
 
 core: `ledger/Deltas.java`, `ledger/Ledger.java` (`entries`, `hasMerged`, `truncate`), `ledger/LedgerEntry.java` (`createMerge`), `merge/Branches.java`, `merge/MergePlanner.java`, `merge/BranchStore.java` (new), `sync/BranchLink.java` (new), `sync/Wire.java`, `sync/SyncClientSession.java`, `sync/SyncServerSession.java`; tests `merge/MergeTest.java` (new), `sync/SyncTest.java`.
+
+## M5 follow-up (2026-11-19): offline player's own files land in the world
+
+- Owner decided: the forked player's own player files always come from the branch (`MergePlanner.plan` 4-arg overload, owner = `branch.entry().host()`, called from `ColdMerge.mergeOne`). Main's copy goes to `backups/merged/` as a replaced record. DESIGN 4.10 updated.
+- New unit test `theBranchOwnersFilesComeFromTheBranchEvenIfMainChangedThem`; `M5Scenarios` now requires `filesKept == 0` and `filesApplied >= 1` in merge-clean and merge-conflict, and no `files/players` in the conflict backup.
+- merge-clean and merge-conflict PASS; full `-Suite all` not rerun.
+- Files: `core/.../merge/MergePlanner.java`, `mc/.../merge/ColdMerge.java`, `mc/src/selftest/.../M5Scenarios.java`, `core/src/test/.../merge/MergeTest.java`, `docs/DESIGN.md`, `docs/VERIFICATION.md`, `session-notes.md`.
