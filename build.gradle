@@ -26,9 +26,8 @@ dependencies {
 def modJar = tasks.register('modJar', ShadowJar) {
     group = 'build'
     description = 'Builds the single mod jar that loads on Fabric and NeoForge.'
-    archiveBaseName = mod_id
-    archiveVersion = "${project.version}+mc${minecraft_version}"
-    archiveClassifier = ''
+    // The released file is named after the mod's public name; the mod id stays "dropin".
+    archiveFileName = "MCo-op-${project.version}.jar"
     destinationDirectory = layout.buildDirectory.dir('libs')
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 

@@ -1,4 +1,4 @@
-# The Co-op Mod
+# MCo-op
 
 Turns a singleplayer world into a drop-in co-op world shared between friends, for Minecraft 26.3 on Fabric and NeoForge (one jar for both).
 
@@ -10,7 +10,7 @@ Turns a singleplayer world into a drop-in co-op world shared between friends, fo
 ## Install
 
 1. Install Fabric Loader or NeoForge for Minecraft 26.3.
-2. Put `dropin-<version>+mc26.3.jar` in your `mods` folder. The same jar works on both loaders.
+2. Put `MCo-op-<version>.jar` in your `mods` folder. The same jar works on both loaders.
 3. Open the **Co-op Worlds** screen from the title menu.
 
 Don't install e4mc next to this mod: it already contains e4mc's tunnel.

@@ -83,7 +83,7 @@
   "text.dropin_coop.players.seen_days": "last seen %s d ago",
   "text.dropin_coop.button.mods": "Mods",
   "text.dropin_coop.mods.title": "Mods of this world",
-  "text.dropin_coop.mods.none": "This world uses no mods besides The Co-op Mod.",
+  "text.dropin_coop.mods.none": "This world uses no mods besides MCo-op.",
   "text.dropin_coop.mods.unknown": "The mod list of this world is not known yet. Join it once to see it.",
   "text.dropin_coop.mods.missing": "(missing here)",
   "text.dropin_coop.mods.extra": "(extra here)",

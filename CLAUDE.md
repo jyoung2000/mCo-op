@@ -30,7 +30,7 @@ The design is in `docs/DESIGN.md`. It is the source of truth. If the code and th
 ## Commands
 
 ```
-./gradlew build                 # full build + unit tests, one jar: build/libs/dropin-<version>+mc26.3.jar
+./gradlew build                 # full build + unit tests, one jar: build/libs/MCo-op-<version>.jar
 ./gradlew :core:test            # core unit tests, no game needed (add --tests "dropin.core.<pkg>.*" for one package)
 ./gradlew :mc:test              # unit tests of the self-test step runner
 ./gradlew :fabric:runClient     # dev client (Fabric), game folder fabric/runs/client
