@@ -128,9 +128,9 @@ Rules:
 - **Claim before hosting:** GET → if a live host exists, join it. Otherwise PUT `st:"starting"` with a fresh `sess` (send `If-Match` with the timestamp of the record just read, when there was one). Wait 2 s, GET again. If the record now carries someone else's `sess` and they ping, join them. Otherwise open the world, and once the e4mc domain arrives PUT `st:"host"` with `addr`.
 - **Heartbeat:** re-PUT every 5 minutes with the current `head`/`seq`. This also keeps the record alive on the DHT. Back off on HTTP 429.
 - **Clean exit:** PUT `st:"idle"` with the final `head`.
-- **Relays** are a config list. Publish to all, read until one answers. Confirm which public relays are live when implementing (see the pkarr repo README); do not hard-code a single one.
+- **Relays** are a config list. Publish to all, read until one answers: once one has answered, the others get 1 s more and the newest answer wins (added 2026-11-23, so one slow relay does not hold up a launch). Confirm which public relays are live when implementing (see the pkarr repo README); do not hard-code a single one.
 - **Offline / relays down:** host solo from the local copy, mark the session `unannounced`, keep retrying the announce every 60 s. If a live host with a different lineage shows up, tell the player.
-- **`lan` hint.** The host also publishes its LAN address. Clients try `lan` first (1 s timeout), then `addr`. Two players in the same house connect directly, and the self-tests use it to stay off the relay.
+- **`lan` hint.** The host also publishes its LAN address. Clients try `lan` first (1 s timeout), then `addr`. The 1 s is for the TCP connect, checked before the status ping: the game's own ping connects with no time limit of its own and would wait 30 s for an address on another network that nobody answers. A `lan` that did not answer is not asked again during the same launch. Two players in the same house connect directly, and the self-tests use it to stay off the relay.
 - Put this behind an interface (`Rendezvous`). Implementations: `PkarrRendezvous` (default), `FileRendezvous` (a shared folder, used by the self-tests in §4.12), and later a self-hosted HTTP one.
 
 Verify the wire format against the pkarr spec and at least one known-good vector before trusting it. Signature input is the BEP44 form `3:seqi<timestamp>e1:v<len>:<dns packet>`.

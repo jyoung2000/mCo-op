@@ -52,13 +52,44 @@ public final class HttpPkarrClient implements PkarrClient {
         return futures;
     }
 
+    /**
+     * DESIGN 4.3 "read until one answers": once a relay has answered, the others get this long to answer as well
+     * (the newest of what came in wins), then the read returns. One slow relay must not hold up every launch.
+     */
+    static final long ANSWER_GRACE_MS = 1_000;
+
     @Override
     public Optional<SignedPacket> get(byte[] publicKey) throws IOException {
         SignedPacket newest = null;
         boolean answered = false;
         boolean limited = false;
         List<String> problems = new ArrayList<>();
-        for (CompletableFuture<HttpResponse<byte[]>> future : sendAll(publicKey, null)) {
+        List<CompletableFuture<HttpResponse<byte[]>>> pending = new ArrayList<>(sendAll(publicKey, null));
+        long graceEnds = Long.MAX_VALUE;
+        while (!pending.isEmpty()) {
+            if (answered && graceEnds == Long.MAX_VALUE) {
+                graceEnds = System.currentTimeMillis() + ANSWER_GRACE_MS;
+            }
+            CompletableFuture<HttpResponse<byte[]>> future = pending.stream().filter(CompletableFuture::isDone).findFirst().orElse(null);
+            if (future == null) {
+                long now = System.currentTimeMillis();
+                if (now >= graceEnds) {
+                    pending.forEach(late -> late.cancel(true));
+                    break;
+                }
+                try {
+                    // Every request has its own time limit, so this wakes up at the latest when one of them ends.
+                    CompletableFuture.anyOf(pending.toArray(CompletableFuture[]::new))
+                            .get(Math.min(graceEnds - now, timeout.toMillis() * 2 + 1_000), java.util.concurrent.TimeUnit.MILLISECONDS);
+                } catch (java.util.concurrent.TimeoutException | java.util.concurrent.ExecutionException e) {
+                    // Handled on the next pass: a finished request is read, a passed grace ends the read.
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("interrupted while reading the pkarr relays", e);
+                }
+                continue;
+            }
+            pending.remove(future);
             try {
                 HttpResponse<byte[]> response = future.join();
                 int status = response.statusCode();

@@ -514,3 +514,20 @@ Not verified: members of the closed session were not part of the test (in a real
 - `join-code`: the host's `/coop code` puts the world's own join code in its chat as a click-to-copy part; B's `/dropin code` shows the same code; B's `/coop code share` reaches both players' chat ("DevB shared the join code for dropin-selftest: …").
 - Earlier runs failed in the test only: B's local list names the joined world differently from the host, so the check now matches the phrase and the code, not the name.
 - Not run: a guest without the mod (DESIGN 4.11) asking for or receiving the code. The rule is enforced by `HostSync.holdsWorldKey` (the host, or a sync session that passed the key proof); no self-test starts a vanilla client.
+
+## Joining from another network without the long wait: 2026-11-23
+
+Cause, from the 26.3 sources: `ServerStatusPinger.pingServer` calls `Connection.connectToServer`, which blocks on
+`connect.syncUninterruptibly()` with no connect timeout of its own (Netty default 30 s). The record's `lan` address is tried
+first; from another network nobody answers it, so every ping hung there before the e4mc domain was tried, and a launch pings
+up to three times. Pkarr reads also waited for every relay (8 s timeout each).
+
+| Check | Result |
+|---|---|
+| `./gradlew :core:test --tests "dropin.core.pkarr.*"` | 28 tests, 0 failures (1 online test skipped); new `httpClientDoesNotWaitForASlowRelayOnceAnotherHasAnswered` 1.2 s with one relay 6 s slow |
+| `./gradlew build`, `scripts/jarcheck.ps1` | exit 0, exit 0 |
+| `selftest.ps1 -Suite m1 -Online -Only drop-in.foreign-lan` (real e4mc relay, record's `lan` = 10.255.255.1, unanswered) | PASS 81.3 s; B: "10.255.255.1:56609 does not accept connections (Connect timed out); not pinging it" once in the launch, then "DevA is hosting, joining curtain-entomb.na.e4mc.link" about 2 s after the launch began |
+| `selftest.ps1 -Suite m0` | 5 of 5 PASS (LAN join still works, both loaders) |
+| `selftest.ps1 -Suite m1` | 8 of 8 PASS |
+
+Not run: the old code against the unanswered address (the 30 s figure is Netty's default, not measured here); two real PCs on different home networks.

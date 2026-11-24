@@ -236,11 +236,21 @@ class PkarrTest {
         final HttpServer server;
         final Map<String, byte[]> stored = new HashMap<>();
         final AtomicInteger forcedStatus = new AtomicInteger();
+        /** How long a read waits before it is answered, in milliseconds. */
+        final AtomicInteger readDelay = new AtomicInteger();
 
         FakeRelay() throws IOException {
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
             server.createContext("/", exchange -> {
                 String key = exchange.getRequestURI().getPath().substring(1);
+                if (exchange.getRequestMethod().equals("GET") && readDelay.get() > 0) {
+                    try {
+                        Thread.sleep(readDelay.get());
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
                 int status;
                 byte[] response = new byte[0];
                 synchronized (stored) {
@@ -305,6 +315,24 @@ class PkarrTest {
 
             assertThrows(PkarrClient.StaleRecordException.class,
                     () -> new HttpPkarrClient(List.of(b.uri()), Duration.ofSeconds(5)).put(packet(15)));
+        }
+    }
+
+    @Test
+    void httpClientDoesNotWaitForASlowRelayOnceAnotherHasAnswered() throws Exception {
+        try (FakeRelay fast = new FakeRelay(); FakeRelay slow = new FakeRelay()) {
+            HttpPkarrClient client = new HttpPkarrClient(List.of(slow.uri(), fast.uri()), Duration.ofSeconds(10));
+            client.put(packet(10));
+            slow.readDelay.set(6_000);
+            long started = System.currentTimeMillis();
+            assertEquals(10, client.get(KEYS.sigPublicKey()).orElseThrow().timestampMicros());
+            long took = System.currentTimeMillis() - started;
+            assertTrue(took < 6_000 - 1_000, "the read waited " + took + " ms for the slow relay");
+
+            // Both quick: the grace lets the second answer in, and the newest still wins.
+            slow.readDelay.set(200);
+            new HttpPkarrClient(List.of(slow.uri()), Duration.ofSeconds(5)).put(packet(20));
+            assertEquals(20, client.get(KEYS.sigPublicKey()).orElseThrow().timestampMicros());
         }
     }
 

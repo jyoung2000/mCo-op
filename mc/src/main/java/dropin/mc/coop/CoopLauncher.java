@@ -363,13 +363,23 @@ public final class CoopLauncher {
             Thread.sleep(millis);
         }
 
+        /** LAN addresses that did not answer during this launch: not asked again (a launch pings up to three times). */
+        private final java.util.Set<String> deadLan = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
         @Override
         public boolean ping(RendezvousRecord record) {
-            for (String address : new String[]{record.lan(), record.addr()}) {
-                if (address != null && !address.isEmpty() && StatusPing.answers(address, PING_TIMEOUT_MS)) {
-                    liveAddress = address;
+            String lan = record.lan();
+            if (lan != null && !lan.isEmpty() && !deadLan.contains(lan)) {
+                if (StatusPing.answers(lan, PING_TIMEOUT_MS)) {
+                    liveAddress = lan;
                     return true;
                 }
+                deadLan.add(lan);
+            }
+            String addr = record.addr();
+            if (addr != null && !addr.isEmpty() && StatusPing.answers(addr, PING_TIMEOUT_MS)) {
+                liveAddress = addr;
+                return true;
             }
             return false;
         }

@@ -672,3 +672,9 @@ core: `ledger/Deltas.java`, `ledger/Ledger.java` (`entries`, `hasMerged`, `trunc
 - New `/coop code` and `/coop code share` (also `/dropin code`): `mc/.../coop/JoinCodeCommands.java`, registered in `CommandsMixin`. Only key holders see the code: `HostSync.holdsWorldKey(uuid)`.
 - DESIGN §4.4 "Join code in chat"; lang `text.dropin_coop.code.*`; self-test `ui` / `join-code`.
 - Unverified: guest (no mod) path; on screen in a real game.
+
+## Faster join from another network (2026-11-23)
+- `StatusPing.reachable`: a plain ip:port must accept TCP within 1 s before the game's status ping (which blocks up to 30 s on connect).
+- `CoopLauncher.Env`: a `lan` that failed is not pinged again in the same launch.
+- `HttpPkarrClient.get`: returns 1 s after the first relay answers (newest wins), DESIGN 4.3 "read until one answers".
+- Dev switch `dropin.dev.foreignLan` (with `dropin.dev.online`): the host announces an unanswered LAN address; scenario `drop-in.foreign-lan` (m1 online).

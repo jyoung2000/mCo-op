@@ -111,7 +111,8 @@ public final class HostSession implements Runnable {
             String lan = openToLan(server);
             if (DropIn.switches().flag("dropin.dev.online")) {
                 // Development only: the online smoke test must go through the relay, not the LAN shortcut.
-                lan = "";
+                // With foreignLan the record names a LAN address nobody answers, as a host on another network's does.
+                lan = DropIn.switches().flag("dropin.dev.foreignLan") ? "10.255.255.1:" + lan.substring(lan.lastIndexOf(':') + 1) : "";
             }
             long started = System.currentTimeMillis();
             String published = null;

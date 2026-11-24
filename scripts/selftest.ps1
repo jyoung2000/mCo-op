@@ -233,6 +233,10 @@ $onlineSuites = @{
     )
     m1 = @(
         @{ Id = 'drop-in.online'; Scenario = 'drop-in'; Online = $true
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+        # As a friend on another network sees it: the record's LAN address answers nobody, so B must skip it
+        # within a second and join through the relay.
+        @{ Id = 'drop-in.foreign-lan'; Scenario = 'drop-in'; Online = $true; ForeignLan = $true
            Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) }
     )
     m2 = @(
@@ -451,6 +455,7 @@ function Start-Client($scenario, $role, [int]$port) {
         ('"-Pdropin.sharedDir={0}"' -f $sharedDir)
     )
     if ($scenario.Online) { $gradleArgs += '"-Pdropin.online=true"' }
+    if ($scenario.ForeignLan) { $gradleArgs += '"-Pdropin.foreignLan=true"' }
     # The game's own watchdog (540 s by default) must not end a scenario that is allowed to run longer.
     if ($scenario.TimeoutSec) { $gradleArgs += ('"-Pdropin.selftestTimeoutSec={0}"' -f $scenario.TimeoutSec) }
     $cmdLine = '/c ""{0}" {1} > "{2}" 2>&1"' -f $gradlew, ($gradleArgs -join ' '), $log

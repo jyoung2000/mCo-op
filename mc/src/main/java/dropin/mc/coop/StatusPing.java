@@ -25,9 +25,39 @@ public final class StatusPing {
     }
 
     private static final long SECOND_TRY_MS = 2_000;
+    /** DESIGN 4.3 "lan hint": a plain address gets 1 s to accept a connection. */
+    static final int LAN_CONNECT_MS = 1_000;
+
+    /**
+     * The game's own status ping connects with {@code Connection.connectToServer}, which blocks until the TCP
+     * connect is done, with no time limit of its own (Netty's default is 30 s). From another network nothing
+     * answers the host's LAN address, so every such ping would hang for half a minute before the e4mc domain is
+     * tried. A plain {@code ip:port} therefore must accept a TCP connection within {@link #LAN_CONNECT_MS} first.
+     * Names (the e4mc domain) are left to the game: e4mc's mixins resolve and connect them through its tunnel.
+     */
+    static boolean reachable(String address) {
+        net.minecraft.client.multiplayer.resolver.ServerAddress parsed =
+                net.minecraft.client.multiplayer.resolver.ServerAddress.parseString(address);
+        java.net.InetAddress ip;
+        try {
+            ip = java.net.InetAddress.ofLiteral(parsed.getHost());
+        } catch (IllegalArgumentException notAnIp) {
+            return true;
+        }
+        try (java.net.Socket socket = new java.net.Socket()) {
+            socket.connect(new java.net.InetSocketAddress(ip, parsed.getPort()), LAN_CONNECT_MS);
+            return true;
+        } catch (java.io.IOException e) {
+            dropin.mc.DropIn.LOGGER.info("{} does not accept connections ({}); not pinging it", address, e.toString());
+            return false;
+        }
+    }
 
     /** The players the server names in its status answer (the game sends up to 12), or null if it did not answer. */
     public static synchronized java.util.List<Player> players(String address, long timeoutMillis) {
+        if (!reachable(address)) {
+            return null;
+        }
         ServerData data = new ServerData("dropin", address, ServerData.Type.OTHER);
         ServerStatusPinger pinger = new ServerStatusPinger();
         try {
