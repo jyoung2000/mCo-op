@@ -38,11 +38,13 @@ public final class Ledger {
      * Reads {@code ledger.jsonl}. A missing file is an empty ledger; a broken chain is an error, except for a
      * last line with no line end that does not parse or verify: that is an append cut short (power lost, the
      * game killed), so it is dropped and the file is rewritten without it. The checkpoint it would have been
-     * is simply not there, as if the session had stopped just before it.
+     * is simply not there, as if the session had stopped just before it. An entry that is already in the chain
+     * (the same hash, and it verifies) is a repeat and is dropped as well; the file is then rewritten without it.
      */
     public static Ledger load(byte[] auth, Path file) throws IOException {
         Ledger ledger = new Ledger(auth, null);
         boolean torn = false;
+        boolean repeated = false;
         if (Files.isRegularFile(file)) {
             String text = Files.readString(file, StandardCharsets.UTF_8);
             String[] lines = text.split("\n", -1);
@@ -54,7 +56,14 @@ public final class Ledger {
                 }
                 boolean unfinished = i == lines.length - 1;
                 try {
-                    ledger.append(LedgerEntry.fromJson(line.strip()));
+                    LedgerEntry entry = LedgerEntry.fromJson(line.strip());
+                    if (ledger.hashes.contains(entry.hash()) && entry.verify(auth)) {
+                        // The same entry a second time (seen when a file-sync tool wrote over the ledger of a
+                        // world in use): it is already in the chain, so dropping the copy loses nothing.
+                        repeated = true;
+                        continue;
+                    }
+                    ledger.append(entry);
                 } catch (RuntimeException e) {
                     if (unfinished) {
                         torn = true;
@@ -72,7 +81,7 @@ public final class Ledger {
         loaded.entries.addAll(ledger.entries);
         loaded.hashes.addAll(ledger.hashes);
         loaded.head = ledger.head;
-        if (torn) {
+        if (torn || repeated) {
             loaded.rewrite(loaded.entries);
         }
         return loaded;

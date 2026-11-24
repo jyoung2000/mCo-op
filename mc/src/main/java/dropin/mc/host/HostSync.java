@@ -188,6 +188,18 @@ public final class HostSync implements SyncServerSession.Host {
         return current;
     }
 
+    private record Unsynced(MinecraftServer server, CoopWorld world) {
+    }
+
+    /** A co-op world this game hosts although its sync could not start; cleared by the next start. */
+    private static volatile Unsynced unsynced;
+
+    /** The co-op world this server runs without a sync (its start failed), or null. */
+    public static CoopWorld unsyncedWorld(MinecraftServer server) {
+        Unsynced u = unsynced;
+        return u != null && u.server() == server ? u.world() : null;
+    }
+
     /** Called once the hosted world is up, before it is opened to LAN. */
     public static void start(MinecraftServer server, CoopWorld world, String hostUuid, String hostName, String sess) {
         start(server, world, hostUuid, hostName, sess, null);
@@ -198,6 +210,7 @@ public final class HostSync implements SyncServerSession.Host {
                              Announcer announcer) {
         Path root = server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize();
         Path dropin = root.resolve(CoopWorldStore.MARKER_DIR);
+        unsynced = null;
         ChunkStores.track(root);
         try {
             Ledger ledger = Ledger.load(world.keys().auth(), dropin.resolve("ledger.jsonl"));
@@ -226,6 +239,11 @@ public final class HostSync implements SyncServerSession.Host {
             thread.start();
         } catch (IOException | RuntimeException e) {
             DropIn.LOGGER.error("World sync of '{}' could not start; friends can play but will not get a copy", world.name(), e);
+            unsynced = new Unsynced(server, world);
+            String reason = e.getMessage() == null ? e.toString() : e.getMessage();
+            net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+            mc.execute(() -> mc.gui.hud.getChat().addClientSystemMessage(net.minecraft.network.chat.Component
+                    .translatable("text.dropin_coop.sync.start_failed", reason).withStyle(net.minecraft.ChatFormatting.RED)));
         }
     }
 

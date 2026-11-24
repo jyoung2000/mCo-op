@@ -531,3 +531,16 @@ up to three times. Pkarr reads also waited for every relay (8 s timeout each).
 | `selftest.ps1 -Suite m1` | 8 of 8 PASS |
 
 Not run: the old code against the unanswered address (the 30 s figure is Netty's default, not measured here); two real PCs on different home networks.
+
+## "This world is not a co-op world" from /coop code: 2026-11-24
+
+Found in the owner's own game log (Modrinth profile): `World sync of 'Co-op world ef7f47' could not start … ledger.jsonl is damaged at entry 11 … Ledger entry 6 rejected: does not follow the head`. The ledger held entries 1-10, then 6-10 again byte for byte, then 11-34; the world's `dropin/` folder also holds `ledger.sync-conflict-20261123-233225-RQTJNVI.jsonl` and the logs folder Syncthing temp files, so a file-sync tool wrote over the files of the world in use. With no sync, the command said "not a co-op world".
+
+| Check | Result |
+|---|---|
+| `./gradlew build` (all unit tests) | exit 0; `LedgerTest` 10 tests, 0 failures, new `entriesWrittenTwiceAreDroppedOnLoad` |
+| `scripts/jarcheck.ps1` | exit 0 |
+| `selftest.ps1 -Suite ui -Only join-code` | PASS 41.4 s |
+| The owner's ledger, read only (not changed): exact repeats dropped | 34 entries, seq 1-34 consecutive |
+
+Not run in a game: the red "sync could not start" chat line, `/coop code` for a host without a sync, and the owner's world opening with the repaired load.

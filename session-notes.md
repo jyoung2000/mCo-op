@@ -678,3 +678,8 @@ core: `ledger/Deltas.java`, `ledger/Ledger.java` (`entries`, `hasMerged`, `trunc
 - `CoopLauncher.Env`: a `lan` that failed is not pinged again in the same launch.
 - `HttpPkarrClient.get`: returns 1 s after the first relay answers (newest wins), DESIGN 4.3 "read until one answers".
 - Dev switch `dropin.dev.foreignLan` (with `dropin.dev.online`): the host announces an unanswered LAN address; scenario `drop-in.foreign-lan` (m1 online).
+
+## Damaged ledger from a file-sync tool (2026-11-24)
+- `Ledger.load` drops an entry already in the chain (same hash, verifies) and rewrites the file.
+- `HostSync.start` failure: red chat line to the host (`text.dropin_coop.sync.start_failed`), `HostSync.unsyncedWorld(server)`; `/coop code` shows the host the code anyway, others get `code.sync_failed`.
+- The owner's Modrinth profile is synced by Syncthing; told to exclude saves.

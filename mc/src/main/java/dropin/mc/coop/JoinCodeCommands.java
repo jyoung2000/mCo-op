@@ -2,6 +2,7 @@ package dropin.mc.coop;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import dropin.core.world.CoopWorld;
 import dropin.mc.host.HostSync;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
@@ -42,7 +43,8 @@ public final class JoinCodeCommands {
         HostSync sync = HostSync.current();
         ServerPlayer player = source.getPlayer();
         if (sync == null || player == null) {
-            source.sendFailure(Component.translatable(K + "not_coop"));
+            source.sendFailure(Component.translatable(player != null && HostSync.unsyncedWorld(source.getServer()) != null
+                    ? K + "sync_failed" : K + "not_coop"));
             return null;
         }
         if (!sync.holdsWorldKey(player.getUUID().toString())) {
@@ -52,12 +54,32 @@ public final class JoinCodeCommands {
         return sync;
     }
 
+    /**
+     * The world this game hosts without a sync (its start failed), if the command comes from the host itself.
+     * The code needs no sync, so the host can still see it; nobody else has proven they hold the key.
+     */
+    private static CoopWorld unsyncedForHost(CommandSourceStack source) {
+        CoopWorld world = HostSync.unsyncedWorld(source.getServer());
+        ServerPlayer player = source.getPlayer();
+        if (world == null || player == null
+                || !player.getUUID().equals(net.minecraft.client.Minecraft.getInstance().getUser().getProfileId())) {
+            return null;
+        }
+        return world;
+    }
+
     private static int show(CommandSourceStack source) {
+        CoopWorld unsynced = HostSync.current() == null ? unsyncedForHost(source) : null;
+        if (unsynced != null) {
+            source.sendSuccess(() -> Component.translatable(K + "show", unsynced.name(), code(unsynced)), false);
+            source.sendSuccess(() -> Component.translatable(K + "sync_failed").withStyle(ChatFormatting.RED), false);
+            return 1;
+        }
         HostSync sync = holder(source);
         if (sync == null) {
             return 0;
         }
-        source.sendSuccess(() -> Component.translatable(K + "show", sync.world().name(), code(sync)), false);
+        source.sendSuccess(() -> Component.translatable(K + "show", sync.world().name(), code(sync.world())), false);
         source.sendSuccess(() -> Component.translatable(K + "warning").withStyle(ChatFormatting.GRAY), false);
         return 1;
     }
@@ -67,7 +89,7 @@ public final class JoinCodeCommands {
         if (sync == null) {
             return 0;
         }
-        Component message = Component.translatable(K + "shared", source.getPlayer().getDisplayName(), sync.world().name(), code(sync));
+        Component message = Component.translatable(K + "shared", source.getPlayer().getDisplayName(), sync.world().name(), code(sync.world()));
         int sent = 0;
         for (ServerPlayer player : source.getServer().getPlayerList().getPlayers()) {
             if (sync.holdsWorldKey(player.getUUID().toString())) {
@@ -84,8 +106,8 @@ public final class JoinCodeCommands {
     }
 
     /** The code, green and underlined; clicking it copies it, hovering says so. */
-    private static MutableComponent code(HostSync sync) {
-        String code = sync.world().invite().encode();
+    private static MutableComponent code(CoopWorld world) {
+        String code = world.invite().encode();
         return Component.literal(code).withStyle(style -> style.withColor(ChatFormatting.GREEN).withUnderlined(true)
                 .withClickEvent(new ClickEvent.CopyToClipboard(code))
                 .withHoverEvent(new HoverEvent.ShowText(Component.translatable(K + "click_to_copy"))));

@@ -152,6 +152,36 @@ class LedgerTest {
     }
 
     @Test
+    void entriesWrittenTwiceAreDroppedOnLoad(@TempDir Path dir) throws IOException {
+        // As found in a player's world that a file-sync tool wrote over: entries 1-10, then 6-10 again, then 11-12.
+        Path file = dir.resolve("dropin").resolve("ledger.jsonl");
+        Ledger ledger = new Ledger(AUTH, file);
+        for (int i = 0; i < 12; i++) {
+            ledger.append(next(ledger, "host-a"));
+        }
+        List<String> lines = Files.readAllLines(file);
+        List<String> damaged = new java.util.ArrayList<>(lines.subList(0, 10));
+        damaged.addAll(lines.subList(5, 12));
+        Files.write(file, damaged);
+
+        Ledger loaded = Ledger.load(AUTH, file);
+        assertEquals(ledger.hashes(), loaded.hashes());
+        assertEquals(lines, Files.readAllLines(file), "the file is written back without the repeats");
+        loaded.append(next(loaded, "host-a"));
+        assertEquals(13, Ledger.load(AUTH, file).size());
+
+        // A repeat that does not verify is not a repeat: still an error.
+        LedgerEntry sixth = LedgerEntry.fromJson(lines.get(5));
+        LedgerEntry forged = new LedgerEntry(sixth.seq(), sixth.parent(), sixth.host(), sixth.name(), sixth.sess(),
+                sixth.ts(), sixth.root(), sixth.changed(), "", "00".repeat(32));
+        List<String> withForged = new java.util.ArrayList<>(lines.subList(0, 10));
+        withForged.add(forged.toJson());
+        withForged.addAll(lines.subList(10, 12));
+        Files.write(file, withForged);
+        assertThrows(IOException.class, () -> Ledger.load(AUTH, file));
+    }
+
+    @Test
     void compareTellsEqualAheadBehindAndDiverged() throws IOException {
         Ledger base = chain(3, "host-a");
         List<String> three = base.hashes();

@@ -66,6 +66,8 @@
   "text.dropin_coop.code.not_coop": "This world is not a co-op world",
   "text.dropin_coop.code.not_holder": "Your game has not connected to this co-op world yet (players without the mod can't see the code)",
   "text.dropin_coop.code.guests_skipped": "Not shown to %s player(s) without the mod",
+  "text.dropin_coop.code.sync_failed": "This co-op world's sync did not start (see the red message when the world opened), so friends can't get a copy and the code can't be shared from here",
+  "text.dropin_coop.sync.start_failed": "Co-op sync could not start: %s. You can play, but friends won't get a copy of this world. If a file-sync app (Syncthing, OneDrive, Dropbox, Google Drive) copies your saves folder, exclude it: it changes the world's files while you play.",
   "text.dropin_coop.invite.copied": "Copied!",
   "text.dropin_coop.invite.bad": "That is not a valid invite code.",
   "text.dropin_coop.invite.failed": "The invite could not be saved. See the log.",

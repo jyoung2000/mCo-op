@@ -171,7 +171,7 @@ While this PC hosts the world, the info screen also shows the tunnel's address (
 - `/coop code`: shows the player the join code of the world being played, with its name. The code is clickable and copies to the clipboard. A second line says that anyone holding it can join and host.
 - `/coop code share`: posts the same line, with who shared it, to every player in the session who holds the code already.
 
-Because an invite is full trust (§2 limit 4), the code goes only to players who have proved they hold the world key: the host, and members whose sync connection passed the key proof of the sync handshake. Guests (§4.11) never see it, not even when it is shared; the sharer is told how many players were left out. A member whose sync has not connected yet is told so and can try again.
+Because an invite is full trust (§2 limit 4), the code goes only to players who have proved they hold the world key: the host, and members whose sync connection passed the key proof of the sync handshake. Guests (§4.11) never see it, not even when it is shared; the sharer is told how many players were left out. A member whose sync has not connected yet is told so and can try again. If the host's sync could not start (the host is told in red when the world opens), `/coop code` still shows the host the code, because the code comes from the world key, not from the sync; sharing needs the sync.
 
 | Wrench (owner) | Action |
 |--------|--------|
