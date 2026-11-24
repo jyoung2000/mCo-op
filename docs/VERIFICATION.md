@@ -501,3 +501,16 @@ Owner decision: when a second host appears, the first one closes its world autom
 - `selftest.ps1 -Suite all`: 55/56 PASS (`build/logs/rival-gate.log`). `handoff-no-full-copy` FAILED: A "fell out of the world" in the void just as the quit confirmation appeared, so it was never "back in the game"; no rival line in its log. Rerun alone: `-Suite m3 -Only handoff-no-full-copy` PASS (132 s, `build/logs/rival-hnfc-rerun.log`). The void fall looks like a rare flake of that scenario's world, not of this change.
 
 Not verified: members of the closed session were not part of the test (in a real game they lose the host and, finding the other session's live record, join it; with an unreachable rival they could start a takeover of their own); the merge of the closed session's play into the other world after a real second host; the alert was checked as a screen type, not looked at.
+
+## Join code commands: 2026-11-23
+
+| Check | Result |
+|---|---|
+| `./gradlew build` | exit 0; jar `build/libs/MCo-op-0.1.0.jar` |
+| `scripts/jarcheck.ps1` | exit 0 |
+| `scripts/selftest.ps1 -Suite ui -Only join-code` | PASS (41.7 s) |
+| `scripts/selftest.ps1 -Suite m3b` | savepoint-unit, savepoint-rollback, savepoint-files PASS (`/dropin savepoint` still works beside `/dropin code`) |
+
+- `join-code`: the host's `/coop code` puts the world's own join code in its chat as a click-to-copy part; B's `/dropin code` shows the same code; B's `/coop code share` reaches both players' chat ("DevB shared the join code for dropin-selftest: …").
+- Earlier runs failed in the test only: B's local list names the joined world differently from the host, so the check now matches the phrase and the code, not the name.
+- Not run: a guest without the mod (DESIGN 4.11) asking for or receiving the code. The rule is enforced by `HostSync.holdsWorldKey` (the host, or a sync session that passed the key proof); no self-test starts a vanilla client.

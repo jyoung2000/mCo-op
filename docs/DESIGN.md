@@ -167,6 +167,12 @@ The list has every world that has `dropin/world.json`, sorted: worlds this playe
 
 While this PC hosts the world, the info screen also shows the tunnel's address (§3 row 14).
 
+**Join code in chat** (added 2026-11-23). Every co-op world has its own invite (a new seed at import or create, §4.1); in game it is called the *join code*. Two commands, on the host's server, for every player regardless of the command setting of §4.13 (the same names also work under `/dropin`):
+- `/coop code`: shows the player the join code of the world being played, with its name. The code is clickable and copies to the clipboard. A second line says that anyone holding it can join and host.
+- `/coop code share`: posts the same line, with who shared it, to every player in the session who holds the code already.
+
+Because an invite is full trust (§2 limit 4), the code goes only to players who have proved they hold the world key: the host, and members whose sync connection passed the key proof of the sync handshake. Guests (§4.11) never see it, not even when it is shared; the sharer is told how many players were left out. A member whose sync has not connected yet is told so and can try again.
+
 | Wrench (owner) | Action |
 |--------|--------|
 | Players and admins | The player list with **Make admin / Remove admin**, Ban / Unban and "Members may use commands" (§4.13). |

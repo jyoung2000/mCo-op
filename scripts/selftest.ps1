@@ -155,6 +155,10 @@ $suites['ui'] = @(
     # player's screen within a second, and the other player's hit on a mob is on the host's.
     @{ Id = 'realtime'; Scenario = 'realtime'; TimeoutSec = 600
        Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
+    # /coop code shows the host the world's own join code, clickable to copy; B gets the same code with
+    # /dropin code, and /coop code share puts it in both players' chat.
+    @{ Id = 'join-code'; Scenario = 'join-code'; TimeoutSec = 600
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
     # Things that move by themselves: a minecart on powered rails, a cow led by wheat, a cow fleeing after a
     # hit. Each is followed tick by tick on the host's server and on three screens (C runs NeoForge); the paths,
     # the resting places and the mob's health, age, glow and name must be the same.

@@ -54,8 +54,94 @@ final class UiScenarios {
             case "pvp:b" -> pvpB(ctx);
             case "realtime:a" -> realtimeA(ctx);
             case "realtime:b" -> realtimeB(ctx);
+            case "join-code:a" -> joinCodeA(ctx);
+            case "join-code:b" -> joinCodeB(ctx);
             default -> null;
         };
+    }
+
+    // ---- /coop code and /coop code share: the world's own join code in chat, clickable to copy ----
+
+    /** True if a chat line has this text and carries the code as a click-to-copy part. */
+    @SuppressWarnings("unchecked")
+    private static boolean chatHas(Minecraft mc, String text, String code) {
+        List<net.minecraft.client.multiplayer.chat.GuiMessage> messages;
+        try {
+            java.lang.reflect.Field field = net.minecraft.client.gui.components.ChatComponent.class.getDeclaredField("allMessages");
+            field.setAccessible(true);
+            messages = List.copyOf((List<net.minecraft.client.multiplayer.chat.GuiMessage>) field.get(mc.gui.hud.getChat()));
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("cannot read the chat", e);
+        }
+        for (net.minecraft.client.multiplayer.chat.GuiMessage message : messages) {
+            Component content = message.content();
+            if (!content.getString().contains(text) || !content.getString().contains(code)) {
+                continue;
+            }
+            boolean[] copies = {false};
+            content.<Object>visit((style, part) -> {
+                if (style.getClickEvent() instanceof net.minecraft.network.chat.ClickEvent.CopyToClipboard copy
+                        && copy.value().equals(code) && part.equals(code)) {
+                    copies[0] = true;
+                }
+                return java.util.Optional.empty();
+            }, net.minecraft.network.chat.Style.EMPTY);
+            if (copies[0]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static StepRunner joinCodeA(Context ctx) {
+        Minecraft mc = ctx.mc();
+        State state = new State();
+        String[] code = {null};
+        return hostA(ctx, state, Map.of(), 0)
+                .step("B dropped in and has its copy", 2 * PEER_TICKS, () -> players(mc) == 2 && ctx.sharedExists("b-ready"))
+                .action("/coop code", () -> {
+                    code[0] = state.world.invite().encode();
+                    mc.player.connection.sendCommand("coop code");
+                })
+                .step("A's chat shows this world's code, clickable", SHORT_TICKS,
+                        () -> chatHas(mc, "Join code for ", code[0]))
+                .action("tell B", () -> ctx.writeShared("a-code", code[0]))
+                .step("B shared the code", PEER_TICKS, () -> {
+                    failIfDisconnected(mc);
+                    return ctx.sharedExists("b-shared") && chatHas(mc, "shared the join code for ", code[0]);
+                })
+                .action("done", () -> {
+                    DropIn.LOGGER.info("Self-test: /coop code and B's /coop code share reached A's chat");
+                    ctx.writeShared("a-done", "ok");
+                });
+    }
+
+    private static StepRunner joinCodeB(Context ctx) {
+        Minecraft mc = ctx.mc();
+        State state = new State();
+        String[] code = {null};
+        return joinB(ctx, state, Map.of())
+                .step("copy complete", 2 * PEER_TICKS, copyComplete(mc, state))
+                .action("tell A", () -> ctx.writeShared("b-ready", "ok"))
+                .step("A saw its code", PEER_TICKS, () -> {
+                    failIfDisconnected(mc);
+                    return ctx.sharedExists("a-code");
+                })
+                .action("/dropin code", () -> {
+                    code[0] = ctx.readShared("a-code");
+                    require(code[0].equals(state.world.invite().encode()), "A's code is not the code of the world B joined");
+                    mc.player.connection.sendCommand("dropin code");
+                })
+                .step("B's chat shows the same code", SHORT_TICKS,
+                        () -> chatHas(mc, "Join code for ", code[0]))
+                .action("/coop code share", () -> mc.player.connection.sendCommand("coop code share"))
+                .step("B's chat shows it was shared", SHORT_TICKS,
+                        () -> chatHas(mc, "shared the join code for ", code[0]))
+                .action("tell A", () -> ctx.writeShared("b-shared", "ok"))
+                .step("A saw it", PEER_TICKS, () -> {
+                    failIfDisconnected(mc);
+                    return ctx.sharedExists("a-done");
+                });
     }
 
     /** Asks for a fresh status every second; true once the announced record says the player is in the session. */

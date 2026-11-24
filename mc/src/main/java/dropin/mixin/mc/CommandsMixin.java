@@ -22,5 +22,6 @@ public abstract class CommandsMixin {
     @Inject(method = "<init>", at = @At("TAIL"))
     private void dropin$savePoints(Commands.CommandSelection selection, CommandBuildContext context, CallbackInfo ci) {
         SavePointCommands.register(this.dispatcher);
+        dropin.mc.coop.JoinCodeCommands.register(this.dispatcher);
     }
 }

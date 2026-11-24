@@ -6,6 +6,7 @@ Turns a singleplayer world into a drop-in co-op world shared between friends, fo
 - When the host quits, another player takes over without losing the world. If the host crashes, a friend takes over.
 - Play offline on your own copy and your changes are merged back the next time you meet.
 - Save points, admins and a shared mod list are built in.
+- Every world has its own join code. In game, `/coop code` shows the code of the world you're playing (click it to copy), and `/coop code share` posts it in chat for the other players who have the mod.
 
 ## Install
 

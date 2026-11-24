@@ -930,6 +930,22 @@ public final class HostSync implements SyncServerSession.Host {
         return frames;
     }
 
+    /**
+     * Whether this player has shown it holds the world key: the host itself, or a player whose sync connection
+     * passed the key proof of the handshake. A guest without the mod (DESIGN 4.11) never does.
+     */
+    public boolean holdsWorldKey(String uuid) {
+        if (uuid.equals(hostUuid)) {
+            return true;
+        }
+        for (Peer peer : peers) {
+            if (peer.session().ready() && peer.session().playerUuid().equals(uuid)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Sync connections that finished the handshake. */
     public int readyPeers() {
         int ready = 0;

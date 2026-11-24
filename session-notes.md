@@ -666,3 +666,9 @@ core: `ledger/Deltas.java`, `ledger/Ledger.java` (`entries`, `hasMerged`, `trunc
 ## Credit on the Co-op Worlds screen (2026-11-19)
 
 - Owner asked for "made by yessirski" with the Discord icon on the co-op menu: bottom-left corner of `CoopWorldsScreen` (top-left when the page arrows would overlap), the logo drawn as pixels in Discord blurple, text from `menu.dropin_coop.credit`. Checked with `-Suite m1 -Only menu` (PASS) and its screenshot `run/a/screenshots/dropin-coop-menu.png`. Full gate not rerun (drawing only).
+
+## Join code commands (2026-11-23)
+- Each world already had its own join code (new seed per import/create, `CoopWorldStore.importWorld`).
+- New `/coop code` and `/coop code share` (also `/dropin code`): `mc/.../coop/JoinCodeCommands.java`, registered in `CommandsMixin`. Only key holders see the code: `HostSync.holdsWorldKey(uuid)`.
+- DESIGN §4.4 "Join code in chat"; lang `text.dropin_coop.code.*`; self-test `ui` / `join-code`.
+- Unverified: guest (no mod) path; on screen in a real game.
