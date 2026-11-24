@@ -313,6 +313,8 @@ final class UiScenarios {
         boolean[] hurt = {false};
         return hostA(ctx, state, Map.of(), 0)
                 .step("B dropped in", 2 * PEER_TICKS, () -> players(mc) == 2 && ctx.sharedExists("b-ready"))
+                // DESIGN 4.4 "Game modes": the world is created creative, so a forced game type would be creative.
+                .step("the host forces no game mode on members", 20, () -> mc.getSingleplayerServer().getForcedGameType() == null)
                 .action("survival, pvp on, B two blocks from A", () -> {
                     var server = mc.getSingleplayerServer();
                     b[0] = ctx.readShared("b-ready").trim();

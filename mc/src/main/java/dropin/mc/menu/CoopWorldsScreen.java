@@ -329,6 +329,11 @@ public class CoopWorldsScreen extends Screen {
         }
         if (ticks % 600 == 0) {
             worlds.forEach(CoopStatus::refresh);
+        } else if (ticks % 100 == 0) {
+            // A world that shows nobody online is asked again every 5 s, so a friend who starts playing shows up
+            // without waiting for the 30 s round (DESIGN 4.4).
+            worlds.stream().filter(world -> CoopStatus.of(world.worldId()).kind() != CoopStatus.Kind.PLAYING)
+                    .forEach(CoopStatus::refresh);
         }
     }
 

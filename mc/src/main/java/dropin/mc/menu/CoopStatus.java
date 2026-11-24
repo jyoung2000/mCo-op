@@ -34,6 +34,7 @@ public final class CoopStatus {
 
     private static final long PING_TIMEOUT_MS = 5_000;
     private static final Map<String, Status> STATUS = new ConcurrentHashMap<>();
+    private static final java.util.Set<String> IN_FLIGHT = ConcurrentHashMap.newKeySet();
     private static final ExecutorService POOL = Executors.newFixedThreadPool(2, runnable -> {
         Thread thread = new Thread(runnable, "dropin-coop-status");
         thread.setDaemon(true);
@@ -50,7 +51,16 @@ public final class CoopStatus {
     /** Starts a fresh lookup; the old status stays visible until the new one is in. */
     public static void refresh(CoopWorld world) {
         STATUS.putIfAbsent(world.worldId(), Status.LOOKING);
-        POOL.submit(() -> STATUS.put(world.worldId(), lookup(world)));
+        if (!IN_FLIGHT.add(world.worldId())) {
+            return; // the lookup already running answers this refresh too
+        }
+        POOL.submit(() -> {
+            try {
+                STATUS.put(world.worldId(), lookup(world));
+            } finally {
+                IN_FLIGHT.remove(world.worldId());
+            }
+        });
     }
 
     /** Blocking. Who is hosting this world right now, checked with a ping. */

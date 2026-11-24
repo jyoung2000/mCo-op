@@ -683,3 +683,11 @@ core: `ledger/Deltas.java`, `ledger/Ledger.java` (`entries`, `hasMerged`, `trunc
 - `Ledger.load` drops an entry already in the chain (same hash, verifies) and rewrites the file.
 - `HostSync.start` failure: red chat line to the host (`text.dropin_coop.sync.start_failed`), `HostSync.unsyncedWorld(server)`; `/coop code` shows the host the code anyway, others get `code.sync_failed`.
 - The owner's Modrinth profile is synced by Syncthing; told to exclude saves.
+
+## Creative mode, nobody online, slow friend joins (2026-11-24)
+- Owner's log (Modrinth profile `launcher_log.txt`): friend's join reached the host 30-90 s late; the host got a direct (Dialtone) connection and never answered it (once: "Sending unknown packet clientbound/minecraft:disconnect"); the friend retried about 30 s later and got in.
+- Cause (inferred from the code, Netty 4.2.16 `AbstractChannel`): `DialtoneServerChannel` fired the child's `channelActive` from the iroh dispatcher thread, racing the child's registration. Fix: `DialtoneChannel.activateWhenRegistered()`; `isActive()` of an accepted child waits for it. Owner approved the tunnel change: DESIGN §3 row 16.
+- Creative: `IntegratedServer.getForcedGameType()` = `forceGameMode && isPublished && !hardcore ? worldData.getGameType() : null`; `public void setForceGameMode(boolean)`. `HostSession.openToLan` calls `setForceGameMode(false)` before `publishServer`. DESIGN §4.4 "Game modes". Self-test: `pvp` step "the host forces no game mode on members".
+- Menu: worlds not showing someone playing are looked up again every 5 s (`CoopWorldsScreen.tick`), one lookup per world at a time (`CoopStatus.IN_FLIGHT`).
+- Not fixed here: a player whose saved mode already became creative stays creative until `/gamemode survival`.
+- Files: `tunnel/.../dialtone/DialtoneChannel.java`, `DialtoneServerChannel.java`, `mc/.../coop/HostSession.java`, `mc/.../menu/CoopStatus.java`, `CoopWorldsScreen.java`, `mc/src/selftest/.../UiScenarios.java`, docs, CLAUDE.md.

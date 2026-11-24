@@ -8,7 +8,7 @@ The design is in `docs/DESIGN.md`. It is the source of truth. If the code and th
 
 - **Read the real 26.3 sources before coding against Minecraft.** 26.x is unobfuscated. Every Minecraft class or method name in `docs/DESIGN.md` §8 is unconfirmed until you have looked at it. Quote the signature you found in `session-notes.md`.
 - **`core/` has no Minecraft, Fabric or NeoForge imports.** Everything in it has unit tests. Run only the tests for the package you changed until the final check.
-- **`tunnel/` is upstream code.** Change it only where the design names a hook (DESIGN §3 rows 6–9, 14 and 15). Keep diffs there small so upstream fixes can still be merged.
+- **`tunnel/` is upstream code.** Change it only where the design names a hook (DESIGN §3 rows 6–9, 14, 15 and 16). Keep diffs there small so upstream fixes can still be merged.
 - **Do not fork or rebuild `iroh-java`.** Its native library is downloaded from upstream's host at runtime (DESIGN §3 row 5).
 - **Bulk world data never goes over a relayed path unless `bulkSyncOverRelay` is on** (DESIGN §2 limit 3).
 - **Never read or write `.mca` files of a world that is open on this machine.** Go through the game's storage objects (DESIGN §4.5).

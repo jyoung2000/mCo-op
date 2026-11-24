@@ -248,6 +248,10 @@ public final class HostSession implements Runnable {
                             .orElseGet(HttpUtil::getAvailablePort);
                     // Members get no commands by default; the self-tests drive the game with commands.
                     boolean commands = DropIn.switches().selfTest().isPresent();
+                    // DESIGN 4.4 "Game modes": a published integrated server forces every player without game-master
+                    // rights into the host copy's default game type (level.dat), so members flipped to creative
+                    // whenever a copy's default said creative. A co-op world keeps each player's own saved mode.
+                    server.setForceGameMode(false);
                     if (!server.publishServer(MinecraftServer.MultiplayerScope.LAN, commands, wanted)) {
                         port.complete(-1);
                         return;

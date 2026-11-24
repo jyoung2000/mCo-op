@@ -21,8 +21,11 @@ public class DialtoneChannel extends AbstractChannel {
     private final ChannelConfig config = new DefaultChannelConfig(this);
     Endpoint endpoint;
     Connection connection;
-    Stream stream;
+    volatile Stream stream;
     volatile boolean closed = false;
+    // DropIn (DESIGN 3 row 16): an accepted child counts as active only once channelActive has been fired on its
+    // own event loop, after registration has added the game's handlers.
+    private volatile boolean activated = false;
     AtomicBoolean readInFlight = new AtomicBoolean(false);
     AtomicBoolean writeInFlight = new AtomicBoolean(false);
 
@@ -183,7 +186,28 @@ public class DialtoneChannel extends AbstractChannel {
 
     @Override
     public boolean isActive() {
-        return stream != null && !closed;
+        return stream != null && !closed && (parent() == null || activated);
+    }
+
+    /**
+     * DropIn (DESIGN 3 row 16): fire channelActive for an accepted child once, on its event loop, after the server
+     * has registered it (registration runs the game's channel initializer). Firing it from the dispatcher thread
+     * raced registration: the first connection after a world opened could lose channelActive and was never answered.
+     */
+    void activateWhenRegistered() {
+        if (closed) {
+            return;
+        }
+        if (!isRegistered()) {
+            parent().eventLoop().schedule(this::activateWhenRegistered, 5, java.util.concurrent.TimeUnit.MILLISECONDS);
+            return;
+        }
+        eventLoop().execute(() -> {
+            if (!activated && !closed && stream != null) {
+                activated = true;
+                pipeline().fireChannelActive();
+            }
+        });
     }
 
     @Override

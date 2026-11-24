@@ -544,3 +544,10 @@ Found in the owner's own game log (Modrinth profile): `World sync of 'Co-op worl
 | The owner's ledger, read only (not changed): exact repeats dropped | 34 entries, seq 1-34 consecutive |
 
 Not run in a game: the red "sync could not start" chat line, `/coop code` for a host without a sync, and the owner's world opening with the repaired load.
+
+## Creative mode, nobody online, slow friend joins: 2026-11-24
+
+- Fixes: tunnel Dialtone child activated on its event loop after registration (DESIGN §3 row 16, owner-approved); co-op host turns off forced game mode (DESIGN §4.4 "Game modes"); menu re-checks worlds without a player every 5 s.
+- `./gradlew build`: BUILD SUCCESSFUL.
+- Self-tests on this machine: `ui -Only pvp` PASS (60 s, includes new step "the host forces no game mode on members"); `ui -Online -Only pvp.online` PASS (85 s, real e4mc relay); `m1 -Online -Only drop-in.foreign-lan` PASS (68 s); `m1` 12/12 PASS.
+- Unverified: a real friend join across networks with the new jar on both sides; the race itself was not reproduced on demand (cause inferred from the owner's log and Netty 4.2.16 code).

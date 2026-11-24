@@ -62,6 +62,7 @@ Line numbers are from commit `93ce8a8`.
 | 13 | Build lists 26.3 as a supported game version | `fabric/build.gradle:178-180`, `neoforge/build.gradle:115-117` | Upstream tunnel code is expected to work on 26.3 as is. |
 | 14 | The tunnel writes the assigned domain (with a click-to-stop link) and relay broadcasts into chat | `QuiclimeSession.java` (`Mirror.addMessage`) | Hook, decided by the owner 2026-11-17: these two notices go to the log (`Mirror.addNotice`); the domain is shown on the world's info screen. The tunnel's error line stays in chat. |
 | 15 | The login mixin `@Redirect`s `Crypt.getCipher` in `handleKey` to skip encryption on a tunnel connection | `mixin/ServerLoginPacketListenerImplMixin.java` | Hook, decided by the owner 2026-11-18: the handler wraps the call (MixinExtras `@WrapOperation`) instead of redirecting it. Two redirects of one call cannot both apply, and Krypton redirects the same call: with the redirect, the host's world never finished loading when Krypton was installed. |
+| 16 | `DialtoneServerChannel` fires the accepted child's `channelActive` from the iroh dispatcher thread, racing the child's registration on its event loop | `dialtone/DialtoneServerChannel.java`, `dialtone/DialtoneChannel.java` | Fix, decided by the owner 2026-11-24: the child counts as active, and `channelActive` is fired, only on its own event loop after registration (`activateWhenRegistered`). Before, the first direct connection after a world opened could lose `channelActive`: the host never answered it (or dropped it with "Sending unknown packet disconnect"), and the friend's game waited about 30 s before trying again. Seen in a real session on 2026-11-24 (friend joins took 1–2 minutes). |
 
 From outside the repo:
 
@@ -153,7 +154,7 @@ The list has every world that has `dropin/world.json`, sorted: worlds this playe
 
 - the world's **preview** (the `icon.png` of the local copy, which is synced; the game's default picture without a copy);
 - the world's name, and an "Owner" or "Admin" tag if this player is one;
-- a live status line: "Looking…", "Sam is playing", "Nobody online, you'll host", "Your copy is behind", "Downloading 63%";
+- a live status line: "Looking…", "Sam is playing", "Nobody online, you'll host", "Your copy is behind", "Downloading 63%"; A world that does not show someone playing is asked again every 5 s while the list is open (others every 30 s), one lookup per world at a time;
 - the **heads** of the world's players (§4.15).
 
 **Play** is a click on the preview (the game's play arrow appears on hover) or a double click on the row; this is the launch flow below. Each row has an **info** button for everyone, and a **wrench** button for the owner only:
@@ -172,6 +173,8 @@ While this PC hosts the world, the info screen also shows the tunnel's address (
 - `/coop code share`: posts the same line, with who shared it, to every player in the session who holds the code already.
 
 Because an invite is full trust (§2 limit 4), the code goes only to players who have proved they hold the world key: the host, and members whose sync connection passed the key proof of the sync handshake. Guests (§4.11) never see it, not even when it is shared; the sharer is told how many players were left out. A member whose sync has not connected yet is told so and can try again. If the host's sync could not start (the host is told in red when the world opens), `/coop code` still shows the host the code, because the code comes from the world key, not from the sync; sharing needs the sync.
+
+**Game modes** (added 2026-11-24, owner's report: "randomly kicks me into creative mode on my survival world"). A published integrated server forces every player without game-master rights into the default game type of the host's copy (`IntegratedServer.getForcedGameType()`, from `level.dat`). Copies of one world can disagree on that default, so whoever hosted decided everyone's mode. The co-op host turns this off (`setForceGameMode(false)` before `publishServer`): each player keeps the mode saved in their own player data, and a player new to the world gets the world's default. A mode that was already changed stays until someone changes it back (`/gamemode`).
 
 | Wrench (owner) | Action |
 |--------|--------|

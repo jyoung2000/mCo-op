@@ -85,7 +85,7 @@ public class DialtoneServerChannel extends AbstractServerChannel {
                 conn.acceptBi().thenAccept(bidi -> {
                     E4mcClient.LOGGER.info("bidi accepted, dialtone child active");
                     channel.stream = bidi;
-                    channel.pipeline().fireChannelActive();
+                    channel.activateWhenRegistered(); // DropIn (DESIGN 3 row 16); was pipeline().fireChannelActive()
                 });
             }).exceptionally(e -> {
                 channel.pipeline().fireChannelInactive();
