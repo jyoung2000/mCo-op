@@ -63,6 +63,48 @@ public final class RecordKey {
         }
     }
 
+    /**
+     * The folder, relative to the world root, that holds a dimension's region-type folders and its saved data in
+     * the world layout of Minecraft 1.21.1 and older: the overworld uses the root itself (""), the Nether
+     * {@code DIM-1}, the End {@code DIM1}, any other dimension {@code dimensions/<namespace>/<path>}.
+     *
+     * @throws IllegalArgumentException if the dimension id is not valid
+     */
+    public static String storageFolder(String dim) {
+        if (!validDimension(dim)) {
+            throw new IllegalArgumentException("Not a dimension id: " + dim);
+        }
+        return switch (dim) {
+            case "minecraft:overworld" -> "";
+            case "minecraft:the_nether" -> "DIM-1";
+            case "minecraft:the_end" -> "DIM1";
+            default -> "dimensions/" + dim.replaceFirst(":", "/");
+        };
+    }
+
+    /**
+     * The dimension whose storage folder ({@link #storageFolder(String)}) a path relative to the world root is,
+     * with forward slashes, or null if it is none.
+     */
+    public static String dimensionOfFolder(String relative) {
+        switch (relative) {
+            case "":
+                return "minecraft:overworld";
+            case "DIM-1":
+                return "minecraft:the_nether";
+            case "DIM1":
+                return "minecraft:the_end";
+            default:
+                break;
+        }
+        String[] segments = relative.split("/", -1);
+        if (segments.length < 3 || !segments[0].equals("dimensions")) {
+            return null;
+        }
+        String dim = segments[1] + ":" + String.join("/", java.util.Arrays.asList(segments).subList(2, segments.length));
+        return validDimension(dim) && storageFolder(dim).equals(relative) ? dim : null;
+    }
+
     public static boolean validDimension(String dim) {
         return DIMENSION.matcher(dim).matches() && !dim.contains("..");
     }
@@ -103,7 +145,7 @@ public final class RecordKey {
                 return false;
             }
         }
-        String lower = path.toLowerCase(Locale.ROOT);
+        String lower = canonicalCase(path);
         if (!lower.equals(path)) {
             // NTFS and APFS ignore case, so "Dropin/ledger.jsonl", "r.0.0.MCA" or "Level.dat" would reach the
             // file the exact name is refused or treated specially for. The game itself writes only lower case.
@@ -113,6 +155,19 @@ public final class RecordKey {
             }
         }
         return true;
+    }
+
+    /**
+     * The path as the game would spell it: lower case, except the Nether's and the End's folders, which the game
+     * names {@code DIM-1} and {@code DIM1}. A path that differs from this only in case reaches the same file on a
+     * case-insensitive file system.
+     */
+    private static String canonicalCase(String path) {
+        String lower = path.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("dim-1/") || lower.startsWith("dim1/")) {
+            return lower.substring(0, lower.indexOf('/')).toUpperCase(Locale.ROOT) + lower.substring(lower.indexOf('/'));
+        }
+        return lower;
     }
 
     /**
@@ -157,6 +212,11 @@ public final class RecordKey {
             }
             return false;
         }
+        if (segments[0].equalsIgnoreCase("DIM-1") || segments[0].equalsIgnoreCase("DIM1")) {
+            // 1.21.1 and older: the Nether's and the End's saved data, DIM-1/data/** and DIM1/data/**; never their
+            // region-type folders
+            return segments.length > 2 && segments[1].equals("data");
+        }
         if (gameFile(segments)) {
             return true;
         }
@@ -171,7 +231,9 @@ public final class RecordKey {
             return segments[0].equals("level.dat") || segments[0].equals("icon.png");
         }
         return switch (segments[0]) {
-            case "data", "players", "datapacks", "resourcepacks", "dimensions" -> true;
+            // playerdata, advancements, stats, DIM-1 and DIM1: the world layout of 1.21.1 and older
+            case "data", "players", "datapacks", "resourcepacks", "dimensions",
+                 "playerdata", "advancements", "stats", "DIM-1", "DIM1" -> true;
             default -> false;
         };
     }

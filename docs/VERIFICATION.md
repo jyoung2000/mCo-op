@@ -551,3 +551,21 @@ Not run in a game: the red "sync could not start" chat line, `/coop code` for a 
 - `./gradlew build`: BUILD SUCCESSFUL.
 - Self-tests on this machine: `ui -Only pvp` PASS (60 s, includes new step "the host forces no game mode on members"); `ui -Online -Only pvp.online` PASS (85 s, real e4mc relay); `m1 -Online -Only drop-in.foreign-lan` PASS (68 s); `m1` 12/12 PASS.
 - Unverified: a real friend join across networks with the new jar on both sides; the race itself was not reproduced on demand (cause inferred from the owner's log and Netty 4.2.16 code).
+
+## Port to Minecraft 1.21.1 (Fabric + NeoForge, branch `port/1.21.1`): 2026-11-25
+
+Jar: `build/libs/MCo-op-0.1.0+mc1.21.1.jar` (one jar, both loaders).
+
+| Check | Result |
+|---|---|
+| `./gradlew build` | exit 0, BUILD SUCCESSFUL |
+| `./gradlew :core:test :mc:test --rerun-tasks` | core 211 tests, 0 failures, 1 skipped; mc 6 tests, 0 failures. New: `ManifestTest.legacyWorldLayoutOf1211AndOlder`, `MergeTest.legacyLayoutPlayerFilesAndWorldLevelFiles` |
+| `scripts/jarcheck.ps1` | exit 0, every check PASS (one mixin config per loader, see session notes) |
+| `selftest.ps1 -Suite all` | 57 of 57 PASS (m0, m1, m2, m2b, m3, m3b, m4, m5, ui, integrity), both loaders in the cross-loader scenarios |
+
+Found and fixed by the suites on the way (details in `session-notes.md`): 1.21.1 world layout (`integrity`), test mods built for
+the game's Java (`m2b`), member packets during the last checkpoint (`m2 resume`), members disconnected after the last checkpoint
+(`m5`), the 10 s chunk save cooldown (`m3b savepoint-rollback`, `m4 stale-warning`).
+
+Not run: `-Online` suites (real e4mc relay, Modrinth mod pack), `perf`; two real PCs; a production jar in a normal 1.21.1
+launcher (only the dev runs and the jar check).

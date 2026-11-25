@@ -82,12 +82,17 @@ public final class Branches {
         if (path.equals("level.dat") || path.startsWith("data/")) {
             return true;
         }
-        // 26.x keeps a dimension's saved data in dimensions/<namespace>/<name>/data/.
-        return path.startsWith("dimensions/") && path.contains("/data/");
+        // 26.x keeps a dimension's saved data in dimensions/<namespace>/<name>/data/; 1.21.1 and older keep the
+        // Nether's and the End's in DIM-1/data/ and DIM1/data/.
+        return path.startsWith("dimensions/") && path.contains("/data/")
+                || path.startsWith("DIM-1/data/") || path.startsWith("DIM1/data/");
     }
 
+    private static final java.util.Set<String> LEGACY_PLAYER_FOLDERS = java.util.Set.of("playerdata", "advancements", "stats");
+
     /**
-     * The player a file record belongs to ({@code players/<kind>/<uuid>.<ext>}, DESIGN 4.8), or null if it is
+     * The player a file record belongs to ({@code players/<kind>/<uuid>.<ext>}, DESIGN 4.8; in 1.21.1 and older
+     * {@code playerdata|advancements|stats/<uuid>.<ext>}), or null if it is
      * not a player's own file.
      */
     public static String playerOf(String key) {
@@ -95,11 +100,17 @@ public final class Branches {
             return null;
         }
         String[] segments = RecordKey.filePath(key).split("/", -1);
-        if (segments.length != 3 || !segments[0].equals("players")) {
+        String file;
+        if (segments.length == 3 && segments[0].equals("players")) {
+            file = segments[2];
+        } else if (segments.length == 2 && LEGACY_PLAYER_FOLDERS.contains(segments[0])) {
+            // 1.21.1 and older: playerdata/<uuid>.dat, advancements/<uuid>.json, stats/<uuid>.json
+            file = segments[1];
+        } else {
             return null;
         }
-        int dot = segments[2].indexOf('.');
-        String name = dot < 0 ? segments[2] : segments[2].substring(0, dot);
+        int dot = file.indexOf('.');
+        String name = dot < 0 ? file : file.substring(0, dot);
         return name.length() == 36 ? name : null;
     }
 

@@ -5,6 +5,8 @@
   "minVersion": "0.8",
   "mixins": [
     "mc.IOWorkerMixin",
+    "mc.MinecraftServerPacketsMixin",
+    "mc.ChunkMapSaveMixin",
     "mc.MinecraftServerStopMixin",
     "mc.PlayerListBanMixin",
     "mc.PlayerListOwnDataMixin",

@@ -537,4 +537,18 @@ class MergeTest {
         writer.finish();
         assertEquals(keys, store.load(head.hash()).keys());
     }
+    @Test
+    void legacyLayoutPlayerFilesAndWorldLevelFiles() {
+        String id = "0f0e0d0c-0001-4000-8000-000000000001";
+        assertEquals(id, Branches.playerOf(RecordKey.file("playerdata/" + id + ".dat")));
+        assertEquals(id, Branches.playerOf(RecordKey.file("advancements/" + id + ".json")));
+        assertEquals(id, Branches.playerOf(RecordKey.file("stats/" + id + ".json")));
+        assertEquals(id, Branches.playerOf(RecordKey.file("players/data/" + id + ".dat")));
+        assertNull(Branches.playerOf(RecordKey.file("playerdata/x/" + id + ".dat")));
+        assertNull(Branches.playerOf(RecordKey.file("somemod/" + id + ".dat")));
+        assertTrue(Branches.worldLevel(RecordKey.file("DIM-1/data/raids.dat")));
+        assertTrue(Branches.worldLevel(RecordKey.file("DIM1/data/raids_end.dat")));
+        assertTrue(Branches.worldLevel(RecordKey.file("data/raids.dat")));
+        assertFalse(Branches.worldLevel(RecordKey.file("playerdata/" + id + ".dat")));
+    }
 }

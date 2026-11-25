@@ -564,7 +564,9 @@ public final class HostSync implements SyncServerSession.Host {
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
                 String relative = root.relativize(dir).toString().replace('\\', '/');
-                boolean regionFolder = relative.startsWith("dimensions/") && RecordKey.KINDS.contains(dir.getFileName().toString());
+                // A region-type folder of a dimension (1.21.1 layout: <world>/region, DIM-1/region, dimensions/<ns>/<path>/region)
+                boolean regionFolder = !relative.isEmpty() && RecordKey.KINDS.contains(dir.getFileName().toString())
+                        && RecordKey.dimensionOfFolder(root.relativize(dir.getParent()).toString().replace('\\', '/')) != null;
                 return relative.equals(CoopWorldStore.MARKER_DIR) || regionFolder
                         ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
             }
@@ -611,6 +613,23 @@ public final class HostSync implements SyncServerSession.Host {
 
     // ---- quitting -----------------------------------------------------------------------------
 
+    /** True while this server hosts a co-op world whose checkpoints this class takes. */
+    public static boolean hosts(MinecraftServer server) {
+        HostSync sync = current;
+        return sync != null && sync.server == server;
+    }
+
+    /**
+     * True while the last checkpoint of this server is taken and pushed to the members (head of {@code stopServer}).
+     * 1.21.1 rejects the members' game packets from then on and drops their connections, which ends their syncs
+     * before the last checkpoint arrives; 26.x queues those packets until {@code stopServer} closes its packet
+     * processor, after this hook. {@code MinecraftServerPacketsMixin} drops them instead for this time.
+     */
+    public static boolean finalCheckpointRunning(MinecraftServer server) {
+        HostSync sync = current;
+        return sync != null && sync.server == server && sync.stopping && !sync.finished;
+    }
+
     /** Head of {@code MinecraftServer.stopServer}, on the server thread. */
     public static void serverStopping(MinecraftServer server) {
         HostSync sync = current;
@@ -649,6 +668,30 @@ public final class HostSync implements SyncServerSession.Host {
                     sync.handedTo == null ? "" : sync.handedTo);
         }
         sync.finished = true;
+        closeMemberConnections(server);
+    }
+
+    /**
+     * 1.21.1: {@code IntegratedServer.halt} takes the members off the player list, so {@code stopServer} never sends them
+     * "Server closed"; their game connections end only when they next send a packet (up to a second for a player
+     * standing still). By then the host may have reopened the world and announced "starting", and a member reading that
+     * takes the quit for a crash. 26.x closes them right after the last record; this does the same, once the last
+     * checkpoint and the last record are out.
+     */
+    private static void closeMemberConnections(MinecraftServer server) {
+        net.minecraft.server.network.ServerConnectionListener listener = server.getConnection();
+        if (listener == null) {
+            return;
+        }
+        List<net.minecraft.network.Connection> connections;
+        synchronized (listener.getConnections()) {
+            connections = new ArrayList<>(listener.getConnections());
+        }
+        for (net.minecraft.network.Connection connection : connections) {
+            if (!connection.isMemoryConnection() && connection.isConnected()) {
+                connection.disconnect(Component.translatable("multiplayer.disconnect.server_shutdown"));
+            }
+        }
     }
 
     /** DESIGN 4.9 steps 2 and 3: choose the successor among the peers that have the final checkpoint and tell everyone. */

@@ -191,4 +191,30 @@ class ManifestTest {
             assertThrows(IllegalArgumentException.class, () -> RecordKey.parseChunk(bad), bad);
         }
     }
+    @Test
+    void legacyWorldLayoutOf1211AndOlder() {
+        assertEquals("", RecordKey.storageFolder("minecraft:overworld"));
+        assertEquals("DIM-1", RecordKey.storageFolder("minecraft:the_nether"));
+        assertEquals("DIM1", RecordKey.storageFolder("minecraft:the_end"));
+        assertEquals("dimensions/somemod/deep/sky", RecordKey.storageFolder("somemod:deep/sky"));
+        assertThrows(IllegalArgumentException.class, () -> RecordKey.storageFolder("../x"));
+        for (String dim : List.of("minecraft:overworld", "minecraft:the_nether", "minecraft:the_end", "somemod:deep/sky")) {
+            assertEquals(dim, RecordKey.dimensionOfFolder(RecordKey.storageFolder(dim)), dim);
+        }
+        for (String none : List.of("dim-1", "DIM2", "region", "dimensions/minecraft", "dimensions/minecraft/the_nether/x/..",
+                "data", "dimensions/Some/thing")) {
+            assertNull(RecordKey.dimensionOfFolder(none), none);
+        }
+        // the Nether's and the End's saved data travel; their region-type folders never do
+        for (String ok : List.of("DIM-1/data/raids.dat", "DIM1/data/raids_end.dat", "playerdata/0f0e0d0c-0001-4000-8000-000000000001.dat",
+                "advancements/0f0e0d0c-0001-4000-8000-000000000001.json", "stats/0f0e0d0c-0001-4000-8000-000000000001.json")) {
+            assertTrue(RecordKey.fileAllowed(ok), ok);
+        }
+        for (String no : List.of("DIM-1/region/r.0.0.mca", "DIM1/entities/r.0.0.mca", "DIM-1/poi/x.dat", "DIM-1/level.dat",
+                "dim-1/data/raids.dat", "Dim1/data/raids.dat", "region/r.0.0.mca", "entities/x.dat", "DIM-1/region/notes.txt")) {
+            assertFalse(RecordKey.fileAllowed(no), no);
+        }
+        assertTrue(RecordKey.fileAllowed("DIM-1/data/huge.dat", RecordKey.MAX_MOD_FILE + 1));
+        assertTrue(RecordKey.fileAllowed("playerdata/huge.dat", RecordKey.MAX_MOD_FILE + 1));
+    }
 }

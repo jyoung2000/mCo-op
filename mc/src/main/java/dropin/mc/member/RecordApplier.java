@@ -162,7 +162,6 @@ public final class RecordApplier implements AutoCloseable {
     public static Manifest scan(Path worldFolder) throws IOException {
         Path root = worldFolder.toAbsolutePath().normalize();
         Manifest manifest = new Manifest();
-        Path dimensions = root.resolve("dimensions");
         try (RecordApplier reader = new RecordApplier(root)) {
             Files.walkFileTree(root, new SimpleFileVisitor<>() {
                 @Override
@@ -172,13 +171,11 @@ public final class RecordApplier implements AutoCloseable {
                         return FileVisitResult.SKIP_SUBTREE;
                     }
                     String kind = dir.getFileName().toString();
-                    if (dir.startsWith(dimensions) && RecordKey.KINDS.contains(kind)
-                            && dimensions.relativize(dir).getNameCount() >= 3) {
-                        Path dimPath = dimensions.relativize(dir.getParent());
-                        String dim = dimPath.getName(0) + ":" + dimPath.subpath(1, dimPath.getNameCount()).toString().replace('\\', '/');
-                        if (RecordKey.validDimension(dim)) {
-                            reader.scanRegions(dir, dim, kind, manifest);
-                        }
+                    // 1.21.1 layout: <world>/region, DIM-1/region, DIM1/region, dimensions/<ns>/<path>/region
+                    String dim = dir.equals(root) || !RecordKey.KINDS.contains(kind) ? null
+                            : RecordKey.dimensionOfFolder(root.relativize(dir.getParent()).toString().replace('\\', '/'));
+                    if (dim != null) {
+                        reader.scanRegions(dir, dim, kind, manifest);
                         return FileVisitResult.SKIP_SUBTREE;
                     }
                     return FileVisitResult.CONTINUE;

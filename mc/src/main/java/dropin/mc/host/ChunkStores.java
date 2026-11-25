@@ -52,14 +52,15 @@ public final class ChunkStores {
         if (!RecordKey.KINDS.contains(kind)) {
             return;
         }
-        Path root = worldRoot(folder);
+        String dim = info.dimension().location().toString();
+        Path root = worldRoot(folder, dim);
         if (root == null) {
             return;
         }
         // A worker of an earlier session of this world that was never reported closed (a replaced class's close()
         // is not seen either) must not be asked for chunks again.
         STORES.values().removeIf(old -> old.dir().equals(folder));
-        STORES.put(worker, new Store(worker, info.dimension().location().toString(), kind, folder, root));
+        STORES.put(worker, new Store(worker, dim, kind, folder, root));
         if (CoopWorldStore.readMarker(root).isPresent()) {
             TRACKED.add(root);
         }
@@ -78,14 +79,25 @@ public final class ChunkStores {
         }
     }
 
-    /** {@code <world>/dimensions/<namespace>/<path...>/<kind>}: the world folder, or null. */
-    private static Path worldRoot(Path dir) {
-        for (int i = dir.getNameCount() - 4; i >= 1; i--) {
-            if (dir.getName(i).toString().equals("dimensions")) {
-                return dir.getRoot() == null ? dir.subpath(0, i) : dir.getRoot().resolve(dir.subpath(0, i));
-            }
+    /**
+     * {@code <world>/<storage folder of the dimension>/<kind>} (1.21.1 layout: {@link RecordKey#storageFolder}):
+     * the world folder, or null if the folder is not where the game keeps that dimension's chunks.
+     */
+    private static Path worldRoot(Path dir, String dim) {
+        if (!RecordKey.validDimension(dim)) {
+            return null;
         }
-        return null;
+        String storage = RecordKey.storageFolder(dim);
+        int depth = storage.isEmpty() ? 0 : storage.split("/").length;
+        Path root = dir.getParent();
+        for (int i = 0; i < depth && root != null; i++) {
+            root = root.getParent();
+        }
+        if (root == null || root.getNameCount() == 0) {
+            return null;
+        }
+        String relative = root.relativize(dir.getParent()).toString().replace('\\', '/');
+        return relative.equals(storage) ? root : null;
     }
 
     /** Starts recording writes of this world (a world made co-op while it is open). */

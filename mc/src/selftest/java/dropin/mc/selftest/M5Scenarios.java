@@ -204,8 +204,11 @@ final class M5Scenarios {
                         require(contains(Files.readAllBytes(chunk), "minecraft:emerald_block"), chunk + " does not have B's block");
                         require(report.message().getString().contains(" 1 kept"), "the chat report is '" + report.message().getString() + "'");
                         ownFilesFromTheBranch(report);
-                        Path playerFiles = report.conflicts().resolve("files").resolve("players");
-                        require(!Files.exists(playerFiles), "B's own player files were backed up instead of merged: " + playerFiles);
+                        // 1.21.1 keeps a player's own files in playerdata/, advancements/ and stats/
+                        for (String folder : List.of("players", "playerdata", "advancements", "stats")) {
+                            Path playerFiles = report.conflicts().resolve("files").resolve(folder);
+                            require(!Files.exists(playerFiles), "B's own player files were backed up instead of merged: " + playerFiles);
+                        }
                         DropIn.LOGGER.info("Self-test: B's version of the chunk is in {}", chunk);
                     })
                     .step("A's version of the chunk is in the world", SHORT_TICKS, () -> {

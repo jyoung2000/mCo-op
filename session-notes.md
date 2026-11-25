@@ -691,3 +691,62 @@ core: `ledger/Deltas.java`, `ledger/Ledger.java` (`entries`, `hasMerged`, `trunc
 - Menu: worlds not showing someone playing are looked up again every 5 s (`CoopWorldsScreen.tick`), one lookup per world at a time (`CoopStatus.IN_FLIGHT`).
 - Not fixed here: a player whose saved mode already became creative stays creative until `/gamemode survival`.
 - Files: `tunnel/.../dialtone/DialtoneChannel.java`, `DialtoneServerChannel.java`, `mc/.../coop/HostSession.java`, `mc/.../menu/CoopStatus.java`, `CoopWorldsScreen.java`, `mc/src/selftest/.../UiScenarios.java`, docs, CLAUDE.md.
+
+## Port to Minecraft 1.21.1 (branch `port/1.21.1`): 2026-11-24
+
+Task from the M4 session: port the mod and all its functions to 1.21.1, 1.20.1 and 1.12.2, each on its own branch. This branch
+is 1.21.1, Fabric + NeoForge, one jar `MCo-op-<version>+mc1.21.1.jar`. `core/` is the same as on `dropin` except the world-layout
+change below.
+
+Decisions (flag to the owner; the design describes 26.x):
+- **Two mixin configs.** 1.21.1 is obfuscated: Fabric runs intermediary names, NeoForge Mojang names, so the jar holds Fabric's
+  remapped classes (`dropin.*`, config `dropin.mixins.json`) and a relocated copy for NeoForge (`dropin.nf.mc`, `dropin.nf.mixin`,
+  `dropin.nf.tunnel`, config `dropin.neoforge.mixins.json`). `core` is shared. DESIGN §5 says "one mixin config"; `jarcheck.ps1`
+  now checks one config per loader, named by that loader's metadata, and no other config in the jar.
+- **World layout of 1.21.1** (overworld chunks in `<world>/region|entities|poi`, Nether `DIM-1/`, End `DIM1/`, other dimensions
+  `dimensions/<ns>/<path>/`, player files `playerdata/`, `advancements/`, `stats/`). The record key format (DESIGN §4.7) is
+  unchanged; only the folder mapping differs: `RecordKey.storageFolder` / `dimensionOfFolder` (core, unit tests), used by
+  `ChunkStores`, `HostSync.scanFiles`, `RecordApplier.scan`. `fileAllowed` accepts `DIM-1/data/**`, `DIM1/data/**` (exact case;
+  any other case is refused like other case-folded game files); `Branches.playerOf` knows the legacy player folders and
+  `worldLevel` the legacy dimension data folders. Without this no chunk write was ever tracked (found by the `integrity` suite).
+- **Removed**: `IntegratedServerFocusMixin` (1.21.1 has no `selectLevelLoadFocusPos`; nothing to fix there), the Netty 4.2
+  `MultiThreadIoEventLoopGroup` branch and the KQueue branch in `QuiclimeSession` (1.21.1 ships Netty 4.1.97 without kqueue).
+- **Added**: `IntegratedServerGameModeMixin` (1.21.1 `getForcedGameType()` forces the LAN game mode; returns null while DropIn
+  turned forcing off, the 26.3 behaviour), `RegionFileStorageAccess` (invoker for the package-private constructor and `write`).
+- Bundled libraries are `transitive = false` (netty-quic otherwise pulls Netty 4.1.124 over the game's 4.1.97). NeoForge dev runs
+  need them on `additionalRuntimeClasspath` too, or the mod cannot see kaleido/directories (FML 4).
+- **Added `MinecraftServerPacketsMixin`** (found by `m2 resume`). 1.21.1 sets `stopped` before `stopServer()`, and
+  `MinecraftServer.executeIfPossible` then throws `RejectedExecutionException`, which `Connection.channelRead0` answers with a
+  disconnect ("Server closed"). So while the last checkpoint was pushed from the head of `stopServer`, every member that sent a
+  game packet lost its connection and its sync stopped one checkpoint short. 26.3 has a `PacketProcessor` that is closed only
+  inside `stopServer`, after DropIn's hook, so it queues those packets and never handles them. The mixin drops them while
+  `HostSync.finalCheckpointRunning(server)`; `PacketUtils.ensureRunningOnSameThread` is the only caller.
+- **Members are disconnected after the last checkpoint** (found by `m5 merge-*`). `HostSync.serverStopping` now ends with
+  `closeMemberConnections`: every connected, non-memory connection gets `multiplayer.disconnect.server_shutdown`. In 1.21.1 a
+  member only notices the closed world when it next sends a packet (up to a second), and by then the host had reopened the world,
+  so the member saw a rendezvous record "starting" instead of "idle" and read the restart as a crash.
+- **Added `ChunkMapSaveMixin`** (found by `m3b savepoint-rollback` and `m4 stale-warning`: the probe block was air in the
+  restored or older copy). 1.21.1 `ChunkMap` keeps `private final Long2LongMap chunkSaveCooldowns` (10 s per chunk), so a
+  non-flush `saveAllChunks(false)` skips chunks saved in the last 10 s and a checkpoint misses recent changes. 26.3
+  `saveAllChunks(false)` clears `nextChunkSaveTime` first. The mixin clears `chunkSaveCooldowns` at the head of
+  `saveAllChunks(false)` for worlds DropIn hosts (`HostSync.hosts(server)`); other worlds keep vanilla behaviour.
+- The test mods of the m2b scenarios are compiled with `options.release = java_version` (they were built for Gradle's Java 25
+  and could not load in a Java 21 game).
+- PvP is a server setting in 1.21.1 (`MinecraftServer.setPvpAllowed`), not a game rule; the self-tests use it.
+
+1.21.1 signatures read in the sources (`src121`, NeoForm 1.21.1-20240808.144430):
+- `protected IOWorker(RegionStorageInfo, Path, boolean)`; `public CompletableFuture<Void> store(ChunkPos, @Nullable CompoundTag)`
+- `RegionFileStorage(RegionStorageInfo, Path, boolean)` (package-private); `protected void write(ChunkPos, @Nullable CompoundTag)`
+- `PauseScreen: private void onDisconnect()` (disconnect hook; 1.21.1 has no `Minecraft.disconnectFromWorld`)
+- `MinecraftServer: public int getProfilePermissions(GameProfile)`
+- `IntegratedServer: public boolean publishServer(@Nullable GameType, boolean, int)`; `public GameType getForcedGameType()`
+- `TitleScreen: private void createNormalMenuOptions(int, int)` (void)
+- `PlayerList: public Optional<CompoundTag> load(ServerPlayer)`; `WorldData: CompoundTag getLoadedPlayerTag()`
+- `DimensionType: public static Path getStorageFolder(ResourceKey<Level>, Path)`
+- `MinecraftServer: public void executeIfPossible(Runnable)` (throws `RejectedExecutionException("Server already shutting down")`
+  when `isStopped()`); `runServer` finally: `this.stopped = true; this.stopServer();`
+- `Connection.channelRead0`: `catch (RejectedExecutionException) { this.disconnect(Component.translatable("multiplayer.disconnect.server_shutdown")); }`
+- `ChunkMap: private final Long2LongMap chunkSaveCooldowns`; `final ServerLevel level`; `protected void saveAllChunks(boolean flush)`
+- `PlayerFaceRenderer: public static void draw(GuiGraphics, PlayerSkin, int, int, int)`
+- `Attributes.MAX_HEALTH` is registered as `"generic.max_health"`; `StateHolder.NAME_TAG = "Name"` (chunk palette entries are
+  `{Name, Properties}`). Self-test commands and readers use these.

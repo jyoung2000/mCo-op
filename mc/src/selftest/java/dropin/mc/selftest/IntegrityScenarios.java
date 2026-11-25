@@ -167,7 +167,7 @@ final class IntegrityScenarios {
         spawn(level, EntityType.IRON_GOLEM, GOLEM, 28.5, 28.5, 37.0f);
         run(server, "effect give DevA minecraft:speed infinite 1");
         run(server, "give DevA minecraft:netherite_ingot 2");
-        run(server, "attribute DevB minecraft:max_health base set 14");
+        run(server, "attribute DevB minecraft:generic.max_health base set 14");
         run(server, "effect give DevB minecraft:strength infinite 0");
         run(server, "effect give DevC minecraft:haste infinite 2");
         run(server, "xp set DevC 7 levels");
@@ -293,7 +293,7 @@ final class IntegrityScenarios {
     }
 
     private static String playerKey(Context ctx, String who) throws IOException {
-        return RecordKey.file("players/data/" + ctx.readShared(who + "-uuid") + ".dat");
+        return RecordKey.file("playerdata/" + ctx.readShared(who + "-uuid") + ".dat");
     }
 
     /**
@@ -427,9 +427,9 @@ final class IntegrityScenarios {
             if (id >= palette.size()) {
                 return "?";
             }
-            // 26.3 BlockState.CODEC: a block's default state is saved as its id alone, any other as {id, properties}.
-            String plain = dropin.mc.compat.Nbt.stringOr(palette, id, "");
-            return plain.isEmpty() ? dropin.mc.compat.Nbt.stringOr(palette.getCompound(id), "id", "?") : plain;
+            // 1.21.1 BlockState.CODEC: every palette entry is {Name, Properties}.
+            CompoundTag entry = palette.getCompound(id);
+            return dropin.mc.compat.Nbt.stringOr(entry, "Name", dropin.mc.compat.Nbt.stringOr(entry, "id", "?"));
         }
         return "minecraft:air";
     }

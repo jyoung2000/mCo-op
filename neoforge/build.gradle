@@ -43,6 +43,8 @@ neoForge {
 dependencies {
     // Bundled libraries, needed on the dev-run classpath
     runtimeOnly(files(configurations.bundled))
+    // NeoForge 1.21.1 (FML 4) only shows plain library jars to the mod through the game's legacy class path
+    additionalRuntimeClasspath(files(configurations.bundled))
 }
 
 // Implement mcgradleconventions loader attribute
