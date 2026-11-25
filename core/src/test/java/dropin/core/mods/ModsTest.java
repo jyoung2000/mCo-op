@@ -93,6 +93,24 @@ class ModsTest {
     }
 
     @Test
+    void forgeJarsAreReadFromModsToml(@TempDir Path dir) throws IOException {
+        Path mods = dir.resolve("mods");
+        jar(mods.resolve("gamma.jar"), "META-INF/mods.toml",
+                "modLoader=\"javafml\"
+loaderVersion=\"[47,)\"
+[[mods]]
+modId=\"gamma\"
+version=\"3.1\"
+", "gamma");
+        fabricJar(mods.resolve("both.jar"), "both_fabric", "1");
+        List<ModManifest.Entry> found = ModScan.scan(mods, Set.of(), "forge");
+        assertEquals(List.of("both.jar", "gamma.jar"), names(found));
+        assertEquals("gamma", found.get(1).modId());
+        assertEquals("3.1", found.get(1).version());
+        assertEquals("gamma", ModScan.jarInfo(mods.resolve("gamma.jar"), "fabric").modId());
+    }
+
+    @Test
     void manifestHashDependsOnContentNotOnInputOrder() {
         ModManifest.Entry a = entry("a.jar", 10);
         ModManifest.Entry b = entry("b.jar", 20);

@@ -40,7 +40,7 @@ public final class ModScan {
 
     /**
      * @param skipModIds mod ids that are never listed (DropIn itself: its version is matched by the sync protocol)
-     * @param loader     "fabric" or "neoforge": which of a jar's two metadata files to prefer
+     * @param loader     "fabric", "neoforge" or "forge": which of a jar's metadata files to prefer
      * @throws ModManifest.ModException if a jar's name cannot be used in a manifest
      */
     public static List<ModManifest.Entry> scan(Path modsDir, Set<String> skipModIds, String loader) throws IOException {
@@ -84,12 +84,12 @@ public final class ModScan {
         }
     }
 
-    /** The mod id and version from {@code fabric.mod.json} or {@code META-INF/neoforge.mods.toml}. Never throws. */
+    /** The mod id and version from {@code fabric.mod.json}, {@code META-INF/neoforge.mods.toml} or {@code META-INF/mods.toml}. Never throws. */
     public static JarInfo jarInfo(Path jar, String loader) {
         try (ZipFile zip = new ZipFile(jar.toFile())) {
             JarInfo fabric = fabricInfo(zip);
             JarInfo neoforge = neoforgeInfo(zip);
-            if ("neoforge".equals(loader)) {
+            if ("neoforge".equals(loader) || "forge".equals(loader)) {
                 return neoforge != null ? neoforge : fabric != null ? fabric : JarInfo.UNKNOWN;
             }
             return fabric != null ? fabric : neoforge != null ? neoforge : JarInfo.UNKNOWN;
@@ -120,6 +120,9 @@ public final class ModScan {
 
     private static JarInfo neoforgeInfo(ZipFile zip) throws IOException {
         String text = text(zip, "META-INF/neoforge.mods.toml");
+        if (text == null) {
+            text = text(zip, "META-INF/mods.toml"); // Forge (1.20.1 and older) names the same TOML format this way
+        }
         if (text == null) {
             return null;
         }

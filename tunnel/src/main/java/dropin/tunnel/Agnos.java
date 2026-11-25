@@ -3,7 +3,7 @@ package dropin.tunnel;
 import java.nio.file.Path;
 
 /**
- * Loader-specific answers, resolved at runtime so one jar works on Fabric and NeoForge.
+ * Loader-specific answers, resolved at runtime so one jar works on Fabric and Forge (1.20.1 port).
  * (Upstream resolved this at build time with Architectury's {@code @ExpectPlatform}.)
  */
 public class Agnos {
@@ -22,14 +22,14 @@ public class Agnos {
     private static final Platform PLATFORM = detect();
 
     private static Platform detect() {
-        // NeoForge first: a Fabric compatibility layer on NeoForge would expose FabricLoader as well.
+        // Forge first: a Fabric compatibility layer on Forge would expose FabricLoader as well.
         String impl;
-        if (classExists("net.neoforged.fml.loading.FMLLoader")) {
-            impl = "dropin.neoforge.NeoForgePlatform";
+        if (classExists("net.minecraftforge.fml.loading.FMLLoader")) {
+            impl = "dropin.forge.ForgePlatform";
         } else if (classExists("net.fabricmc.loader.api.FabricLoader")) {
             impl = "dropin.fabric.FabricPlatform";
         } else {
-            throw new IllegalStateException("Unsupported mod loader: neither NeoForge nor Fabric was found");
+            throw new IllegalStateException("Unsupported mod loader: neither Forge nor Fabric was found");
         }
         try {
             return (Platform) Class.forName(impl, true, Agnos.class.getClassLoader()).getDeclaredConstructor().newInstance();

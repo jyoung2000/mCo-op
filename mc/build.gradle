@@ -1,7 +1,7 @@
 // Minecraft-facing DropIn code, compiled here against vanilla (NeoForm) and again inside each loader module.
 plugins {
     id 'multiloader-common'
-    id 'net.neoforged.moddev'
+    id 'net.neoforged.moddev.legacyforge'
 }
 
 sourceSets {
@@ -9,8 +9,8 @@ sourceSets {
     selftest
 }
 
-neoForge {
-    neoFormVersion = neo_form_version
+legacyForge {
+    mcpVersion = mcp_version
     addModdingDependenciesTo(sourceSets.selftest)
 }
 

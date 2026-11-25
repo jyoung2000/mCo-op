@@ -1,18 +1,18 @@
-package dropin.neoforge;
+package dropin.forge;
 
 import dropin.tunnel.Agnos;
 import dropin.tunnel.E4mcClient;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.fml.loading.FMLEnvironment;
-import net.neoforged.fml.loading.FMLLoader;
-import net.neoforged.fml.loading.FMLPaths;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.loading.FMLEnvironment;
+import net.minecraftforge.fml.loading.FMLLoader;
+import net.minecraftforge.fml.loading.FMLPaths;
 
 import java.nio.file.Path;
 
-public class NeoForgePlatform implements Agnos.Platform {
+public class ForgePlatform implements Agnos.Platform {
     @Override
     public String loaderName() {
-        return "neoforge";
+        return "forge";
     }
 
     @Override

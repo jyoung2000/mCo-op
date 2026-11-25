@@ -1,0 +1,94 @@
+plugins {
+    id 'multiloader-loader'
+    id 'net.neoforged.moddev.legacyforge'
+}
+
+legacyForge {
+    version = forge_version
+    runs {
+        configureEach {
+            ideName = "Forge ${it.name.capitalize()} (${project.path})" // Unify the run config names with fabric
+        }
+        client {
+            client()
+            gameDirectory = this.mkdir(this.file('runs/client'))
+        }
+        server {
+            server()
+            this.file('runs/server').createParentDirectories()
+            gameDirectory = this.mkdir(this.file('runs/server'))
+        }
+        selftestSlots.each { slot ->
+            create("client${slot.toUpperCase()}") {
+                client()
+                gameDirectory = this.mkdir(rootProject.file("run/${slot}"))
+                programArguments.addAll(selftestProgramArgs(slot))
+                selftestSystemProps().each { k, v -> systemProperty(k, v) }
+            }
+        }
+    }
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+// Forge 1.20.1 runs SRG names: the mixin annotation processor writes a refmap (Mojang -> SRG) for the reobfuscated jar.
+mixin {
+    add sourceSets.main, 'dropin.forge.refmap.json'
+    config 'dropin.forge.mixins.json'
+}
+
+dependencies {
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+    annotationProcessor 'io.github.llamalad7:mixinextras-common:0.5.3'
+    // Forge 1.20.1 does not ship MixinExtras: it is nested (jar-in-jar) and loaded by Forge itself.
+    implementation('io.github.llamalad7:mixinextras-forge:0.5.3')
+    jarJar('io.github.llamalad7:mixinextras-forge:0.5.3') {
+        version { strictly '[0.5.3,)'; prefer '0.5.3' }
+    }
+    // Bundled libraries, needed on the dev-run classpath
+    runtimeOnly(files(configurations.bundled))
+}
+
+// Implement mcgradleconventions loader attribute
+def loaderAttribute = Attribute.of('io.github.mcgradleconventions.loader', String)
+['apiElements', 'runtimeElements'].each { variant ->
+    configurations.named(variant) {
+        attributes {
+            attribute(loaderAttribute, 'forge')
+        }
+    }
+}
+sourceSets.configureEach {
+    [it.compileClasspathConfigurationName, it.runtimeClasspathConfigurationName, it.getTaskName(null, 'jarJar')].each { variant ->
+        configurations.named(variant) {
+            attributes {
+                attribute(loaderAttribute, 'forge')
+            }
+        }
+    }
+}
+
+// Forge's mixin config: the shared dropin.mixins.json under its own name and with Forge's refmap, so that the merged
+// jar can carry a relocated copy of it next to Fabric's (see root build.gradle). In development it points at the
+// plain classes. Forge 1.20.1 finds mixin configs through the jar manifest (MixinConfigs), set by the root modJar.
+processResources {
+    from(project(':mc').file('src/main/resources/dropin.mixins.json')) {
+        rename { 'dropin.forge.mixins.json' }
+        filter { String line -> line.replace('"package": "dropin.mixin",', '"package": "dropin.mixin",
+  "refmap": "dropin.forge.refmap.json",') }
+    }
+}
+
+// The reobfuscated (SRG) jar with the refmap and the nested MixinExtras: the Forge part of the merged mod jar.
+configurations {
+    reobfContents {
+        canBeResolved = false
+        canBeConsumed = true
+    }
+}
+artifacts {
+    reobfContents(tasks.named('reobfJar'))
+}

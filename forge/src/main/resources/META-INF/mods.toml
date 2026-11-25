@@ -1,5 +1,5 @@
 modLoader = "javafml"
-loaderVersion = "${neoforge_loader_version_range}"
+loaderVersion = "${forge_loader_version_range}"
 license = "${license}"
 
 [[mods]]
@@ -13,19 +13,16 @@ description = '''
 ${description}
 '''
 
-[[mixins]]
-config = "dropin.neoforge.mixins.json"
-
 [[dependencies.${mod_id}]]
-modId = "neoforge"
-type = "required"
-versionRange = "[${neoforge_version},)"
+modId = "forge"
+mandatory = true
+versionRange = "[47.4,)"
 ordering = "NONE"
 side = "BOTH"
 
 [[dependencies.${mod_id}]]
 modId = "minecraft"
-type = "required"
+mandatory = true
 versionRange = "${minecraft_version_range}"
 ordering = "NONE"
 side = "BOTH"
@@ -33,7 +30,7 @@ side = "BOTH"
 # DropIn contains the e4mc tunnel: both mods would mixin the same targets and open two relay sessions.
 [[dependencies.${mod_id}]]
 modId = "e4mc"
-type = "incompatible"
-versionRange = "*"
+mandatory = false
+versionRange = "[0,0)"
 ordering = "NONE"
 side = "BOTH"

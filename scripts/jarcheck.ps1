@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
   Gate jar check (docs/MILESTONES.md, common gate): exactly one mod jar; it contains fabric.mod.json,
-  META-INF/neoforge.mods.toml and one mixin config; bundled libraries are relocated; no self-test class
+  META-INF/mods.toml (Forge) and one mixin config per loader; bundled libraries are relocated; no self-test class
   is in the jar. Prints one line per item and exits non-zero if any item fails.
 #>
 $ErrorActionPreference = 'Stop'
@@ -28,12 +28,12 @@ function Count-Under([string]$prefix) {
 }
 
 Report ($names -contains 'fabric.mod.json') 'fabric-metadata' 'fabric.mod.json'
-Report ($names -contains 'META-INF/neoforge.mods.toml') 'neoforge-metadata' 'META-INF/neoforge.mods.toml'
+Report ($names -contains 'META-INF/mods.toml') 'forge-metadata' 'META-INF/mods.toml'
 
-# Obfuscated Minecraft versions (this port): Fabric runs intermediary names and NeoForge Mojang names, so each
+# Obfuscated Minecraft versions (this port): Fabric runs intermediary names and Forge SRG names, so each
 # loader has its own copy of the Minecraft-facing classes and exactly one mixin config of its own (DESIGN 5 asks
 # for one config on 26.x, where both loaders share the classes). Checked: each loader's metadata names exactly
-# one config, that config is in the jar, and the jar holds no other mixin config.
+# one config (Forge 1.20.1 names it in the manifest's MixinConfigs attribute), that config is in the jar, and the jar holds no other mixin config.
 function Read-Entry([string]$entry) {
     $z = [System.IO.Compression.ZipFile]::OpenRead($jars[0].FullName)
     try {
@@ -44,17 +44,17 @@ function Read-Entry([string]$entry) {
     } finally { $z.Dispose() }
 }
 $fabricMeta = Read-Entry 'fabric.mod.json'
-$neoMeta = Read-Entry 'META-INF/neoforge.mods.toml'
+$neoMeta = Read-Entry 'META-INF/MANIFEST.MF'
 $fabricConfigs = @([regex]::Matches($fabricMeta, '"([^"]+\.mixins\.json)"') | ForEach-Object { $_.Groups[1].Value })
-$neoConfigs = @([regex]::Matches($neoMeta, 'config\s*=\s*"([^"]+)"') | ForEach-Object { $_.Groups[1].Value })
+$neoConfigs = @([regex]::Matches($neoMeta, 'MixinConfigs:\s*([^\s,]+)') | ForEach-Object { $_.Groups[1].Value })
 $mixinConfigs = @($names | Where-Object { $_ -like '*.mixins.json' })
 Report ($fabricConfigs.Count -eq 1 -and ($names -contains $fabricConfigs[0])) 'one-mixin-config fabric' ($fabricConfigs -join ', ')
-Report ($neoConfigs.Count -eq 1 -and ($names -contains $neoConfigs[0])) 'one-mixin-config neoforge' ($neoConfigs -join ', ')
+Report ($neoConfigs.Count -eq 1 -and ($names -contains $neoConfigs[0])) 'one-mixin-config forge' ($neoConfigs -join ', ')
 $expected = @($fabricConfigs + $neoConfigs | Sort-Object -Unique)
 $extra = @($mixinConfigs | Where-Object { $expected -notcontains $_ })
 Report ($extra.Count -eq 0) 'no-other-mixin-config' ('in jar: ' + ($mixinConfigs -join ', '))
 
-foreach ($prefix in @('dropin/mc/selftest/', 'dropin/nf/mc/selftest/')) {
+foreach ($prefix in @('dropin/mc/selftest/', 'dropin/fg/mc/selftest/')) {
     $selftest = Count-Under $prefix
     Report ($selftest -eq 0) 'no-selftest-classes' ("$selftest entries under $prefix")
 }
