@@ -178,8 +178,7 @@ final class Scenarios {
                     WorldOptions options = new WorldOptions(SEED, false, false);
                     mc.createWorldOpenFlows().createFreshLevel(WORLD_ID, settings, options,
                             registries -> registries.lookupOrThrow(Registries.WORLD_PRESET)
-                                    .getOrThrow(WorldPresets.FLAT).value().createWorldDimensions(),
-                            mc.screen);
+                                    .getOrThrow(WorldPresets.FLAT).value().createWorldDimensions());
                 })
                 .step("world loaded", WORLD_TICKS, () -> inWorld(mc) && mc.getSingleplayerServer() != null)
                 .action("force-load probe chunk", () -> {
@@ -232,7 +231,7 @@ final class Scenarios {
         return runner
                 .action("connect", () -> ConnectScreen.startConnecting(new TitleScreen(), mc,
                         ServerAddress.parseString(address[0]),
-                        new ServerData("dropin-selftest", address[0], ServerData.Type.OTHER), false, null))
+                        new ServerData("dropin-selftest", address[0], false), false))
                 .step("joined world", SHORT_TICKS, () -> {
                     failIfDisconnected(mc);
                     return inWorld(mc);
@@ -251,12 +250,12 @@ final class Scenarios {
 
     private static StepRunner pinger(Context ctx) {
         Minecraft mc = ctx.mc();
-        ServerData data = new ServerData("dropin-selftest", ctx.localAddress(), ServerData.Type.OTHER);
+        ServerData data = new ServerData("dropin-selftest", ctx.localAddress(), false);
         ServerStatusPinger pinger = new ServerStatusPinger();
         return new StepRunner()
                 .step("main menu", STARTUP_TICKS, () -> atMainMenu(mc))
                 .step("host port open", STARTUP_TICKS, new PortProbe(ctx.port())::tick)
-                .action("send status ping", () -> pinger.pingServer(data, () -> {}, () -> {}))
+                .action("send status ping", () -> pinger.pingServer(data, () -> {}))
                 .step("status response", SHORT_TICKS, () -> {
                     pinger.tick();
                     return data.players != null;
@@ -276,6 +275,17 @@ final class Scenarios {
 
     static boolean atMainMenu(Minecraft mc) {
         return mc.getOverlay() == null && mc.screen != null && mc.level == null;
+    }
+
+    /** 1.20.1 port: {@code Inventory.contains(Predicate)} came later; every slot is checked the same way. */
+    static boolean has(net.minecraft.world.entity.player.Inventory inventory, java.util.function.Predicate<net.minecraft.world.item.ItemStack> test) {
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            net.minecraft.world.item.ItemStack stack = inventory.getItem(i);
+            if (!stack.isEmpty() && test.test(stack)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     static boolean inWorld(Minecraft mc) {

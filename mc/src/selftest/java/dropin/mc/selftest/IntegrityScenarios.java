@@ -39,7 +39,6 @@ import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.trading.ItemCost;
 import net.minecraft.world.item.trading.MerchantOffer;
 import net.minecraft.world.item.trading.MerchantOffers;
 import net.minecraft.world.level.block.Blocks;
@@ -160,8 +159,8 @@ final class IntegrityScenarios {
         villager.getInventory().addItem(new ItemStack(Items.BREAD, 5));
         villager.getInventory().addItem(new ItemStack(Items.WHEAT_SEEDS, 12));
         MerchantOffers offers = new MerchantOffers();
-        offers.add(new MerchantOffer(new ItemCost(Items.EMERALD, 3), Optional.empty(), new ItemStack(Items.DIAMOND, 1), 2, 7, 4, 0.05f));
-        offers.add(new MerchantOffer(new ItemCost(Items.WHEAT, 20), Optional.empty(), new ItemStack(Items.EMERALD, 1), 0, 16, 2, 0.05f));
+        offers.add(new MerchantOffer(new ItemStack(Items.EMERALD, 3), ItemStack.EMPTY, new ItemStack(Items.DIAMOND, 1), 2, 7, 4, 0.05f));
+        offers.add(new MerchantOffer(new ItemStack(Items.WHEAT, 20), ItemStack.EMPTY, new ItemStack(Items.EMERALD, 1), 0, 16, 2, 0.05f));
         villager.setOffers(offers);
         spawn(level, EntityType.COW, COW, 24.5, 24.5, 4.0f);
         spawn(level, EntityType.IRON_GOLEM, GOLEM, 28.5, 28.5, 37.0f);
@@ -266,7 +265,7 @@ final class IntegrityScenarios {
             return "C has experience level " + c.experienceLevel;
         }
         Predicate<ItemStack> netherite = stack -> stack.is(Items.NETHERITE_INGOT);
-        if (!a.getInventory().contains(netherite)
+        if (!Scenarios.has(a.getInventory(), netherite)
                 || !M3Scenarios.marked(a, M3Scenarios.MARK_A) || !M3Scenarios.marked(b, M3Scenarios.MARK_B) || !M3Scenarios.marked(c, MARK_C)) {
             return "a player's items or place are not as they were";
         }
@@ -341,7 +340,7 @@ final class IntegrityScenarios {
                 throw new IOException("player " + who + " has no data file in this copy");
             }
             out.append("record ").append(key).append(" = ").append(Manifest.hash(file)).append('\n');
-            CompoundTag player = NbtIo.readCompressed(new ByteArrayInputStream(file), NbtAccounter.unlimitedHeap());
+            CompoundTag player = NbtIo.readCompressed(new ByteArrayInputStream(file));
             String p = "player " + who + ' ';
             out.append(p).append("health = ").append(dropin.mc.compat.Nbt.floatOr(player, "Health", -1f)).append('\n');
             out.append(p).append("pos = ").append(pos(dropin.mc.compat.Nbt.listOrEmpty(player, "Pos"))).append('\n');
@@ -705,7 +704,7 @@ final class IntegrityScenarios {
                 .action("the world went to B", () -> {
                     String b = ctx.readShared("b-uuid");
                     require(b.equals(HostSync.lastHandedTo()), "A handed the world to '" + HostSync.lastHandedTo() + "', expected B " + b);
-                    Path world = mc.getLevelSource().getLevelPath(WORLD_ID);
+                    Path world = dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), WORLD_ID);
                     LedgerEntry last = Ledger.load(state.world.keys().auth(), world.resolve(CoopWorldStore.MARKER_DIR).resolve("ledger.jsonl")).last();
                     require(last != null && last.root().equals(HostSync.lastFinalRoot()), "the ledger does not end on the handed-over root");
                     ctx.writeShared("a-root", last.seq() + " " + last.root());

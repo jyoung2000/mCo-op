@@ -2,7 +2,7 @@ package dropin.tunnel;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
-import dropin.mixin.tunnel.ServerCommonPacketListenerImplAccessor;
+import dropin.mixin.tunnel.ServerGamePacketListenerImplAccessor;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.EntityArgument;
@@ -90,7 +90,7 @@ public class E4mcClient {
                             return 1;
                         }))
                         .then(Commands.literal("conninfo").then(Commands.argument("player", EntityArgument.player()).executes(ctx -> {
-                            var diag = ((DialtoneConnectionExtensions) ((ServerCommonPacketListenerImplAccessor) EntityArgument.getPlayer(ctx, "player").connection).getConnection()).e4mc$connInfo();
+                            var diag = ((DialtoneConnectionExtensions) ((ServerGamePacketListenerImplAccessor) EntityArgument.getPlayer(ctx, "player").connection).getConnection()).e4mc$connInfo();
                             LOGGER.info("e4mc connection information report:\n{}", diag);
                             Mirror.sendSuccessToSource(ctx.getSource(), Mirror.literal(diag));
                             return 1;

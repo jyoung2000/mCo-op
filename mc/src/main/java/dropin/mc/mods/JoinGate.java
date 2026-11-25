@@ -86,7 +86,7 @@ public final class JoinGate {
         }
         mc.execute(() -> {
             ConnectScreen.startConnecting(back, mc, ServerAddress.parseString(address),
-                    new ServerData(world.name(), address, ServerData.Type.OTHER), false, null);
+                    new ServerData(world.name(), address, false), false);
             SyncClient.start(mc, world, address);
         });
     }

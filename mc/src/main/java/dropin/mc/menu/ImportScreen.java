@@ -30,6 +30,7 @@ public class ImportScreen extends Screen {
     private String selected;
     private int page;
     private boolean backup = true;
+    private Checkbox backupBox;
     private Button importButton;
     private Component notice = Component.empty();
 
@@ -74,8 +75,8 @@ public class ImportScreen extends Screen {
                 }).bounds(left + listWidth - 20, 8, 20, 20).build());
             }
         }
-        this.addRenderableWidget(Checkbox.builder(Component.translatable(K + "import.backup"), this.font)
-                .pos(left, this.height - 74).selected(backup).onValueChange((box, value) -> backup = value).build());
+        backupBox = this.addRenderableWidget(new Checkbox(left, this.height - 74, listWidth, 20,
+                Component.translatable(K + "import.backup"), backup));
         int half = (listWidth - 4) / 2;
         importButton = this.addRenderableWidget(Button.builder(Component.translatable(K + "button.import"), button -> importSelected())
                 .bounds(left, this.height - 50, half, 20).build());
@@ -106,7 +107,7 @@ public class ImportScreen extends Screen {
 
     /** Worlds that are already co-op on this PC are not offered ("not co-op yet"). */
     private boolean isKnownCoop(LevelSummary summary) {
-        Optional<String> marker = CoopWorldStore.readMarker(this.minecraft.getLevelSource().getLevelPath(summary.getLevelId()));
+        Optional<String> marker = CoopWorldStore.readMarker(dropin.mc.compat.Compat.levelPath(this.minecraft.getLevelSource(), summary.getLevelId()));
         try {
             return marker.isPresent() && CoopWorlds.store().get(marker.get()).isPresent();
         } catch (Exception e) {
@@ -118,6 +119,7 @@ public class ImportScreen extends Screen {
         if (selected == null) {
             return;
         }
+        backup = backupBox == null || backupBox.selected();
         finish(CoopActions.importFromSaves(this.minecraft, selected, backup));
     }
 

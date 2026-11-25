@@ -776,7 +776,7 @@ final class UiScenarios {
                 .step("the invite of the new co-op world is shown", SHORT_TICKS, () -> mc.screen instanceof InviteScreen)
                 .action("it is a co-op world of this player", () -> {
                     world[0] = ((InviteScreen) mc.screen).world();
-                    Path folder = mc.getLevelSource().getLevelPath(Scenarios.WORLD_ID);
+                    Path folder = dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), Scenarios.WORLD_ID);
                     require(CoopWorldStore.readMarker(folder).orElse("").equals(world[0].worldId()), "the world folder is not marked");
                     require(CoopWorlds.store().isOwner(world[0].worldId()), "the importer is not the owner");
                     mc.setScreen(new ImportScreen(new CoopWorldsScreen(new TitleScreen())));
@@ -785,7 +785,7 @@ final class UiScenarios {
                         && M1Scenarios.buttonContaining(mc.screen, Scenarios.WORLD_ID) == null)
                 // ---- Export world: an ordinary world in a zip, which the import takes back.
                 .action("export the world", () -> {
-                    Path folder = mc.getLevelSource().getLevelPath(Scenarios.WORLD_ID);
+                    Path folder = dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), Scenarios.WORLD_ID);
                     Path zip = CoopActions.exportWorld(mc, world[0], folder);
                     require(Files.size(zip) > 0 && zip.getParent().equals(folder.resolve(CoopWorldStore.MARKER_DIR).resolve("backups")),
                             "no zip in the backups folder");

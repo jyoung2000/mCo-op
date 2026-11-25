@@ -315,7 +315,7 @@ public final class WorldPolicy {
         if (!Files.isRegularFile(levelDat)) {
             return enabled;
         }
-        CompoundTag root = NbtIo.readCompressed(levelDat, NbtAccounter.unlimitedHeap());
+        CompoundTag root = dropin.mc.compat.Compat.readCompressed(levelDat);
         ListTag list = dropin.mc.compat.Nbt.listOrEmpty(root.getCompound("Data").getCompound("DataPacks"), "Enabled");
         for (int i = 0; i < list.size(); i++) {
             String name = dropin.mc.compat.Nbt.stringOr(list, i, "");

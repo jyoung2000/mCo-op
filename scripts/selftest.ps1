@@ -35,10 +35,10 @@ $suites = [ordered]@{
     m0 = @(
         @{ Id = 'lan-join.fabric-fabric'; Scenario = 'lan-join'
            Roles = @((New-Role 'host' 'fabric' 'a'), (New-Role 'joiner' 'fabric' 'b')) },
-        @{ Id = 'lan-join.fabric-neoforge'; Scenario = 'lan-join'
-           Roles = @((New-Role 'host' 'fabric' 'a'), (New-Role 'joiner' 'neoforge' 'b')) },
-        @{ Id = 'lan-join.neoforge-fabric'; Scenario = 'lan-join'
-           Roles = @((New-Role 'host' 'neoforge' 'a'), (New-Role 'joiner' 'fabric' 'b')) },
+        @{ Id = 'lan-join.fabric-forge'; Scenario = 'lan-join'
+           Roles = @((New-Role 'host' 'fabric' 'a'), (New-Role 'joiner' 'forge' 'b')) },
+        @{ Id = 'lan-join.forge-fabric'; Scenario = 'lan-join'
+           Roles = @((New-Role 'host' 'forge' 'a'), (New-Role 'joiner' 'fabric' 'b')) },
         @{ Id = 'status-ping'; Scenario = 'status-ping'
            Roles = @((New-Role 'host' 'fabric' 'a'), (New-Role 'pinger' 'fabric' 'b')) },
         @{ Id = 'prod-guard'; Unit = @(':core:test', '--tests', 'dropin.core.dev.DevSwitchesTest') }
@@ -46,13 +46,13 @@ $suites = [ordered]@{
     m1 = @(
         @{ Id = 'menu'; Scenario = 'menu'; Roles = @((New-Role 'solo' 'fabric' 'a')) },
         @{ Id = 'import-saves'; Scenario = 'import-saves'; Roles = @((New-Role 'solo' 'fabric' 'a')) },
-        @{ Id = 'import-zip'; Scenario = 'import-zip'; Roles = @((New-Role 'solo' 'neoforge' 'a')) },
+        @{ Id = 'import-zip'; Scenario = 'import-zip'; Roles = @((New-Role 'solo' 'forge' 'a')) },
         @{ Id = 'import-rejects'; Scenario = 'import-rejects'; Roles = @((New-Role 'solo' 'fabric' 'a')) },
-        @{ Id = 'remove'; Scenario = 'remove'; Roles = @((New-Role 'solo' 'neoforge' 'a')) },
-        @{ Id = 'drop-in.fabric-neoforge'; Scenario = 'drop-in'
-           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'neoforge' 'b')) },
-        @{ Id = 'drop-in.neoforge-fabric'; Scenario = 'drop-in'
-           Roles = @((New-Role 'a' 'neoforge' 'a'), (New-Role 'b' 'fabric' 'b')) },
+        @{ Id = 'remove'; Scenario = 'remove'; Roles = @((New-Role 'solo' 'forge' 'a')) },
+        @{ Id = 'drop-in.fabric-forge'; Scenario = 'drop-in'
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'forge' 'b')) },
+        @{ Id = 'drop-in.forge-fabric'; Scenario = 'drop-in'
+           Roles = @((New-Role 'a' 'forge' 'a'), (New-Role 'b' 'fabric' 'b')) },
         @{ Id = 'host-swap-own-inventory'; Scenario = 'host-swap-own-inventory'
            Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
         @{ Id = 'race'; Scenario = 'race'
@@ -64,11 +64,11 @@ $suites = [ordered]@{
     )
     m2 = @(
         @{ Id = 'vanilla-through-sniffer'; Scenario = 'vanilla-through-sniffer'
-           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'neoforge' 'b')) },
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'forge' 'b')) },
         @{ Id = 'first-download-root-match'; Scenario = 'first-download-root-match'
-           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'neoforge' 'b')) },
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'forge' 'b')) },
         @{ Id = 'live-checkpoint'; Scenario = 'live-checkpoint'
-           Roles = @((New-Role 'a' 'neoforge' 'a'), (New-Role 'b' 'fabric' 'b')) },
+           Roles = @((New-Role 'a' 'forge' 'a'), (New-Role 'b' 'fabric' 'b')) },
         # B's game is killed when it writes run/shared/kill-b, then started again as role b2 on the same game folder.
         @{ Id = 'resume'; Scenario = 'resume'; TimeoutSec = 900
            Relaunch = @{ Marker = 'kill-b'; Index = 1; Role = 'b2' }
@@ -84,17 +84,17 @@ $suites = [ordered]@{
         @{ Id = 'swap-spike.fabric'; Scenario = 'swap-spike'; Mods = @{ a = @('z') }
            Relaunch = @{ GameFile = 'config\dropin\modswap.result.json'; Index = 0; Role = 'a2' }
            Roles = @((New-Role 'a' 'fabric' 'a')) },
-        @{ Id = 'swap-spike.neoforge'; Scenario = 'swap-spike'; Mods = @{ a = @('z') }
+        @{ Id = 'swap-spike.forge'; Scenario = 'swap-spike'; Mods = @{ a = @('z') }
            Relaunch = @{ GameFile = 'config\dropin\modswap.result.json'; Index = 0; Role = 'a2' }
-           Roles = @((New-Role 'a' 'neoforge' 'a')) },
+           Roles = @((New-Role 'a' 'forge' 'a')) },
         # A is the owner and hosts with test mod X. B approves the consent screen, its game exits, the helper swaps
         # B's mods/, and B is started again as b2 on the same game folder.
         @{ Id = 'mod-join.fabric'; Scenario = 'mod-join'; TimeoutSec = 900; Mods = @{ a = @('x') }
            Relaunch = @{ GameFile = 'config\dropin\modswap.result.json'; Index = 1; Role = 'b2' }
            Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
-        @{ Id = 'mod-join.neoforge'; Scenario = 'mod-join'; TimeoutSec = 900; Mods = @{ a = @('x') }
+        @{ Id = 'mod-join.forge'; Scenario = 'mod-join'; TimeoutSec = 900; Mods = @{ a = @('x') }
            Relaunch = @{ GameFile = 'config\dropin\modswap.result.json'; Index = 1; Role = 'b2' }
-           Roles = @((New-Role 'a' 'neoforge' 'a'), (New-Role 'b' 'neoforge' 'b')) },
+           Roles = @((New-Role 'a' 'forge' 'a'), (New-Role 'b' 'forge' 'b')) },
         @{ Id = 'mod-decline'; Scenario = 'mod-decline'; Mods = @{ a = @('x') }
            Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
         # The owner (X) restarts with X and Y while B (X) hosts; B's session ends, and B gets back in after its own restart.
@@ -107,9 +107,9 @@ $suites = [ordered]@{
         @{ Id = 'mod-keep-extra'; Scenario = 'mod-keep-extra'; TimeoutSec = 900; Mods = @{ a = @('x'); b = @('x', 'z') }
            Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
         @{ Id = 'owner-known-to-members'; Scenario = 'owner-known-to-members'; TimeoutSec = 900
-           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'neoforge' 'b')) },
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'forge' 'b')) },
         @{ Id = 'owner-rights'; Scenario = 'owner-rights'; TimeoutSec = 900
-           Roles = @((New-Role 'a' 'neoforge' 'a'), (New-Role 'b' 'fabric' 'b')) },
+           Roles = @((New-Role 'a' 'forge' 'a'), (New-Role 'b' 'fabric' 'b')) },
         @{ Id = 'datapack-mismatch'; Scenario = 'datapack-mismatch'; TimeoutSec = 900
            Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
         @{ Id = 'mods-tab'; Scenario = 'mods-tab'; Mods = @{ a = @('x'); b = @('z') }
@@ -117,7 +117,7 @@ $suites = [ordered]@{
         # B starts with its own jars Y and Z; after the swap both must be under mods/.dropin-disabled/, unchanged.
         @{ Id = 'swap-restores'; Scenario = 'swap-restores'; TimeoutSec = 900; Mods = @{ a = @('x'); b = @('y', 'z') }
            Relaunch = @{ GameFile = 'config\dropin\modswap.result.json'; Index = 1; Role = 'b2' }
-           Roles = @((New-Role 'a' 'neoforge' 'a'), (New-Role 'b' 'neoforge' 'b')) }
+           Roles = @((New-Role 'a' 'forge' 'a'), (New-Role 'b' 'forge' 'b')) }
     )
     m3 = @(
         # A hosts, B and C are fully synced; A quits; B takes over; C is back with no input; A rejoins B.
@@ -160,10 +160,10 @@ $suites['ui'] = @(
     @{ Id = 'join-code'; Scenario = 'join-code'; TimeoutSec = 600
        Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
     # Things that move by themselves: a minecart on powered rails, a cow led by wheat, a cow fleeing after a
-    # hit. Each is followed tick by tick on the host's server and on three screens (C runs NeoForge); the paths,
+    # hit. Each is followed tick by tick on the host's server and on three screens (C runs Forge); the paths,
     # the resting places and the mob's health, age, glow and name must be the same.
     @{ Id = 'motion'; Scenario = 'motion'; TimeoutSec = 900
-       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'neoforge' 'c')) }
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'forge' 'c')) }
 )
 
 # World integrity (DESIGN 4.5 to 4.9): after play and after a handoff, every copy holds the host's data.
@@ -171,28 +171,28 @@ $suites['integrity'] = @(
     # A hosts; B and C have copies. Ores, a chest, a villager (inventory, trades), mob health and each player's
     # health, effects and items are decoded from the host's records and from each member's copy at the same
     # checkpoint and must be the same; again after A handed the world to B; then every closed copy is read back
-    # from disk in full. C runs NeoForge.
+    # from disk in full. C runs Forge.
     @{ Id = 'integrity'; Scenario = 'integrity'; TimeoutSec = 1200
-       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'neoforge' 'c')) },
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'forge' 'c')) },
     # What a mod keeps in the world's root reaches B and C; the downloads stay under the direct rate cap; and of
     # two complete copies the player with the faster upload (C) is the one who would take over, not the one
-    # connected longest (B). C runs NeoForge.
+    # connected longest (B). C runs Forge.
     @{ Id = 'sync-extras'; Scenario = 'sync-extras'; TimeoutSec = 900
-       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'neoforge' 'c')) }
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'forge' 'c')) }
 )
 
 # MILESTONES M4: crash failover (DESIGN 4.9) and the stale-copy warning (DESIGN 4.4). 'Kill' names a file in
 # run/shared and the roles (by index) whose games are killed the hard way when it appears; they never report.
 $suites['m4'] = @(
     # A's game is killed; B (first in the order) hosts its copy; C is back by itself; a block placed before
-    # the last checkpoint is still there. C runs NeoForge.
+    # the last checkpoint is still there. C runs Forge.
     @{ Id = 'crash-failover'; Scenario = 'crash-failover'; TimeoutSec = 900
        Kill = @{ Marker = 'kill-a'; Index = @(0) }
-       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'neoforge' 'c')) },
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'forge' 'c')) },
     # A and B (first in the order) are killed together; C takes over once B's 45 s have passed.
     @{ Id = 'crash-fallthrough'; Scenario = 'crash-fallthrough'; TimeoutSec = 900
        Kill = @{ Marker = 'kill-a'; Index = @(0, 1) }
-       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'neoforge' 'c')) },
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'forge' 'c')) },
     # B's copy is one session behind and nobody is online: the warning; Cancel leaves the copy untouched.
     @{ Id = 'stale-warning'; Scenario = 'stale-warning'; TimeoutSec = 900
        Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
@@ -210,10 +210,10 @@ $suites['m5'] = @(
        Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
     # Both edit the same chunk: A's version stays, B's is under dropin/backups/conflicts, the report counts one.
     @{ Id = 'merge-conflict'; Scenario = 'merge-conflict'; TimeoutSec = 1500
-       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'neoforge' 'b')) },
+       Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'forge' 'b')) },
     # B's lists of changes are gone: its session is saved as a separate world, A's world is not touched.
     @{ Id = 'merge-too-old'; Scenario = 'merge-too-old'; TimeoutSec = 1500
-       Roles = @((New-Role 'a' 'neoforge' 'a'), (New-Role 'b' 'fabric' 'b')) }
+       Roles = @((New-Role 'a' 'forge' 'a'), (New-Role 'b' 'fabric' 'b')) }
 )
 
 # Measurements, not gates: run by name only, never by "all".
@@ -272,7 +272,7 @@ $onlineSuites = @{
         @{ Id = 'realtime.online'; Scenario = 'realtime'; Online = $true; TimeoutSec = 900
            Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b')) },
         @{ Id = 'motion.online'; Scenario = 'motion'; Online = $true; TimeoutSec = 1200
-           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'neoforge' 'c')) }
+           Roles = @((New-Role 'a' 'fabric' 'a'), (New-Role 'b' 'fabric' 'b'), (New-Role 'c' 'forge' 'c')) }
     )
 }
 

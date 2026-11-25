@@ -22,7 +22,8 @@ public class ServerboundKeyPacketMixin {
         return Crypt.encryptUsingKey(key, bs);
     }
 
-    @Inject(method = "*(Ljava/security/PrivateKey;)[B", at = @At("HEAD"), cancellable = true, remap = false, require = 0)
+    // 1.20.1 port: Forge's Mixin 0.8.5 matched the former "*(Ljava/security/PrivateKey;)[B" against the constructor.
+    @Inject(method = "name=/^[^<].*$/ desc=/^\\(Ljava\\/security\\/PrivateKey;\\)\\[B$/", at = @At("HEAD"), cancellable = true, remap = false, require = 0)
     private void patchGetNonce(PrivateKey privateKey, CallbackInfoReturnable<byte[]> callbackInfoReturnable) {
         if (privateKey == null) {
             callbackInfoReturnable.setReturnValue(new byte[0]);

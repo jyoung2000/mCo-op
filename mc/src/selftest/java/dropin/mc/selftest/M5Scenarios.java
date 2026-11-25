@@ -143,7 +143,7 @@ final class M5Scenarios {
     private static StepRunner a(Context ctx, Mode mode) {
         Minecraft mc = ctx.mc();
         State state = new State();
-        Path world = mc.getLevelSource().getLevelPath(WORLD_ID);
+        Path world = dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), WORLD_ID);
         StepRunner together = hostA(ctx, state, Map.of(), 0)
                 .step("B has a full copy and left", 4 * PEER_TICKS, () -> ctx.sharedExists("b-left") && players(mc) == 1);
         StepRunner alone = quitToTitle(together, ctx)
@@ -323,7 +323,7 @@ final class M5Scenarios {
                     Path folder = folder(mc, state);
                     if (mode == Mode.TOO_OLD) {
                         require(split.startsWith("separate:"), "B's session became '" + split + "', expected a separate world");
-                        Path separate = mc.getLevelSource().getLevelPath(split.substring("separate:".length()));
+                        Path separate = dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), split.substring("separate:".length()));
                         require(!separate.equals(folder) && Files.isRegularFile(separate.resolve("level.dat")), separate + " is not a world");
                         require(!Files.exists(separate.resolve(CoopWorldStore.MARKER_DIR)), "the separate world is still a co-op world");
                         String far = RecordApplier.scan(separate).get(FAR_CHUNK);

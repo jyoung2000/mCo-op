@@ -57,11 +57,10 @@ public final class StatusPing {
         if (!reachable(address)) {
             return null;
         }
-        ServerData data = new ServerData("dropin", address, ServerData.Type.OTHER);
+        ServerData data = new ServerData("dropin", address, false);
         ServerStatusPinger pinger = new ServerStatusPinger();
         try {
             pinger.pingServer(data, () -> {
-            }, () -> {
             });
             long started = System.currentTimeMillis();
             long deadline = started + timeoutMillis;
@@ -81,9 +80,8 @@ public final class StatusPing {
                     return list;
                 }
                 if (second == null && System.currentTimeMillis() - started >= SECOND_TRY_MS) {
-                    second = new ServerData("dropin", address, ServerData.Type.OTHER);
+                    second = new ServerData("dropin", address, false);
                     pinger.pingServer(second, () -> {
-                    }, () -> {
                     });
                 }
                 Thread.sleep(50);

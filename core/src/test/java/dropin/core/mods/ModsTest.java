@@ -96,12 +96,7 @@ class ModsTest {
     void forgeJarsAreReadFromModsToml(@TempDir Path dir) throws IOException {
         Path mods = dir.resolve("mods");
         jar(mods.resolve("gamma.jar"), "META-INF/mods.toml",
-                "modLoader=\"javafml\"
-loaderVersion=\"[47,)\"
-[[mods]]
-modId=\"gamma\"
-version=\"3.1\"
-", "gamma");
+                "modLoader=\"javafml\"\nloaderVersion=\"[47,)\"\n[[mods]]\nmodId=\"gamma\"\nversion=\"3.1\"\n", "gamma");
         fabricJar(mods.resolve("both.jar"), "both_fabric", "1");
         List<ModManifest.Entry> found = ModScan.scan(mods, Set.of(), "forge");
         assertEquals(List.of("both.jar", "gamma.jar"), names(found));

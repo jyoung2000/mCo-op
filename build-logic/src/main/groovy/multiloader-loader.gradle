@@ -64,7 +64,7 @@ def testmodSrc = layout.buildDirectory.dir('testmods-src')
 def testmodLoader = project.name
 def generateTestmods = tasks.register('generateTestmods') {
     inputs.property('loader', testmodLoader)
-    inputs.property('revision', 2)
+    inputs.property('revision', 3)
     outputs.dir(testmodSrc)
     doLast {
         def out = testmodSrc.get().asFile
@@ -79,7 +79,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.Item;
 '''
-            def key = "ResourceKey<Item> key = ResourceKey.create(Registries.ITEM, ResourceLocation.fromNamespaceAndPath(\"${id}\", \"item\"));"
+            def key = "ResourceKey<Item> key = ResourceKey.create(Registries.ITEM, new ResourceLocation(\"${id}\", \"item\"));"
             def java
             if (testmodLoader == 'fabric') {
                 def body = n == 'z' ? 'System.setProperty("dropin.testmod.z", "loaded");'
@@ -96,13 +96,13 @@ public final class ${cls} implements net.fabricmc.api.ModInitializer {
 """
             } else {
                 def body = n == 'z' ? 'System.setProperty("dropin.testmod.z", "loaded");'
-                        : "${key}\n        bus.addListener(net.neoforged.neoforge.registries.RegisterEvent.class, event ->\n                event.register(Registries.ITEM, key.location(), () -> new Item(new Item.Properties())));"
+                        : "${key}\n        net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext.get().getModEventBus().addListener(\n                (net.minecraftforge.registries.RegisterEvent event) -> event.register(Registries.ITEM, key.location(), () -> new Item(new Item.Properties())));"
                 java = """package dropin.testmod.${n};
 
 ${itemImports}
-@net.neoforged.fml.common.Mod("${id}")
+@net.minecraftforge.fml.common.Mod("${id}")
 public final class ${cls} {
-    public ${cls}(net.neoforged.bus.api.IEventBus bus) {
+    public ${cls}() {
         ${body}
     }
 }
@@ -124,10 +124,14 @@ public final class ${cls} {
 }
 """, 'UTF-8')
             } else {
-                def meta = new File(out, "meta/${n}/META-INF/neoforge.mods.toml")
+                // Forge 1.20.1: META-INF/mods.toml, and a pack.mcmeta for the mod's (empty) resources
+                def pack = new File(out, "meta/${n}/pack.mcmeta")
+                pack.parentFile.mkdirs()
+                pack.setText('{"pack":{"description":"DropIn test mod","pack_format":15}}', 'UTF-8')
+                def meta = new File(out, "meta/${n}/META-INF/mods.toml")
                 meta.parentFile.mkdirs()
                 meta.setText("""modLoader = "javafml"
-loaderVersion = "[1,)"
+loaderVersion = "[47,)"
 license = "MIT"
 
 [[mods]]

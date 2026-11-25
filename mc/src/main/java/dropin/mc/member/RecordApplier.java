@@ -11,7 +11,6 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.storage.RegionFileStorage;
-import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
 import net.minecraft.world.level.dimension.DimensionType;
 
 import java.io.IOException;
@@ -142,13 +141,13 @@ public final class RecordApplier implements AutoCloseable {
         String id = dim + "|" + kind;
         RegionFileStorage storage = storages.get(id);
         if (storage == null) {
-            ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION, ResourceLocation.parse(dim));
+            ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION, new ResourceLocation(dim));
             Path folder = DimensionType.getStorageFolder(dimension, root).resolve(kind).normalize();
             if (!folder.startsWith(root)) {
                 throw new IOException("Refused dimension " + dim);
             }
             Files.createDirectories(folder);
-            storage = dropin.mixin.mc.RegionFileStorageAccess.dropin$create(new RegionStorageInfo(levelId, dimension, kind), folder, false);
+            storage = dropin.mixin.mc.RegionFileStorageAccess.dropin$create(folder, false);
             storages.put(id, storage);
         }
         return storage;

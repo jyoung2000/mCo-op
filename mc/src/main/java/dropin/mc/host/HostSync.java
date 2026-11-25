@@ -1286,7 +1286,7 @@ public final class HostSync implements SyncServerSession.Host {
             pace(session, bytes, devDirectRate >= 0 ? devDirectRate : rate("directRateKBps", 2048));
         }
         // Bulk transfer must not slow the game down: wait while the server is behind (below about 18 TPS).
-        for (int waited = 0; !stopping && waited < 5000 && server.getAverageTickTimeNanos() > 55_000_000L; waited += 100) {
+        for (int waited = 0; !stopping && waited < 5000 && server.getAverageTickTime() > 55.0F; waited += 100) {
             Thread.sleep(100);
         }
         peer.pipe().awaitWritable(30_000);

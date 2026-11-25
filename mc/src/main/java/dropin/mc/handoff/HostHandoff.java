@@ -4,7 +4,7 @@ import dropin.mc.DropIn;
 import dropin.mc.host.HostSync;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ConfirmScreen;
-import net.minecraft.client.gui.screens.GenericMessageScreen;
+import dropin.mc.compat.GenericMessageScreen;
 import net.minecraft.network.chat.Component;
 
 /**

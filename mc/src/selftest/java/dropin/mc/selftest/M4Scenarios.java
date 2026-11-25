@@ -307,7 +307,7 @@ final class M4Scenarios {
                 .step("block placed", SHORT_TICKS, () -> blockOnServer(mc));
         return quitToTitle(second, ctx)
                 .action("report the last checkpoint", () -> {
-                    Path file = mc.getLevelSource().getLevelPath(WORLD_ID).resolve(CoopWorldStore.MARKER_DIR).resolve("ledger.jsonl");
+                    Path file = dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), WORLD_ID).resolve(CoopWorldStore.MARKER_DIR).resolve("ledger.jsonl");
                     LedgerEntry last = Ledger.load(state.world.keys().auth(), file).last();
                     require(last != null, "A has no checkpoint");
                     DropIn.LOGGER.info("Self-test: A's second session ended on checkpoint {}", last.seq());

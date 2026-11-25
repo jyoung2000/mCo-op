@@ -4,7 +4,6 @@ import dropin.core.manifest.RecordKey;
 import dropin.core.world.CoopWorldStore;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.storage.IOWorker;
-import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -45,14 +44,19 @@ public final class ChunkStores {
     }
 
     /** Called when the game creates a chunk storage worker. */
-    public static void register(IOWorker worker, RegionStorageInfo info, Path dir) {
+    public static void register(IOWorker worker, Path dir) {
         Path folder = dir.toAbsolutePath().normalize();
         // The kind is the folder name: the storage type of region files is "chunk", not "region".
         String kind = folder.getFileName() == null ? "" : folder.getFileName().toString();
         if (!RecordKey.KINDS.contains(kind)) {
             return;
         }
-        String dim = info.dimension().location().toString();
+        // 1.20.1 port: the storage worker is not told its dimension (RegionStorageInfo came in 1.20.5), so it is
+        // read from the folder's place under the world folder.
+        String dim = dimensionOf(folder);
+        if (dim == null) {
+            return;
+        }
         Path root = worldRoot(folder, dim);
         if (root == null) {
             return;
@@ -77,6 +81,33 @@ public final class ChunkStores {
             DIRTY.computeIfAbsent(store.worldRoot(), root -> ConcurrentHashMap.newKeySet())
                     .add(RecordKey.chunk(store.dim(), store.kind(), pos.x, pos.z));
         }
+    }
+
+    /**
+     * 1.20.1 port: the dimension whose chunks {@code <world>/<storage folder>/<kind>} holds. Of the ancestors whose
+     * relative path is a dimension's storage folder ({@link RecordKey#dimensionOfFolder}), the one with a
+     * {@code level.dat} wins; without one, the deepest named storage folder (DIM-1, DIM1, dimensions/...) wins over
+     * the overworld.
+     */
+    static String dimensionOf(Path folder) {
+        Path storage = folder.getParent();
+        if (storage == null) {
+            return null;
+        }
+        String named = null;
+        for (Path root = storage; root != null && root.getNameCount() > 0; root = root.getParent()) {
+            String dim = RecordKey.dimensionOfFolder(root.relativize(storage).toString().replace('\\', '/'));
+            if (dim == null) {
+                continue;
+            }
+            if (java.nio.file.Files.isRegularFile(root.resolve("level.dat"))) {
+                return dim;
+            }
+            if (named == null && !dim.equals("minecraft:overworld")) {
+                named = dim;
+            }
+        }
+        return named != null ? named : "minecraft:overworld";
     }
 
     /**

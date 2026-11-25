@@ -161,7 +161,7 @@ final class M2Scenarios {
     /** B's folder of the world under saves/, or null while there is none. */
     static Path folder(Minecraft mc, State state) {
         String name = CoopActions.folders(mc).get(state.world.worldId());
-        return name == null ? null : mc.getLevelSource().getLevelPath(name);
+        return name == null ? null : dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), name);
     }
 
     /** True once B's copy is complete and the sync is waiting for the next checkpoint. Polled twice a second. */
@@ -187,7 +187,7 @@ final class M2Scenarios {
         Minecraft mc = ctx.mc();
         return quitToTitle(runner.step("B's copy is complete", completeTicks, () -> ctx.sharedExists("b-complete")), ctx)
                 .action("report the root", () -> {
-                    Path file = mc.getLevelSource().getLevelPath(WORLD_ID).resolve(CoopWorldStore.MARKER_DIR).resolve("ledger.jsonl");
+                    Path file = dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), WORLD_ID).resolve(CoopWorldStore.MARKER_DIR).resolve("ledger.jsonl");
                     LedgerEntry last = Ledger.load(state.world.keys().auth(), file).last();
                     require(last != null, "A has no checkpoint");
                     DropIn.LOGGER.info("Self-test: A ended on checkpoint {} with root {}", last.seq(), last.root());
@@ -243,11 +243,11 @@ final class M2Scenarios {
     /** B is a plain client here: a status ping and an ordinary login by address, no invite and no world sync. */
     private static StepRunner snifferB(Context ctx) {
         Minecraft mc = ctx.mc();
-        ServerData data = new ServerData("dropin-selftest", ctx.localAddress(), ServerData.Type.OTHER);
+        ServerData data = new ServerData("dropin-selftest", ctx.localAddress(), false);
         ServerStatusPinger pinger = new ServerStatusPinger();
         return base(ctx)
                 .step("A is hosting", STARTUP_TICKS + WORLD_TICKS + PEER_TICKS, () -> ctx.sharedExists(A_HOSTING))
-                .action("send status ping", () -> pinger.pingServer(data, () -> {}, () -> {}))
+                .action("send status ping", () -> pinger.pingServer(data, () -> {}))
                 .step("status response", SHORT_TICKS, () -> {
                     pinger.tick();
                     return data.players != null;
@@ -257,7 +257,7 @@ final class M2Scenarios {
                     pinger.removeAll();
                 })
                 .action("connect", () -> ConnectScreen.startConnecting(new TitleScreen(), mc,
-                        ServerAddress.parseString(ctx.localAddress()), data, false, null))
+                        ServerAddress.parseString(ctx.localAddress()), data, false))
                 .step("joined world", SHORT_TICKS, () -> joinedRemote(mc))
                 .step("sees A", SHORT_TICKS, () -> {
                     failIfDisconnected(mc);

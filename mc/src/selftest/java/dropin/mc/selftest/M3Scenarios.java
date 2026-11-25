@@ -88,7 +88,7 @@ final class M3Scenarios {
 
     static boolean marked(Player player, Mark mark) {
         Predicate<ItemStack> isItem = stack -> stack.is(mark.item());
-        return player != null && player.getInventory().contains(isItem)
+        return player != null && Scenarios.has(player.getInventory(), isItem)
                 && Math.abs(player.getX() - mark.x()) < 2 && Math.abs(player.getZ() - mark.z()) < 2;
     }
 
@@ -125,7 +125,7 @@ final class M3Scenarios {
                     require(standing != null && b.equals(standing.successorUuid()), "before quitting, the successor was "
                             + (standing == null ? "not looked for" : standing.successorUuid()) + ", expected B " + b);
                     require(b.equals(HostSync.lastHandedTo()), "A handed the world to '" + HostSync.lastHandedTo() + "', expected B " + b);
-                    Path file = mc.getLevelSource().getLevelPath(WORLD_ID).resolve(CoopWorldStore.MARKER_DIR).resolve("ledger.jsonl");
+                    Path file = dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), WORLD_ID).resolve(CoopWorldStore.MARKER_DIR).resolve("ledger.jsonl");
                     LedgerEntry last = Ledger.load(state.world.keys().auth(), file).last();
                     require(last != null, "A has no checkpoint");
                     require(last.root().equals(HostSync.lastFinalRoot()), "the ledger ends on root " + last.root()

@@ -14,7 +14,7 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.AlertScreen;
 import net.minecraft.client.gui.screens.FaviconTexture;
-import net.minecraft.client.gui.screens.GenericMessageScreen;
+import dropin.mc.compat.GenericMessageScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.worldselection.CreateWorldScreen;
 import net.minecraft.network.chat.CommonComponents;
@@ -48,8 +48,8 @@ public class CoopWorldsScreen extends Screen {
     private static final int AQUA = 0xFF55FFFF;
     private static final int GREEN = 0xFF55FF55;
     private static final int GRAY = 0xFFA0A0A0;
-    private static final ResourceLocation JOIN_SPRITE = ResourceLocation.withDefaultNamespace("world_list/join");
-    private static final ResourceLocation JOIN_HIGHLIGHTED_SPRITE = ResourceLocation.withDefaultNamespace("world_list/join_highlighted");
+    // 1.20.1 port: the world list's join arrow is a region of this texture (no GUI sprites in this version).
+    private static final ResourceLocation WORLD_SELECTION = new ResourceLocation("textures/gui/world_selection.png");
     /** The Discord logo in pixels: '#' Discord blurple, 'o' white. */
     private static final String[] DISCORD_ICON = {
             "...#....#...",
@@ -149,7 +149,7 @@ public class CoopWorldsScreen extends Screen {
         CoopStatus.Status status = CoopStatus.of(world.worldId());
         boolean hasCopy = folder != null;
         Component sync = dropin.mc.member.SyncClient.statusLine(world.worldId(),
-                hasCopy ? mc.getLevelSource().getLevelPath(folder) : null);
+                hasCopy ? dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), folder) : null);
         if (sync != null) {
             return status.kind() == CoopStatus.Kind.PLAYING
                     ? Component.translatable(K + "status.playing", status.hostName()).append(" — ").append(sync) : sync;
@@ -222,7 +222,7 @@ public class CoopWorldsScreen extends Screen {
     /** The world's folder under saves/, or null if this PC has no copy of it. */
     private Path folderOf(String worldId) {
         String name = folders.get(worldId);
-        return name == null ? null : this.minecraft.getLevelSource().getLevelPath(name);
+        return name == null ? null : dropin.mc.compat.Compat.levelPath(this.minecraft.getLevelSource(), name);
     }
 
     private void turnPage(int delta, int pages) {
@@ -346,7 +346,7 @@ public class CoopWorldsScreen extends Screen {
         }
         String folder = folders.get(world.worldId());
         if (folder != null) {
-            this.minecraft.createWorldOpenFlows().openWorld(folder, () -> this.minecraft.setScreen(this));
+            this.minecraft.createWorldOpenFlows().loadLevel(this, folder);
             return;
         }
         // First join (DESIGN 4.4): there is nothing to open yet, so it needs a live host.
@@ -500,7 +500,7 @@ public class CoopWorldsScreen extends Screen {
             if (this.isHovered()) {
                 boolean onIcon = mouseX < x + 4 + ICON;
                 graphics.fill(x + 4, y + 7, x + 4 + ICON, y + 7 + ICON, -1601138544);
-                graphics.blitSprite(onIcon ? JOIN_HIGHLIGHTED_SPRITE : JOIN_SPRITE, x + 4, y + 7, ICON, ICON);
+                graphics.blit(WORLD_SELECTION, x + 4, y + 7, 0.0F, onIcon ? 32.0F : 0.0F, ICON, ICON, 256, 256);
             }
             int textX = x + 4 + ICON + 5;
             int right = x + this.width - 4;

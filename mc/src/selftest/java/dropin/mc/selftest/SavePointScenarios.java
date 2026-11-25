@@ -62,7 +62,7 @@ final class SavePointScenarios {
     }
 
     private static Path folder(Minecraft mc) {
-        return mc.getLevelSource().getLevelPath(WORLD_ID);
+        return dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), WORLD_ID);
     }
 
     private static void serverCommand(Minecraft mc, String command) {
@@ -194,10 +194,10 @@ final class SavePointScenarios {
                     Path folder = folder(mc);
                     Point point = SavePointActions.store(folder).find("p10").orElseThrow();
                     solo[0] = SavePointActions.makeSinglePlayer(mc, state.world, folder, point);
-                    Path made = mc.getLevelSource().getLevelPath(solo[0]);
+                    Path made = dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), solo[0]);
                     require(Files.isRegularFile(made.resolve("level.dat")), "the new world has no level.dat");
                     require(!Files.exists(made.resolve(CoopWorldStore.MARKER_DIR)), "the new world is linked to the co-op world");
-                    mc.createWorldOpenFlows().openWorld(solo[0], () -> { });
+                    mc.createWorldOpenFlows().loadLevel(mc.screen, solo[0]);
                 })
                 .step("the single-player world opens and has the block", WORLD_TICKS, () -> inWorld(mc) && mc.getSingleplayerServer() != null
                         && HostSync.current() == null

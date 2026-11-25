@@ -40,7 +40,7 @@ public final class ChunkBytes {
     }
 
     public static CompoundTag parse(byte[] bytes) throws IOException {
-        return NbtIo.read(new DataInputStream(new ByteArrayInputStream(bytes)), NbtAccounter.unlimitedHeap());
+        return NbtIo.read(new DataInputStream(new ByteArrayInputStream(bytes)), NbtAccounter.UNLIMITED);
     }
 
     private static void payload(Tag tag, DataOutput out) throws IOException {

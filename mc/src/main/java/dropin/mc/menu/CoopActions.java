@@ -77,7 +77,7 @@ public final class CoopActions {
     /** True if the save folder is a co-op world on this PC (badge in the Singleplayer list). */
     public static boolean isCoopLevel(Minecraft mc, String levelId) {
         try {
-            return CoopWorlds.forFolder(mc.getLevelSource().getLevelPath(levelId)).isPresent();
+            return CoopWorlds.forFolder(dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), levelId)).isPresent();
         } catch (RuntimeException e) {
             return false;
         }
@@ -88,7 +88,7 @@ public final class CoopActions {
     /** Import from saves (DESIGN 4.4): the three checks in order, the optional backup, then the key files. */
     public static Outcome importFromSaves(Minecraft mc, String levelId, boolean backup) {
         LevelStorageSource source = mc.getLevelSource();
-        Path folder = source.getLevelPath(levelId);
+        Path folder = dropin.mc.compat.Compat.levelPath(source, levelId);
         if (!Files.isRegularFile(folder.resolve("level.dat"))) {
             return Outcome.fail("import.no_level_dat", levelId);
         }
@@ -327,7 +327,7 @@ public final class CoopActions {
     public static Outcome remove(Minecraft mc, CoopWorld world) {
         try {
             String folder = folders(mc).get(world.worldId());
-            CoopWorlds.store().remove(world.worldId(), folder == null ? null : mc.getLevelSource().getLevelPath(folder));
+            CoopWorlds.store().remove(world.worldId(), folder == null ? null : dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), folder));
             return Outcome.ok(world, "remove.done", world.name());
         } catch (IOException | RuntimeException e) {
             DropIn.LOGGER.error("Could not remove co-op world {}", world.worldId(), e);

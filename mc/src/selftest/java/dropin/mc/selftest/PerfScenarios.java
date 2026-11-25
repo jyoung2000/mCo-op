@@ -86,7 +86,7 @@ final class PerfScenarios {
             }
             if (tick != lastTick) {
                 // Tick n is stored at n % 100 when it ends; tick `tick` may still be running.
-                long[] times = server.getTickTimesNanos();
+                long[] times = server.tickTimes;
                 for (int t = Math.max(lastTick, tick - 100); t < tick; t++) {
                     tickNanos.add(times[t % 100]);
                 }
@@ -209,8 +209,7 @@ final class PerfScenarios {
                             WorldDataConfiguration.DEFAULT);
                     mc.createWorldOpenFlows().createFreshLevel(WORLD_ID, settings, new WorldOptions(Scenarios.SEED, true, false),
                             registries -> registries.lookupOrThrow(Registries.WORLD_PRESET)
-                                    .getOrThrow(WorldPresets.NORMAL).value().createWorldDimensions(),
-                            mc.screen);
+                                    .getOrThrow(WorldPresets.NORMAL).value().createWorldDimensions());
                 })
                 .step("world loaded", 2 * WORLD_TICKS, () -> inWorld(mc) && mc.getSingleplayerServer() != null)
                 .action("force-load 512 chunks", () -> {

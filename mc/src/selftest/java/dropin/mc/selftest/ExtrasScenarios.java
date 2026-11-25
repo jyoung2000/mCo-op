@@ -55,7 +55,7 @@ final class ExtrasScenarios {
         // Both members count as "over the internet" here, so the cap applies although they are on this PC.
         return hostA(ctx, state, Map.of("dropin.dev.forcePath", "internet", "dropin.dev.directRateKBps", Integer.toString(CAP_KBPS)), 450)
                 .action("a mod's files appear in the world's root", () -> {
-                    Path root = mc.getLevelSource().getLevelPath(WORLD_ID);
+                    Path root = dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), WORLD_ID);
                     Files.createDirectories(root.resolve(CONFIG).getParent());
                     Files.createDirectories(root.resolve(STATE).getParent());
                     Files.writeString(root.resolve(CONFIG), CONFIG_TEXT, StandardCharsets.UTF_8);

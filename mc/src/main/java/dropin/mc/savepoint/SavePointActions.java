@@ -13,7 +13,7 @@ import dropin.mc.handoff.HostHandoff;
 import dropin.mc.host.HostSync;
 import dropin.mc.member.RecordApplier;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.GenericMessageScreen;
+import dropin.mc.compat.GenericMessageScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.network.chat.Component;
@@ -190,10 +190,10 @@ public final class SavePointActions {
         SavePoints points = store(folder);
         String base = fileName(world.name()) + "-" + point.name();
         String name = base;
-        for (int n = 2; Files.exists(mc.getLevelSource().getLevelPath(name)); n++) {
+        for (int n = 2; Files.exists(dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), name)); n++) {
             name = base + "-" + n;
         }
-        Path target = mc.getLevelSource().getLevelPath(name);
+        Path target = dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), name);
         Files.createDirectories(target);
         Manifest manifest = points.manifest(point);
         try (RecordApplier files = new RecordApplier(target)) {

@@ -750,3 +750,63 @@ Decisions (flag to the owner; the design describes 26.x):
 - `PlayerFaceRenderer: public static void draw(GuiGraphics, PlayerSkin, int, int, int)`
 - `Attributes.MAX_HEALTH` is registered as `"generic.max_health"`; `StateHolder.NAME_TAG = "Name"` (chunk palette entries are
   `{Name, Properties}`). Self-test commands and readers use these.
+
+## Port to Minecraft 1.20.1 (branch `port/1.20.1`): 2026-11-25
+
+Forge 1.20.1 (47.4.29) + Fabric (loader 0.20.1, API 0.92.6+1.20.1), one jar `MCo-op-<version>+mc1.20.1.jar`. Rebased on
+`port/1.21.1` (bb6d1c5), so the legacy world layout, `MinecraftServerPacketsMixin`, `ChunkMapSaveMixin` and
+`HostSync.closeMemberConnections` come from there. `core/` is unchanged except `ModScan` (reads `META-INF/mods.toml` for loader
+`forge`; test `forgeJarsAreReadFromModsToml`).
+
+Decisions (flag to the owner):
+- **Forge, not NeoForge** (NeoForge has no 1.20.1 line worth targeting). Module `forge/` (was `neoforge/`), ModDevGradle
+  `net.neoforged.moddev.legacyforge` 2.0.147, `mcpVersion = 1.20.1`. Forge runs SRG names: the Forge copy is reobfuscated
+  (`reobfJar`) with a mixin refmap `dropin.forge.refmap.json`, relocated to `dropin.fg.*` in the merged jar; Forge finds the
+  mixin config through the manifest `MixinConfigs: dropin.forge.mixins.json`. MixinExtras is nested for Forge
+  (`META-INF/jarjar/mixinextras-forge-0.5.3.jar`); Fabric loader ships its own.
+- Self-test loader name `neoforge` is `forge` in `scripts/selftest.ps1` (scenario ids such as `lan-join.fabric-forge`).
+- Test mods (m2b) for Forge: `@net.minecraftforge.fml.common.Mod`, items through `RegisterEvent` on the mod bus,
+  `META-INF/mods.toml` + `pack.mcmeta`.
+- `DirsUtilMixin` gets `remap = false` (not a Minecraft class; the SRG annotation processor refused it). `tunnel` hook.
+- `ServerCommonPacketListenerImplAccessor` -> `ServerGamePacketListenerImplAccessor` (1.20.1 has no common listener; the
+  `connection` field is on `ServerGamePacketListenerImpl`). `tunnel` hook (used by `/e4mc` diag only).
+
+1.20.1 API differences handled in `mc` (all through `dropin.mc.compat` where shared):
+- No `RegionStorageInfo`: `protected IOWorker(Path, boolean, String)`; `RegionFileStorage(Path, boolean)` (package-private,
+  invoker). `ChunkStores.dimensionOf(folder)` reads the dimension from the folder's place under the world folder
+  (`RecordKey.dimensionOfFolder`; an ancestor with `level.dat` wins, else the deepest DIM-1/DIM1/dimensions folder).
+- `GenericMessageScreen` -> `GenericDirtMessageScreen` (`dropin.mc.compat.GenericMessageScreen` subclass).
+- `PauseScreen: private void onDisconnect()` does `level.disconnect(); clearLevel(screen)`; `Minecraft.clearLevel(Screen)`
+  and `isConnectedToRealms()` (read before leaving) replace `disconnect(...)` / `ServerData.isRealm()` in `Compat`.
+- `LevelStorageSource.getLevelPath(String)` is private: `Compat.levelPath` = `getBaseDir().resolve(id)`.
+- `WorldOpenFlows.openWorld(String, Runnable)` does not exist: `public void loadLevel(Screen, String)`; `Compat.openWorld`
+  passes a screen that runs the cancel action when shown.
+- No `ClientCommonPacketListenerImpl.createDisconnectScreen`: `ClientPacketListener.onDisconnect(Component)` builds a
+  `DisconnectedScreen` and calls `Minecraft.setScreen`; `ClientPacketListenerDisconnectMixin` changes that argument
+  (`private final ServerData serverData`).
+- Skins: no `PlayerSkin`; `SkinManager.registerSkins(GameProfile, SkinTextureCallback, boolean)`,
+  `PlayerFaceRenderer.draw(GuiGraphics, ResourceLocation, int, int, int)`, `DefaultPlayerSkin.getDefaultSkin(UUID)`.
+- `new ServerData(String, String, boolean lan)`; `ServerStatusPinger.pingServer(ServerData, Runnable)`;
+  `ConnectScreen.startConnecting(Screen, Minecraft, ServerAddress, ServerData, boolean)`.
+- NBT: `NbtIo.readCompressed(File)`, `writeCompressed(CompoundTag, File)`, `read(DataInput, NbtAccounter)`,
+  `NbtAccounter.UNLIMITED`. `new ResourceLocation(...)` (no `parse`/`withDefaultNamespace`/`fromNamespaceAndPath`).
+- `MinecraftServer.getAverageTickTime()` (float ms; 55.0F = the old 55 ms limit); `public final long[] tickTimes`.
+- No GUI sprites: the world list's join arrow is `textures/gui/world_selection.png` at (0, 0|32), 32x32 of 256x256.
+- `Checkbox(int, int, int, int, Component, boolean)` and `selected()`; no `Checkbox.builder`. No no-arg
+  `Screen.setInitialFocus()`; `setInitialFocus(GuiEventListener)` is called from `init()`.
+- `Util.getPlatform().openFile(File)`. `Inventory.contains(Predicate)` does not exist (self-tests: `Scenarios.has`).
+- `MerchantOffer(ItemStack, ItemStack, ItemStack, int, int, int, float)` (no `ItemCost`).
+- `WorldOpenFlows.createFreshLevel(String, LevelSettings, WorldOptions, Function<RegistryAccess, WorldDimensions>)`.
+
+Rechecked in the 1.20.1 sources (NeoForm/MCP `vanilla-1.20.1-sources.jar`), unchanged from 1.21.1:
+- `MinecraftServer: public void executeIfPossible(Runnable)` throws `RejectedExecutionException("Server already shutting down")`
+  when `isStopped()`; `runServer` finally: `this.stopped = true; this.stopServer();`
+- `Connection.channelRead0`: `catch (RejectedExecutionException) { this.disconnect(Component.translatable("multiplayer.disconnect.server_shutdown")); }`
+- `PacketUtils.ensureRunningOnSameThread(..., BlockableEventLoop)` calls `executeIfPossible`.
+- `ChunkMap: private final Long2LongMap chunkSaveCooldowns`; `protected void saveAllChunks(boolean)`; `saveChunkIfNeeded`
+  puts `now + 10000L`.
+- `PlayerList: public CompoundTag load(ServerPlayer)` (not `Optional`), reads `getWorldData().getLoadedPlayerTag()`.
+- `IntegratedServer: public boolean publishServer(@Nullable GameType, boolean, int)`; `public GameType getForcedGameType()`
+  (published -> published or world game type; no force flag, so `IntegratedServerGameModeMixin` stays).
+- `TitleScreen: private void createNormalMenuOptions(int, int)`; `MinecraftServer: public int getProfilePermissions(GameProfile)`;
+  `public void setPvpAllowed(boolean)`; `DimensionType: public static Path getStorageFolder(ResourceKey<Level>, Path)`.

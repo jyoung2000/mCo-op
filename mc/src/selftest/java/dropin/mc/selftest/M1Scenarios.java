@@ -130,8 +130,7 @@ final class M1Scenarios {
                             WorldDataConfiguration.DEFAULT);
                     mc.createWorldOpenFlows().createFreshLevel(WORLD_ID, settings, new WorldOptions(Scenarios.SEED, false, false),
                             registries -> registries.lookupOrThrow(Registries.WORLD_PRESET)
-                                    .getOrThrow(WorldPresets.FLAT).value().createWorldDimensions(),
-                            mc.screen);
+                                    .getOrThrow(WorldPresets.FLAT).value().createWorldDimensions());
                 })
                 .step("world loaded", WORLD_TICKS, () -> inWorld(mc) && mc.getSingleplayerServer() != null);
     }
@@ -259,7 +258,7 @@ final class M1Scenarios {
         return runner
                 .action("files and invite", () -> {
                     CoopWorld world = state.world;
-                    Path folder = mc.getLevelSource().getLevelPath(WORLD_ID);
+                    Path folder = dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), WORLD_ID);
                     require(Files.isRegularFile(folder.resolve("dropin/world.json")), "no dropin/world.json");
                     require(CoopWorldStore.readMarker(folder).orElse("").equals(world.worldId()), "marker names another world");
                     require(Files.isRegularFile(worldsDir().resolve(world.worldId() + ".json")), "no key file");
@@ -301,7 +300,7 @@ final class M1Scenarios {
         Minecraft mc = ctx.mc();
         Path zip = ctx.sharedDir().resolve("zipped-world.zip");
         return quitToTitle(createWorld(base(ctx), ctx), ctx)
-                .action("zip the world", () -> zipTree(mc.getLevelSource().getLevelPath(WORLD_ID), zip))
+                .action("zip the world", () -> zipTree(dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), WORLD_ID), zip))
                 .action("open the Co-op Worlds screen", () -> mc.setScreen(new CoopWorldsScreen(new TitleScreen())))
                 .action("drop the zip on it", () -> mc.screen.onFilesDrop(List.of(zip)))
                 .step("invite is shown", SHORT_TICKS, () -> mc.screen instanceof InviteScreen)
@@ -311,7 +310,7 @@ final class M1Scenarios {
                     require(Files.isRegularFile(folder.resolve("level.dat")), "the zip was not extracted into saves/zipped-world");
                     require(CoopWorldStore.readMarker(folder).orElse("").equals(world.worldId()), "the extracted world is not marked");
                     require(CoopActions.folders(mc).getOrDefault(world.worldId(), "").equals("zipped-world"), "world is not listed with its folder");
-                    require(CoopWorldStore.readMarker(mc.getLevelSource().getLevelPath(WORLD_ID)).isEmpty(), "the original world was changed");
+                    require(CoopWorldStore.readMarker(dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), WORLD_ID)).isEmpty(), "the original world was changed");
                 });
     }
 
@@ -322,7 +321,7 @@ final class M1Scenarios {
                 .action("an open world is refused", () -> {
                     CoopActions.Outcome outcome = CoopActions.importFromSaves(mc, WORLD_ID, true);
                     expectRefused(outcome, "import.open");
-                    require(CoopWorldStore.readMarker(mc.getLevelSource().getLevelPath(WORLD_ID)).isEmpty(), "an open world was marked");
+                    require(CoopWorldStore.readMarker(dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), WORLD_ID)).isEmpty(), "an open world was marked");
                 });
         return importWorld(quitToTitle(runner, ctx), ctx, state)
                 .action("an already co-op world is refused", () ->
@@ -357,12 +356,12 @@ final class M1Scenarios {
                     CoopActions.Outcome outcome = CoopActions.remove(mc, state.world);
                     require(outcome.ok(), "remove failed: " + outcome.message().getString());
                     String id = state.world.worldId();
-                    require(!Files.exists(mc.getLevelSource().getLevelPath(WORLD_ID).resolve("dropin")), "dropin/ is still there");
+                    require(!Files.exists(dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), WORLD_ID).resolve("dropin")), "dropin/ is still there");
                     require(!Files.exists(worldsDir().resolve(id + ".json")), "the key file is still there");
                     require(!Files.exists(worldsDir().resolve(id + ".owner.key")), "the owner key is still there");
                     require(CoopWorlds.store().list().isEmpty(), "the world is still in the co-op list");
                 })
-                .action("open it from singleplayer", () -> mc.createWorldOpenFlows().openWorld(WORLD_ID, () -> {}))
+                .action("open it from singleplayer", () -> mc.createWorldOpenFlows().loadLevel(mc.screen, WORLD_ID))
                 .step("world loaded", WORLD_TICKS, () -> inWorld(mc) && mc.getSingleplayerServer() != null)
                 .action("it is plain singleplayer", () -> {
                     IntegratedServer server = mc.getSingleplayerServer();
@@ -411,7 +410,7 @@ final class M1Scenarios {
         Minecraft mc = ctx.mc();
         return importWorld(quitToTitle(createWorld(base(ctx), ctx), ctx), ctx, state)
                 .action("share invite and world copy", () -> {
-                    copyTree(mc.getLevelSource().getLevelPath(WORLD_ID), ctx.sharedDir().resolve(WORLD_COPY));
+                    copyTree(dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), WORLD_ID), ctx.sharedDir().resolve(WORLD_COPY));
                     ctx.writeShared(INVITE_FILE, state.world.invite().encode());
                     ctx.writeShared(WORLD_READY, "ok");
                 });
@@ -540,7 +539,7 @@ final class M1Scenarios {
                 .step("world closed", WORLD_TICKS, () -> mc.getSingleplayerServer() == null && mc.level == null)
                 .action("title screen", () -> mc.setScreen(new TitleScreen()))
                 .action("copy the world folder to B", () -> {
-                    copyTree(mc.getLevelSource().getLevelPath(WORLD_ID), ctx.sharedDir().resolve("world-copy-2"));
+                    copyTree(dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), WORLD_ID), ctx.sharedDir().resolve("world-copy-2"));
                     ctx.writeShared("swap-ready", "ok");
                 })
                 .step("B is hosting", WORLD_TICKS + PEER_TICKS, () -> ctx.sharedExists("b-hosting"))
@@ -574,7 +573,7 @@ final class M1Scenarios {
                 .action("title screen", () -> mc.setScreen(new TitleScreen()))
                 .step("A copied the world folder", WORLD_TICKS, () -> ctx.sharedExists("swap-ready"))
                 .action("replace the local copy", () -> {
-                    Path local = mc.getLevelSource().getLevelPath(CoopActions.folders(mc).get(state.world.worldId()));
+                    Path local = dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), CoopActions.folders(mc).get(state.world.worldId()));
                     deleteTree(local);
                     copyTree(ctx.sharedDir().resolve("world-copy-2"), local);
                 })
@@ -592,7 +591,7 @@ final class M1Scenarios {
 
     private static boolean has(Minecraft mc, Item item) {
         Predicate<ItemStack> isItem = stack -> stack.is(item);
-        return mc.player != null && mc.player.getInventory().contains(isItem);
+        return mc.player != null && Scenarios.has(mc.player.getInventory(), isItem);
     }
 
     private static boolean near(Minecraft mc, double x, double z) {

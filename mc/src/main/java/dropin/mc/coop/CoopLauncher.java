@@ -10,7 +10,7 @@ import dropin.mc.menu.CoopStatus;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.AlertScreen;
 import net.minecraft.client.gui.screens.ConnectScreen;
-import net.minecraft.client.gui.screens.GenericMessageScreen;
+import dropin.mc.compat.GenericMessageScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.worldselection.WorldOpenFlows;
 import net.minecraft.client.multiplayer.ServerData;
@@ -43,7 +43,7 @@ public final class CoopLauncher {
             return false;
         }
         Minecraft mc = Minecraft.getInstance();
-        Optional<CoopWorld> world = CoopWorlds.forFolder(mc.getLevelSource().getLevelPath(levelId));
+        Optional<CoopWorld> world = CoopWorlds.forFolder(dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), levelId));
         if (world.isEmpty()) {
             return false;
         }
@@ -114,7 +114,7 @@ public final class CoopLauncher {
         String uuid = mc.getUser().getProfileId().toString();
         String name = mc.getUser().getName();
         Rendezvous rendezvous = CoopWorlds.rendezvous(world);
-        java.nio.file.Path folder = mc.getLevelSource().getLevelPath(levelId);
+        java.nio.file.Path folder = dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), levelId);
         if (SyncClient.incomplete(folder)) {
             // DESIGN 4.7: an unfinished download is not a world yet. It can only be continued from a live host.
             CoopStatus.Status status = CoopStatus.lookup(world);
@@ -132,7 +132,7 @@ public final class CoopLauncher {
         }
         // DESIGN 4.14: the owner's mods and datapacks must be what the signed policy says before anyone plays.
         if (!dropin.mc.policy.HostGate.ownerReady(mc, world, folder,
-                () -> mc.execute(() -> flows.openWorld(levelId, onCancel)), onCancel)) {
+                () -> mc.execute(() -> dropin.mc.compat.Compat.openWorld(mc, flows, levelId, onCancel)), onCancel)) {
             return;
         }
         Env env = new Env();
@@ -216,7 +216,7 @@ public final class CoopLauncher {
                 HostSession.start(mc, world, rendezvous, host.sess(), uuid, name);
                 passThrough = true;
                 try {
-                    flows.openWorld(levelId, onCancel);
+                    dropin.mc.compat.Compat.openWorld(mc, flows, levelId, onCancel);
                 } finally {
                     passThrough = false;
                 }
@@ -257,7 +257,7 @@ public final class CoopLauncher {
             HostSession.start(mc, world, CoopWorlds.rendezvous(world), sess, uuid, name);
             passThrough = true;
             try {
-                mc.createWorldOpenFlows().openWorld(levelId, onCancel);
+                dropin.mc.compat.Compat.openWorld(mc, mc.createWorldOpenFlows(), levelId, onCancel);
             } finally {
                 passThrough = false;
             }

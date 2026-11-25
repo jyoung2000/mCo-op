@@ -8,7 +8,7 @@ import dropin.mc.DropIn;
 import dropin.mc.coop.CoopLauncher;
 import dropin.mc.member.SyncClient;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.GenericMessageScreen;
+import dropin.mc.compat.GenericMessageScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.network.chat.Component;

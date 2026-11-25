@@ -310,10 +310,10 @@ public final class ColdMerge {
         String display = world.name() + " (" + player + "'s branch)";
         String base = safeName(display);
         String folderName = base;
-        for (int n = 2; Files.exists(mc.getLevelSource().getLevelPath(folderName)); n++) {
+        for (int n = 2; Files.exists(dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), folderName)); n++) {
             folderName = base + " " + n;
         }
-        Path target = mc.getLevelSource().getLevelPath(folderName);
+        Path target = dropin.mc.compat.Compat.levelPath(mc.getLevelSource(), folderName);
         Files.createDirectories(target);
         try (RecordApplier files = new RecordApplier(target)) {
             for (String key : manifest.keys()) {
@@ -327,9 +327,9 @@ public final class ColdMerge {
         Path level = target.resolve("level.dat");
         if (Files.isRegularFile(level)) {
             try {
-                CompoundTag root = NbtIo.readCompressed(level, NbtAccounter.unlimitedHeap());
+                CompoundTag root = dropin.mc.compat.Compat.readCompressed(level);
                 root.getCompound("Data").putString("LevelName", display);
-                NbtIo.writeCompressed(root, level);
+                dropin.mc.compat.Compat.writeCompressed(root, level);
             } catch (IOException | RuntimeException e) {
                 DropIn.LOGGER.warn("Could not name the separate world '{}'; it keeps the name of '{}'", folderName, world.name(), e);
             }

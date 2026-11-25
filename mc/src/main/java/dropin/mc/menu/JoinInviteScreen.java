@@ -68,10 +68,11 @@ public class JoinInviteScreen extends Screen {
             changed(typed);
         }
         joinButton.active = candidate != null;
+        focusCode();
     }
 
-    @Override
-    protected void setInitialFocus() {
+    // 1.20.1 port: Screen has no no-argument setInitialFocus() to override here; init() calls this.
+    private void focusCode() {
         this.setInitialFocus(codeBox);
     }
 

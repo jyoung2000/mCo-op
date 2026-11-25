@@ -79,7 +79,7 @@ public class WorldSettingsScreen extends Screen {
     private void open(Path dir) {
         try {
             java.nio.file.Files.createDirectories(dir);
-            net.minecraft.Util.getPlatform().openPath(dir);
+            net.minecraft.Util.getPlatform().openFile(dir.toFile());
         } catch (java.io.IOException | RuntimeException e) {
             notice = Component.literal(String.valueOf(e.getMessage()));
         }

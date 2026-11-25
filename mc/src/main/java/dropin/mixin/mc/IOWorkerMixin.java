@@ -4,7 +4,6 @@ import dropin.mc.host.ChunkStores;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.storage.IOWorker;
-import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -16,13 +15,13 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * DESIGN 4.5 dirty tracking: region, entities and POI each write through one {@code IOWorker}, and
- * {@code store(ChunkPos, CompoundTag)} is its only write method in 1.21.1, so this is the one choke point.
+ * {@code store(ChunkPos, CompoundTag)} is its only write method in 1.20.1 as in 1.21.1, so this is the one choke point.
  */
 @Mixin(IOWorker.class)
 public abstract class IOWorkerMixin {
     @Inject(method = "<init>", at = @At("TAIL"))
-    private void dropin$created(RegionStorageInfo info, Path dir, boolean sync, CallbackInfo ci) {
-        ChunkStores.register((IOWorker) (Object) this, info, dir);
+    private void dropin$created(Path dir, boolean sync, String name, CallbackInfo ci) {
+        ChunkStores.register((IOWorker) (Object) this, dir);
     }
 
     // After the write was queued, so a checkpoint that reads the chunk back always sees it.

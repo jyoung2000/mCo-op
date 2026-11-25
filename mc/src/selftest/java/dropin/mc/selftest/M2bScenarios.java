@@ -140,7 +140,7 @@ final class M2bScenarios {
     }
 
     static boolean itemExists(String id) {
-        return BuiltInRegistries.ITEM.containsKey(ResourceLocation.parse(id));
+        return BuiltInRegistries.ITEM.containsKey(new ResourceLocation(id));
     }
 
     static boolean zLoaded() {
@@ -167,8 +167,7 @@ final class M2bScenarios {
     }
 
     private static boolean holds(Minecraft mc, String itemId) {
-        return mc.player != null && mc.player.getInventory()
-                .contains(stack -> BuiltInRegistries.ITEM.getKey(stack.getItem()).toString().equals(itemId));
+        return mc.player != null && Scenarios.has(mc.player.getInventory(), stack -> BuiltInRegistries.ITEM.getKey(stack.getItem()).toString().equals(itemId));
     }
 
     private static void command(Minecraft mc, String command) {

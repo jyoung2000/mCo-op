@@ -5,7 +5,7 @@ import dropin.mc.DropIn;
 import dropin.mc.coop.CoopLauncher;
 import dropin.mc.menu.CoopStatus;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.screens.GenericMessageScreen;
+import dropin.mc.compat.GenericMessageScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
