@@ -153,8 +153,8 @@ final class IntegrityScenarios {
         run(server, "setblock 21 100 20 minecraft:deepslate_emerald_ore");
         run(server, "setblock 22 100 20 minecraft:ancient_debris");
         run(server, "fill 24 100 20 27 103 23 minecraft:iron_ore");
-        run(server, "setblock 20 101 21 minecraft:chest{Items:[{Slot:0b,id:\"minecraft:raw_gold\",count:17},"
-                + "{Slot:5b,id:\"minecraft:redstone\",count:40}]}");
+        run(server, "setblock 20 101 21 minecraft:chest{Items:[{Slot:0b,id:\"minecraft:raw_gold\",Count:17b},"
+                + "{Slot:5b,id:\"minecraft:redstone\",Count:40b}]}");
         Villager villager = spawn(level, EntityType.VILLAGER, VILLAGER, 20.5, 24.5, 13.0f);
         villager.getInventory().addItem(new ItemStack(Items.BREAD, 5));
         villager.getInventory().addItem(new ItemStack(Items.WHEAT_SEEDS, 12));
@@ -167,6 +167,8 @@ final class IntegrityScenarios {
         run(server, "effect give DevA minecraft:speed infinite 1");
         run(server, "give DevA minecraft:netherite_ingot 2");
         run(server, "attribute DevB minecraft:generic.max_health base set 14");
+        // 1.20.1 port: a lower max health does not clamp the current health here (1.20.5+ does); same state as there
+        server.getPlayerList().getPlayerByName("DevB").setHealth(14.0f);
         run(server, "effect give DevB minecraft:strength infinite 0");
         run(server, "effect give DevC minecraft:haste infinite 2");
         run(server, "xp set DevC 7 levels");
@@ -345,7 +347,7 @@ final class IntegrityScenarios {
             out.append(p).append("health = ").append(dropin.mc.compat.Nbt.floatOr(player, "Health", -1f)).append('\n');
             out.append(p).append("pos = ").append(pos(dropin.mc.compat.Nbt.listOrEmpty(player, "Pos"))).append('\n');
             out.append(p).append("xp level = ").append(dropin.mc.compat.Nbt.intOr(player, "XpLevel", 0)).append('\n');
-            out.append(p).append("effects = ").append(effects(dropin.mc.compat.Nbt.listOrEmpty(player, "active_effects"))).append('\n');
+            out.append(p).append("effects = ").append(effects(dropin.mc.compat.Nbt.listOrEmpty(player, "ActiveEffects"))).append('\n');
             out.append(p).append("inventory = ").append(items(dropin.mc.compat.Nbt.listOrEmpty(player, "Inventory"))).append('\n');
             out.append(p).append("whole = ").append(Manifest.hash(ChunkBytes.canonical(player))).append('\n');
         }
@@ -383,7 +385,7 @@ final class IntegrityScenarios {
     }
 
     private static String item(CompoundTag stack) {
-        return dropin.mc.compat.Nbt.stringOr(stack, "id", "?") + " x" + dropin.mc.compat.Nbt.intOr(stack, "count", 1);
+        return dropin.mc.compat.Nbt.stringOr(stack, "id", "?") + " x" + dropin.mc.compat.Nbt.intOr(stack, "Count", 1); // 1.20.1 port: item NBT is {id, Count:b, tag}
     }
 
     private static String items(ListTag list) {
@@ -397,8 +399,11 @@ final class IntegrityScenarios {
     private static String effects(ListTag list) {
         List<String> parts = new ArrayList<>();
         for (CompoundTag effect : dropin.mc.compat.Nbt.compounds(list).toList()) {
-            parts.add(dropin.mc.compat.Nbt.stringOr(effect, "id", "?") + " amp " + dropin.mc.compat.Nbt.byteOr(effect, "amplifier", (byte) 0) + " duration "
-                    + dropin.mc.compat.Nbt.intOr(effect, "duration", 0));
+            // 1.20.1 port: an effect is saved as {Id: numeric registry id, Amplifier, Duration}
+            net.minecraft.world.effect.MobEffect type = net.minecraft.world.effect.MobEffect.byId(dropin.mc.compat.Nbt.intOr(effect, "Id", -1));
+            String id = type == null ? "?" : String.valueOf(net.minecraft.core.registries.BuiltInRegistries.MOB_EFFECT.getKey(type));
+            parts.add(id + " amp " + dropin.mc.compat.Nbt.byteOr(effect, "Amplifier", (byte) 0) + " duration "
+                    + dropin.mc.compat.Nbt.intOr(effect, "Duration", 0));
         }
         return String.join(", ", parts);
     }

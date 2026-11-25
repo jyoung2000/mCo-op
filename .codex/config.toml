@@ -1,0 +1,5 @@
+[shell_environment_policy]
+inherit = "core"
+
+[shell_environment_policy.set]
+JAVA_HOME = 'C:\Program Files\Microsoft\jdk-25.0.5.21-hotspot'
