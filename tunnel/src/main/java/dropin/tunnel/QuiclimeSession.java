@@ -8,7 +8,12 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
 import io.netty.channel.epoll.EpollDatagramChannel;
 import io.netty.channel.epoll.EpollEventLoopGroup;
+import io.netty.channel.epoll.EpollIoHandler;
+import io.netty.channel.kqueue.KQueueDatagramChannel;
+import io.netty.channel.kqueue.KQueueEventLoopGroup;
+import io.netty.channel.kqueue.KQueueIoHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.nio.NioIoHandler;
 import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.handler.codec.ByteToMessageCodec;
@@ -16,9 +21,8 @@ import io.netty.incubator.codec.quic.*;
 import dropin.tunnel.dialtone.DialtoneAddress;
 import dropin.tunnel.dialtone.DialtoneServerChannel;
 import link.e4mc.iroh.Endpoint;
-import net.minecraft.ChatFormatting;
-import net.minecraft.client.Minecraft;
-import net.minecraft.network.chat.Component;
+import net.minecraft.util.text.TextFormatting;
+import net.minecraft.util.text.ITextComponent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -237,6 +241,16 @@ public class QuiclimeSession {
                 channelClass = EpollDatagramChannel.class;
             } else if (group instanceof NioEventLoopGroup) {
                 channelClass = NioDatagramChannel.class;
+            } else if (group instanceof KQueueEventLoopGroup) {
+                channelClass = KQueueDatagramChannel.class;
+            } else if (group instanceof MultiThreadIoEventLoopGroup mig) {
+                if (mig.isIoType(EpollIoHandler.class)) {
+                    channelClass = EpollDatagramChannel.class;
+                } else if (mig.isIoType(NioIoHandler.class)) {
+                    channelClass = NioDatagramChannel.class;
+                } else if (mig.isIoType(KQueueIoHandler.class)) {
+                    channelClass = KQueueDatagramChannel.class;
+                }
             } else {
                 throw new RuntimeException("Unknown EventLoopGroup " + group.getClass().getName());
             }
@@ -290,22 +304,22 @@ public class QuiclimeSession {
                                         LOGGER.info("Domain assigned: {}", domain);
                                         E4mcClient.onDomainAssigned(domain);
                                         if (Agnos.isClient()) {
-                                            Component domainComponent = Mirror.literal(domain);
+                                            ITextComponent domainComponent = Mirror.literal(domain);
                                             if (Config.INSTANCE.hideDomainInChat.value()) {
                                                 domainComponent = Mirror.translatable("text.dropin.hiddenDomain");
                                             }
-                                            Component message = Mirror.append(Mirror.translatable(
+                                            ITextComponent message = Mirror.append(Mirror.translatable(
                                                     "text.dropin.domainAssigned",
                                                     Mirror.withStyle(domainComponent, it ->
                                                     it
-                                                            .withClickEvent(Mirror.copyToClipboard(domain))
-                                                            .withColor(ChatFormatting.GREEN)
-                                                            .withHoverEvent(Mirror.showText(Mirror.translatable("chat.copy.click"))))
+                                                            .setClickEvent(Mirror.copyToClipboard(domain))
+                                                            .setColor(TextFormatting.GREEN)
+                                                            .setHoverEvent(Mirror.showText(Mirror.translatable("chat.copy.click"))))
                                             ),
                                                     Mirror.withStyle(Mirror.translatable("text.dropin.clickToStop"), it ->
                                                             it
-                                                                    .withClickEvent(Mirror.runCommand("/e4mc stop"))
-                                                                    .withColor(ChatFormatting.GRAY)
+                                                                    .setClickEvent(Mirror.runCommand("/e4mc stop"))
+                                                                    .setColor(TextFormatting.GRAY)
                                                     )
                                             );
                                             Mirror.addNotice(message);

@@ -1,0 +1,132 @@
+// The Cleanroom (Minecraft 1.12.2) mod: entry point here, plus the sources of tunnel/ and mc/, compiled against the
+// MCP-named game that CleanroomGradle (Cleanroom's official toolchain) sets up. reobfJar renames the jar to SRG names.
+plugins {
+    id 'java'
+    id 'dropin-bundled'
+    id 'com.cleanroommc.cleanroomgradle'
+}
+
+base {
+    archivesName = "${mod_id}-cleanroom-${minecraft_version}"
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(25)
+}
+
+tasks.withType(JavaCompile).configureEach {
+    // Cleanroom 0.7.x runs on Java 25 and its userdev artifact asks for a Java 25 consumer
+    options.release = 25
+    options.encoding = 'UTF-8'
+    options.compilerArgs += ['-Xmaxerrs', '100000']
+}
+
+sourceSets {
+    main {
+        java.srcDirs = ['src/main/java', '../tunnel/src/main/java', '../mc/src/main/java']
+        resources.srcDirs = ['src/main/resources', '../tunnel/src/main/resources', '../mc/src/main/resources']
+    }
+    // Development-only scripted driver (DESIGN 4.12). Compiled into dev runs, never into the mod jar.
+    selftest {
+        java.srcDirs = ['../mc/src/selftest/java']
+        resources.srcDirs = []
+        compileClasspath += main.output + main.compileClasspath
+        runtimeClasspath += main.output + main.runtimeClasspath
+    }
+    test {
+        java.srcDirs = ['../mc/src/test/java']
+        resources.srcDirs = []
+        compileClasspath += selftest.output
+        runtimeClasspath += selftest.output
+    }
+}
+
+// netty-quic: its classes live in io.netty.*, which Cleanroom's class loader always hands to the JDK's app class
+// loader, so they cannot be loaded from the mod jar itself. The jar ships nested (dropin/libs/netty-quic.jar) and
+// dropin.mc.boot.QuicBootstrap appends it to the app class loader at startup. Dev runs take the same path: the quic
+// jar is on the compile classpath only, never on a run classpath.
+def quicJar = configurations.bundled.filter { it.name.startsWith('netty-incubator-codec-classes-quic') }
+def runtimeBundled = configurations.bundled.filter { !it.name.startsWith('netty-incubator-codec-classes-quic') }
+
+dependencies {
+    implementation cleanroom.userdev(cleanroom_version)
+    implementation project(':core')
+    compileOnly files(configurations.bundled)
+    runtimeOnly runtimeBundled
+
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test', Test) {
+    useJUnitPlatform()
+}
+
+processResources {
+    from(quicJar) {
+        into 'dropin/libs'
+        rename { 'netty-quic.jar' }
+    }
+    def props = [version: project.version, minecraft_version: minecraft_version, mod_name: mod_name,
+                 mod_id: mod_id, description: project.findProperty('description') ?: '', credits: credits,
+                 mod_author: mod_author]
+    inputs.properties(props)
+    filesMatching(['mcmod.info', 'pack.mcmeta']) {
+        expand props
+    }
+}
+
+jar {
+    manifest {
+        attributes([
+                // Cleanroom submits the jar's mixin config to Mixin (CleanroomModDiscoverer.discoverMixinMods)
+                'MixinConfigs'          : 'dropin.mixins.json',
+                'Specification-Title'   : mod_name,
+                'Specification-Version' : project.version,
+                'Implementation-Title'  : mod_id,
+                'Implementation-Version': project.version,
+                'Built-On-Minecraft'    : minecraft_version
+        ])
+    }
+}
+
+// Runs. runClient: a normal dev client (game folder cleanroom/run/client). runClientA/B/C: the self-test slots
+// (DESIGN 4.12), one game folder each under <root>/run/<slot>; scripts/selftest.ps1 passes the scenario with
+// -Pdropin.selftest=<scenario>:<role>, which becomes -Ddropin.selftest on the game JVM (development only).
+def selftestProps = { ->
+    def props = ['dropin.dev.offlineLan': 'true',
+                 'dropin.dev.testModsDir': rootProject.layout.buildDirectory.dir('testmods').get().asFile.path.replace('\\', '/')]
+    if (project.hasProperty('dropin.selftest')) props['dropin.selftest'] = project.property('dropin.selftest').toString()
+    if (project.hasProperty('dropin.lanPort')) props['dropin.dev.lanPort'] = project.property('dropin.lanPort').toString()
+    if (project.hasProperty('dropin.sharedDir')) props['dropin.dev.sharedDir'] = project.property('dropin.sharedDir').toString().replace('\\', '/')
+    if (project.hasProperty('dropin.online')) props['dropin.dev.online'] = project.property('dropin.online').toString()
+    if (project.hasProperty('dropin.foreignLan')) props['dropin.dev.foreignLan'] = project.property('dropin.foreignLan').toString()
+    if (project.hasProperty('dropin.selftestTimeoutSec')) props['dropin.dev.selftestTimeoutSec'] = project.property('dropin.selftestTimeoutSec').toString()
+    return props
+}
+def selftestOutput = sourceSets.selftest.output
+
+cleanroom {
+    runs {
+        client {
+            configure {
+                username = 'Dev'
+                systemProperty 'crl.dev.mixin', 'dropin.mixins.json'
+            }
+        }
+        ['a', 'b', 'c'].each { slot ->
+            "client${slot.toUpperCase()}" {
+                inherit = 'client'
+                configure {
+                    username = "Dev${slot.toUpperCase()}".toString()
+                    workingDir = rootProject.file("run/${slot}")
+                    dependsOn 'selftestClasses'
+                    classpath selftestOutput
+                    args '--width', '480', '--height', '320'
+                    selftestProps().each { k, v -> systemProperty k, v }
+                }
+            }
+        }
+    }
+}

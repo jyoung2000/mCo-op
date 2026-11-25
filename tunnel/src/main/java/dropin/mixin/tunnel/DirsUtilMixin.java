@@ -7,7 +7,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-@Mixin(targets = "dev.dirs.Util")
+@Mixin(targets = "dev.dirs.Util", remap = false)
 public class DirsUtilMixin {
     @Inject(method = "getWinDirs", at = @At("HEAD"), cancellable = true)
     private static void useJna(String[] guids, CallbackInfoReturnable<String[]> cir) {

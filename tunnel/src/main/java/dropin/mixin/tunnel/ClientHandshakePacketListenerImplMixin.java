@@ -2,11 +2,10 @@ package dropin.mixin.tunnel;
 
 import dropin.tunnel.DialtoneConnectionExtensions;
 import dropin.tunnel.dialtone.DialtoneAddress;
-import net.minecraft.client.multiplayer.ClientHandshakePacketListenerImpl;
-import net.minecraft.network.Connection;
-import net.minecraft.network.protocol.login.ClientboundHelloPacket;
-import net.minecraft.util.Crypt;
-import net.minecraft.util.CryptException;
+import net.minecraft.client.network.NetHandlerLoginClient;
+import net.minecraft.network.NetworkManager;
+import net.minecraft.network.login.server.SPacketEncryptionRequest;
+import net.minecraft.util.CryptManager;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -17,23 +16,24 @@ import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.security.PublicKey;
 
-@Mixin(ClientHandshakePacketListenerImpl.class)
+/** 1.12.2 port: 26.x {@code ClientHandshakePacketListenerImpl} is {@code NetHandlerLoginClient}. */
+@Mixin(NetHandlerLoginClient.class)
 public class ClientHandshakePacketListenerImplMixin {
-    @Shadow @Final private Connection connection;
+    @Shadow @Final private NetworkManager networkManager;
 
-    @Redirect(method = "handleHello", at = @At(value = "INVOKE", target = "Lnet/minecraft/network/protocol/login/ClientboundHelloPacket;getPublicKey()Ljava/security/PublicKey;"))
-    private PublicKey publicKey(ClientboundHelloPacket instance) throws CryptException {
-        if (connection.getRemoteAddress() instanceof DialtoneAddress) {
+    @Redirect(method = "handleEncryptionRequest", at = @At(value = "INVOKE", target = "Lnet/minecraft/network/login/server/SPacketEncryptionRequest;getPublicKey()Ljava/security/PublicKey;"))
+    private PublicKey publicKey(SPacketEncryptionRequest instance) {
+        if (networkManager.getRemoteAddress() instanceof DialtoneAddress) {
             return null;
         }
         return instance.getPublicKey();
     }
 
-    @Redirect(method = "handleHello", at = @At(value = "INVOKE", target = "Lnet/minecraft/util/Crypt;digestData(Ljava/lang/String;Ljava/security/PublicKey;Ljavax/crypto/SecretKey;)[B"))
-    private byte[] digestData(String string, PublicKey publicKey, SecretKey secretKey) throws CryptException {
-        if (connection.getRemoteAddress() instanceof DialtoneAddress) {
-            return ((DialtoneConnectionExtensions) connection).e4mc$exportKeyingMaterial("EXPERIMENTAL mojang authentication".getBytes(StandardCharsets.UTF_8), new byte[0], 20);
+    @Redirect(method = "handleEncryptionRequest", at = @At(value = "INVOKE", target = "Lnet/minecraft/util/CryptManager;getServerIdHash(Ljava/lang/String;Ljava/security/PublicKey;Ljavax/crypto/SecretKey;)[B"))
+    private byte[] digestData(String string, PublicKey publicKey, SecretKey secretKey) {
+        if (networkManager.getRemoteAddress() instanceof DialtoneAddress) {
+            return ((DialtoneConnectionExtensions) networkManager).e4mc$exportKeyingMaterial("EXPERIMENTAL mojang authentication".getBytes(StandardCharsets.UTF_8), new byte[0], 20);
         }
-        return Crypt.digestData(string, publicKey, secretKey);
+        return CryptManager.getServerIdHash(string, publicKey, secretKey);
     }
 }

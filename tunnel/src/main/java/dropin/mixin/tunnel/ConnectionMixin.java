@@ -2,27 +2,35 @@ package dropin.mixin.tunnel;
 
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
-import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.*;
 import dropin.tunnel.DialtoneConnectionExtensions;
-import dropin.tunnel.SmugglersInetSocketAddress;
+import dropin.tunnel.DialtoneResolver;
 import dropin.tunnel.dialtone.DialtoneAddress;
 import dropin.tunnel.dialtone.DialtoneAmbientSession;
 import dropin.tunnel.dialtone.DialtoneChannel;
-import net.minecraft.network.Connection;
-import org.objectweb.asm.Opcodes;
+import io.netty.bootstrap.Bootstrap;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.EventLoopGroup;
+import net.minecraft.network.NetworkManager;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
-import org.spongepowered.asm.mixin.injection.*;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-import javax.crypto.Cipher;
+import javax.crypto.SecretKey;
 import java.net.InetAddress;
-import java.net.InetSocketAddress;
 
-@Mixin(Connection.class)
+/**
+ * 1.12.2 port: 26.x {@code Connection} is {@code NetworkManager}. 1.12.2 connects with an {@code InetAddress} and a
+ * port, so the Dialtone ticket cannot ride inside the resolved address as it did upstream
+ * ({@code SmugglersInetSocketAddress}); it is looked up here, from the host name the address was resolved from
+ * ({@link DialtoneResolver}, the logic of upstream's {@code ServerNameResolverMixin}).
+ */
+@Mixin(NetworkManager.class)
 public abstract class ConnectionMixin implements DialtoneConnectionExtensions {
 
     @Shadow private Channel channel;
@@ -45,28 +53,13 @@ public abstract class ConnectionMixin implements DialtoneConnectionExtensions {
         return channel.getClass().getCanonicalName();
     }
 
-    @Inject(method = "/^(connect|method_52271|m_290025_)$/", at = @At("HEAD"), require = 0)
-    private static void hijackStart(InetSocketAddress inetSocketAddress, @Coerce Object obj, Connection connection, CallbackInfoReturnable<ChannelFuture> cir) {
-        if (inetSocketAddress instanceof SmugglersInetSocketAddress smuggledAddress) {
-            e4mc$smuggledDialtoneAddress = new DialtoneAddress(smuggledAddress.ticket);
-        }
+    @Inject(method = "createNetworkManagerAndConnect", at = @At("HEAD"))
+    private static void hijackStart(InetAddress address, int port, boolean useNative, CallbackInfoReturnable<NetworkManager> cir) {
+        String ticket = DialtoneResolver.ticketFor(address, port);
+        e4mc$smuggledDialtoneAddress = ticket == null ? null : new DialtoneAddress(ticket);
     }
 
-    @Surrogate
-    private static void hijackStart(InetSocketAddress inetSocketAddress, boolean bl, Connection connection, CallbackInfoReturnable<ChannelFuture> cir) {
-        if (inetSocketAddress instanceof SmugglersInetSocketAddress smuggledAddress) {
-            e4mc$smuggledDialtoneAddress = new DialtoneAddress(smuggledAddress.ticket);
-        }
-    }
-
-    @Inject(method = "name=/^(connectToServer|method_10753|m_178300_)$/ desc=/^\\(Ljava\\/net\\/InetSocketAddress;Z\\)L.+;$/", at = @At("HEAD"), require = 0)
-    private static void hijackStartAlt(InetSocketAddress inetSocketAddress, boolean bl, CallbackInfoReturnable<Connection> cir) {
-        if (inetSocketAddress instanceof SmugglersInetSocketAddress smuggledAddress) {
-            e4mc$smuggledDialtoneAddress = new DialtoneAddress(smuggledAddress.ticket);
-        }
-    }
-
-    @ModifyArg(method = "/^(connect|method_52271|m_290025_|connectToServer|method_10753|m_178300_)$/", at = @At(value = "INVOKE", target = "Lio/netty/bootstrap/Bootstrap;channel(Ljava/lang/Class;)Lio/netty/bootstrap/AbstractBootstrap;"))
+    @ModifyArg(method = "createNetworkManagerAndConnect", at = @At(value = "INVOKE", target = "Lio/netty/bootstrap/Bootstrap;channel(Ljava/lang/Class;)Lio/netty/bootstrap/AbstractBootstrap;", remap = false))
     private static Class hijackChannel(Class clazz) {
         if (e4mc$smuggledDialtoneAddress != null) {
             return DialtoneChannel.class;
@@ -75,7 +68,7 @@ public abstract class ConnectionMixin implements DialtoneConnectionExtensions {
         }
     }
 
-    @ModifyArg(method = "/^(connect|method_52271|m_290025_|connectToServer|method_10753|m_178300_)$/", at = @At(value = "INVOKE", target = "Lio/netty/bootstrap/Bootstrap;group(Lio/netty/channel/EventLoopGroup;)Lio/netty/bootstrap/AbstractBootstrap;"))
+    @ModifyArg(method = "createNetworkManagerAndConnect", at = @At(value = "INVOKE", target = "Lio/netty/bootstrap/Bootstrap;group(Lio/netty/channel/EventLoopGroup;)Lio/netty/bootstrap/AbstractBootstrap;", remap = false))
     private static EventLoopGroup hijackGroup(EventLoopGroup group) {
         if (e4mc$smuggledDialtoneAddress != null) {
             return DialtoneAmbientSession.INSTANCE.group;
@@ -84,7 +77,7 @@ public abstract class ConnectionMixin implements DialtoneConnectionExtensions {
         }
     }
 
-    @WrapOperation(method = "/^(connect|method_52271|m_290025_|connectToServer|method_10753|m_178300_)$/", at = @At(value = "INVOKE", target = "Lio/netty/bootstrap/Bootstrap;connect(Ljava/net/InetAddress;I)Lio/netty/channel/ChannelFuture;"))
+    @WrapOperation(method = "createNetworkManagerAndConnect", at = @At(value = "INVOKE", target = "Lio/netty/bootstrap/Bootstrap;connect(Ljava/net/InetAddress;I)Lio/netty/channel/ChannelFuture;", remap = false))
     private static ChannelFuture hijackConnect(Bootstrap instance, InetAddress inetHost, int inetPort, Operation<ChannelFuture> operation) {
         if (e4mc$smuggledDialtoneAddress != null) {
             var ret = instance.connect(e4mc$smuggledDialtoneAddress);
@@ -95,8 +88,8 @@ public abstract class ConnectionMixin implements DialtoneConnectionExtensions {
         }
     }
 
-    @Inject(method = "setEncryptionKey", at = @At(value = "FIELD", target = "Lnet/minecraft/network/Connection;channel:Lio/netty/channel/Channel;", opcode = Opcodes.GETFIELD, ordinal = 0), cancellable = true)
-    private void killDoubleEncryption(Cipher cipher, Cipher cipher2, CallbackInfo ci) {
+    @Inject(method = "enableEncryption", at = @At("HEAD"), cancellable = true)
+    private void killDoubleEncryption(SecretKey key, CallbackInfo ci) {
         if (channel instanceof DialtoneChannel) {
             ci.cancel();
         }

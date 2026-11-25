@@ -1,0 +1,15 @@
+[
+  {
+    "modid": "${mod_id}",
+    "name": "${mod_name}",
+    "description": "${description}",
+    "version": "${version}",
+    "mcversion": "${minecraft_version}",
+    "url": "https://github.com/jyoung2000/mCo-op",
+    "authorList": ["jyoung2000", "skyevg (e4mc)"],
+    "credits": "${credits}",
+    "logoFile": "",
+    "screenshots": [],
+    "dependencies": []
+  }
+]

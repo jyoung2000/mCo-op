@@ -1,30 +1,21 @@
 pluginManagement {
     repositories {
+        maven { url = 'https://maven.cleanroommc.com' }
         gradlePluginPortal()
         mavenCentral()
-        exclusiveContent {
-            forRepository {
-                maven {
-                    name = 'Fabric'
-                    url = uri('https://maven.fabricmc.net')
-                }
-            }
-            filter {
-                includeGroupAndSubgroups('net.fabricmc')
-            }
-        }
     }
 }
 
 plugins {
     id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+    // Adds Cleanroom's and Mojang's repositories to every project (CleanroomGradle, the official Cleanroom toolchain).
+    id 'com.cleanroommc.cleanroomgradle.settings' version '0.22.0'
 }
 
 // This should match the folder name of the project, or else IDEA may complain (see https://youtrack.jetbrains.com/issue/IDEA-317606)
 rootProject.name = 'dropin-coop'
 includeBuild('build-logic')
 include('core')
-include('tunnel')
-include('mc')
-include('fabric')
-include('neoforge')
+// The one loader of the 1.12.2 port: Cleanroom (a Forge 1.12.2 fork on Java 25 with Mixin built in). It compiles the
+// sources of tunnel/ and mc/ together with its own entry point; tunnel/ and mc/ are source folders, not projects.
+include('cleanroom')
