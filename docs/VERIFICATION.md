@@ -569,3 +569,25 @@ the game's Java (`m2b`), member packets during the last checkpoint (`m2 resume`)
 
 Not run: `-Online` suites (real e4mc relay, Modrinth mod pack), `perf`; two real PCs; a production jar in a normal 1.21.1
 launcher (only the dev runs and the jar check).
+
+## Port to Minecraft 1.20.1 (Forge + Fabric, branch `port/1.20.1`): 2026-11-25
+
+Jar: `build/libs/MCo-op-0.1.0+mc1.20.1.jar` (one jar, both loaders; Forge 47.4.29, Fabric loader 0.20.1 + API 0.92.6+1.20.1).
+Commit under test: `5ca688c` (self-test code fixes), on top of `69df559` (the port).
+
+| Check | Result |
+|---|---|
+| `./gradlew build :core:test :mc:test --rerun-tasks` | exit 0, BUILD SUCCESSFUL; core 212 tests, 0 failures, 1 skipped; mc 6 tests, 0 failures. New: `ModsTest.forgeJarsAreReadFromModsToml` |
+| `scripts/jarcheck.ps1` | exit 0, every check PASS (Fabric config `dropin.mixins.json`; Forge config `dropin.forge.mixins.json` named in MANIFEST `MixinConfigs`, refmap `dropin.forge.refmap.json`; no self-test classes under `dropin/mc/selftest/` or `dropin/fg/mc/selftest/`) |
+| `selftest.ps1 -Suite all`, run 1 (`69df559`) | 55 of 57 PASS. `handoff-3`: the three clients could not start (Windows commit memory full, "paging file is too small"); `integrity`: self-test readers still used 1.20.5+ NBT (fixed in `5ca688c`) |
+| `-Suite integrity -Only integrity`, `-Suite m3 -Only handoff-3` (`5ca688c`) | PASS, PASS |
+| `selftest.ps1 -Suite all`, run 2 (`5ca688c`) | 56 of 57 PASS (m0, m1, m2, m2b, m3, m3b, m4, m5, ui, integrity), both loaders in the cross-loader scenarios. `vanilla-through-sniffer` failed once: the Forge client's status ping got no answer while the host was up (the intermittent unanswered status connection noted in `StatusPing`) |
+| `-Suite m2 -Only vanilla-through-sniffer` (`5ca688c`), three reruns | PASS, PASS, PASS |
+
+Found and fixed by the suites (details in `session-notes.md`): `WorldOpenFlows.loadLevel` entry point (`m0`), Forge's refusal of
+the `[0,0)` e4mc range (`m0`), Forge Mixin 0.8.5 matching a wildcard selector against a constructor (`m0`), 1.20.1 NBT in the
+integrity fingerprint and the max-health clamp in its setup (`integrity`).
+
+Not run: `-Online` suites (real e4mc relay, Modrinth mods), `perf`; two real PCs; a production jar in a normal 1.20.1 Forge or
+Fabric launcher (only the dev runs and the jar check). The m2b test mods are dev-named jars; a real SRG-named Forge mod in a dev
+run was not tried.

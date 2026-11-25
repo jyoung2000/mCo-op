@@ -810,3 +810,16 @@ Rechecked in the 1.20.1 sources (NeoForm/MCP `vanilla-1.20.1-sources.jar`), unch
   (published -> published or world game type; no force flag, so `IntegratedServerGameModeMixin` stays).
 - `TitleScreen: private void createNormalMenuOptions(int, int)`; `MinecraftServer: public int getProfilePermissions(GameProfile)`;
   `public void setPvpAllowed(boolean)`; `DimensionType: public static Path getStorageFolder(ResourceKey<Level>, Path)`.
+
+Found by the self-tests on 1.20.1 (fixed):
+- `m0`: `WorldOpenFlowsMixin` targeted `openWorld(String, Runnable)`; 1.20.1 has `loadLevel(Screen, String)` (cancel goes back
+  to `lastScreen`). Forge 1.20.1 refused the e4mc "breaks" range `[0,0)`: now `(,0)` (optional dependency no version meets;
+  Forge 47 has no `type = "incompatible"`). Forge's Mixin 0.8.5 matched `ServerboundKeyPacketMixin`'s wildcard
+  `*(Ljava/security/PrivateKey;)[B` against the constructor: now `name=/^[^<].*$/ desc=...` (`tunnel` hook, `require = 0`;
+  1.20.1 has no such method).
+- `integrity` (self-test code only, the checks are the same): 1.20.1 item NBT is `{id, Count:b, tag}` (chest command and the
+  fingerprint reader), player effects are `ActiveEffects` `{Id: numeric, Amplifier, Duration}` (read through
+  `MobEffect.byId`), and lowering `generic.max_health` does not clamp the current health in 1.20.1 (1.20.5+ does), so the
+  setup sets B's health to 14 after the attribute command.
+- `handoff-3` and `integrity` once failed because Windows ran out of commit memory ("paging file is too small"; an emulator
+  and WSL were holding most of it); both passed when rerun with more free memory.
