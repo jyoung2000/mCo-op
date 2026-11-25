@@ -145,6 +145,9 @@ public final class ProtocolSniffer extends ChannelInboundHandlerAdapter {
         ChannelPipeline pipeline = ctx.pipeline();
         // The vanilla handler is a ChannelInitializer: on a registered channel it runs at once, adds its
         // handlers behind this one and removes itself.
+        // 1.12.2 port: NetworkSystem.addEndpoint's initializer adds "timeout", "legacy_query", "splitter", "decoder",
+        // "prepender", "encoder" and "packet_handler" with addLast, so they all land behind the sniffer; the replayed
+        // bytes reach "legacy_query" first, as on a plain connection. No handler is looked up by name here.
         pipeline.addLast(vanilla);
         if (ctx.channel().isActive()) {
             ctx.fireChannelActive();

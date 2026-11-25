@@ -26,8 +26,10 @@ $gradlew = Join-Path $root 'gradlew.bat'
 $logDir = Join-Path $root 'build\selftest-logs'
 $sharedDir = Join-Path $root 'run\shared'
 
+# 1.12.2 port: one loader, Cleanroom. The scenario table keeps the loader names of the 26.x suites; every role runs
+# on Cleanroom, and scenarios that differed only by loader collapse into one (see the dedupe in main).
 function New-Role([string]$role, [string]$loader, [string]$slot) {
-    return @{ Role = $role; Loader = $loader; Slot = $slot }
+    return @{ Role = $role; Loader = 'cleanroom'; Slot = $slot }
 }
 
 # Suites in milestone order. "all" runs every suite listed here.
@@ -661,6 +663,14 @@ foreach ($name in $selected) {
         $scenarios += $measureSuites[$name]
     }
 }
+# 1.12.2 port: ids that named loaders (lan-join.fabric-neoforge, swap-spike.neoforge) name Cleanroom; the variants
+# that are now the same run once.
+$seenIds = @{}
+$scenarios = @(foreach ($s in $scenarios) {
+    $copy = $s.Clone()
+    $copy.Id = ($s.Id -replace 'neoforge', 'cleanroom') -replace 'fabric', 'cleanroom'
+    if (-not $seenIds.ContainsKey($copy.Id)) { $seenIds[$copy.Id] = $true; $copy }
+})
 if ($Only) { $scenarios = @($scenarios | Where-Object { $_.Id -eq $Only }) }
 if ($scenarios.Count -eq 0) { throw 'No scenarios selected.' }
 
@@ -673,7 +683,7 @@ Set-Content -Path $summaryFile -Value ("selftest -Suite {0}{1}  {2}" -f $Suite, 
 # that up to date (two Gradle builds downloading the same assets at once fail).
 $loaders = @($scenarios | Where-Object { $_.Roles } | ForEach-Object { $_.Roles } | ForEach-Object { $_.Loader } | Sort-Object -Unique)
 if ($loaders.Count -gt 0) {
-    $compileArgs = @($loaders | ForEach-Object { ":$($_):classes"; ":$($_):downloadAssets"; ":$($_):testmodJars" }) + '--console=plain'
+    $compileArgs = @($loaders | ForEach-Object { ":$($_):classes"; ":$($_):selftestClasses"; ":$($_):testmodJars" }) + '--console=plain'
     $code = Invoke-GradleLogged $compileArgs (Join-Path $logDir 'compile.log')
     if ($code -ne 0) {
         $line = 'FAIL  compile  (see build/selftest-logs/compile.log)'

@@ -2,34 +2,47 @@ package dropin.mc.selftest;
 
 import dropin.core.dev.SelfTestSpec;
 import dropin.mc.DropIn;
+import dropin.mc.host.ChunkBytes;
 import dropin.tunnel.Config;
 import dropin.tunnel.E4mcClient;
+import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.ConnectScreen;
-import net.minecraft.client.gui.screens.DisconnectedScreen;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.client.gui.GuiDisconnected;
+import net.minecraft.client.gui.GuiMainMenu;
+import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.multiplayer.GuiConnecting;
 import net.minecraft.client.multiplayer.ServerData;
-import net.minecraft.client.multiplayer.ServerStatusPinger;
-import net.minecraft.client.multiplayer.resolver.ServerAddress;
-import net.minecraft.client.server.IntegratedServer;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.Registries;
+import net.minecraft.client.network.ServerPinger;
+import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.init.Blocks;
+import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.nbt.NBTTagList;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.world.Difficulty;
-import net.minecraft.world.level.GameType;
-import net.minecraft.world.level.LevelSettings;
-import net.minecraft.world.level.WorldDataConfiguration;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.levelgen.WorldOptions;
-import net.minecraft.world.level.levelgen.presets.WorldPresets;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.ChunkPos;
+import net.minecraft.util.text.ITextComponent;
+import net.minecraft.util.text.TextFormatting;
+import net.minecraft.world.EnumDifficulty;
+import net.minecraft.world.GameType;
+import net.minecraft.world.WorldServer;
+import net.minecraft.world.WorldSettings;
+import net.minecraft.world.WorldType;
+import net.minecraftforge.common.ForgeChunkManager;
+import net.minecraftforge.fml.common.Loader;
+import net.minecraftforge.fml.common.ModContainer;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.function.Predicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * The scripted scenarios (MILESTONES gate suites). Development only.
@@ -41,6 +54,11 @@ final class Scenarios {
     /** In a chunk the host force-loads, so the block can be placed and read wherever the players stand. */
     static final BlockPos PROBE_POS = new BlockPos(0, 250, 0);
     static final String PROBE_COMMAND = "setblock 0 250 0 minecraft:gold_block";
+    /**
+     * 1.12.2 port: where a player stands on the ground of a flat world. 26.x's flat world has its surface at y -60;
+     * 1.12.2's default flat preset (bedrock, two dirt, grass) has it at y 4, and y -60 is the void.
+     */
+    static final int GROUND_Y = 4;
 
     static final int STARTUP_TICKS = 12_000;
     static final int WORLD_TICKS = 6_000;
@@ -171,26 +189,15 @@ final class Scenarios {
                     }
                 })
                 .step("main menu", STARTUP_TICKS, () -> atMainMenu(mc))
-                .action("create world", () -> {
-                    LevelSettings settings = new LevelSettings(WORLD_ID, GameType.CREATIVE,
-                            false, Difficulty.PEACEFUL, true, new net.minecraft.world.level.GameRules(),
-                            WorldDataConfiguration.DEFAULT);
-                    WorldOptions options = new WorldOptions(SEED, false, false);
-                    mc.createWorldOpenFlows().createFreshLevel(WORLD_ID, settings, options,
-                            registries -> registries.lookupOrThrow(Registries.WORLD_PRESET)
-                                    .getOrThrow(WorldPresets.FLAT).value().createWorldDimensions(),
-                            mc.screen);
-                })
-                .step("world loaded", WORLD_TICKS, () -> inWorld(mc) && mc.getSingleplayerServer() != null)
-                .action("force-load probe chunk", () -> {
-                    IntegratedServer server = mc.getSingleplayerServer();
-                    server.execute(() -> server.getCommands()
-                            .performPrefixedCommand(server.createCommandSourceStack(), "forceload add 0 0"));
-                })
+                .action("create world", () -> createFlatWorld(mc))
+                .step("world loaded", WORLD_TICKS, () -> inWorld(mc) && mc.getIntegratedServer() != null)
+                .action("force-load probe chunk", () -> forceLoadChunk(mc.getIntegratedServer(), 0, 0))
                 .action("publish to LAN", () -> {
-                    IntegratedServer server = mc.getSingleplayerServer();
-                    if (!server.publishServer(null, true, ctx.port())) {
-                        throw new IllegalStateException("publishServer returned false for port " + ctx.port());
+                    // 1.12.2 port: 26.x publishServer(mode, cheats, port) is shareToLAN(mode, cheats); the port is
+                    // dropin.dev.lanPort through IntegratedServerOfflineLanMixin, and the call returns it (null on failure).
+                    String port = mc.getIntegratedServer().shareToLAN(null, true);
+                    if (port == null || !port.equals(Integer.toString(ctx.port()))) {
+                        throw new IllegalStateException("shareToLAN returned " + port + ", expected port " + ctx.port());
                     }
                 });
     }
@@ -198,10 +205,10 @@ final class Scenarios {
     private static StepRunner joinHost(Context ctx) {
         Minecraft mc = ctx.mc();
         return hostBase(ctx)
-                .step("joiner connected", PEER_TICKS, () -> mc.getSingleplayerServer().getPlayerList().getPlayerCount() == 2)
-                .step("sees joiner", SHORT_TICKS, () -> mc.level != null && mc.level.players().size() == 2)
+                .step("joiner connected", PEER_TICKS, () -> mc.getIntegratedServer().getCurrentPlayerCount() == 2)
+                .step("sees joiner", SHORT_TICKS, () -> mc.world != null && mc.world.playerEntities.size() == 2)
                 .step("reads block placed by joiner", SHORT_TICKS,
-                        () -> mc.getSingleplayerServer().overworld().getBlockState(PROBE_POS).is(Blocks.GOLD_BLOCK))
+                        () -> blockAt(mc.getIntegratedServer(), PROBE_POS) == Blocks.GOLD_BLOCK)
                 .action("tell joiner", () -> ctx.writeShared(HOST_DONE, "ok"))
                 .step("joiner finished", SHORT_TICKS, () -> ctx.sharedExists(PEER_DONE));
     }
@@ -230,18 +237,16 @@ final class Scenarios {
             runner.step("host port open", STARTUP_TICKS, new PortProbe(ctx.port())::tick);
         }
         return runner
-                .action("connect", () -> ConnectScreen.startConnecting(new TitleScreen(), mc,
-                        ServerAddress.parseString(address[0]),
-                        new ServerData("dropin-selftest", address[0], ServerData.Type.OTHER), false, null))
+                .action("connect", () -> connect(mc, address[0]))
                 .step("joined world", SHORT_TICKS, () -> {
                     failIfDisconnected(mc);
                     return inWorld(mc);
                 })
                 .step("sees host", SHORT_TICKS, () -> {
                     failIfDisconnected(mc);
-                    return mc.level != null && mc.level.players().size() == 2;
+                    return mc.world != null && mc.world.playerEntities.size() == 2;
                 })
-                .action("place block", () -> mc.player.connection.sendCommand(PROBE_COMMAND))
+                .action("place block", () -> sendCommand(mc, PROBE_COMMAND))
                 .step("host read the block", SHORT_TICKS, () -> {
                     failIfDisconnected(mc);
                     return ctx.sharedExists(HOST_DONE);
@@ -251,42 +256,202 @@ final class Scenarios {
 
     private static StepRunner pinger(Context ctx) {
         Minecraft mc = ctx.mc();
-        ServerData data = new ServerData("dropin-selftest", ctx.localAddress(), ServerData.Type.OTHER);
-        ServerStatusPinger pinger = new ServerStatusPinger();
+        ServerData data = new ServerData("dropin-selftest", ctx.localAddress(), false);
+        ServerPinger pinger = new ServerPinger();
         return new StepRunner()
                 .step("main menu", STARTUP_TICKS, () -> atMainMenu(mc))
                 .step("host port open", STARTUP_TICKS, new PortProbe(ctx.port())::tick)
-                .action("send status ping", () -> pinger.pingServer(data, () -> {}, () -> {}))
+                .action("send status ping", () -> pinger.ping(data))
                 .step("status response", SHORT_TICKS, () -> {
-                    pinger.tick();
-                    return data.players != null;
+                    pinger.pingPendingNetworks();
+                    return onlinePlayers(data) != null;
                 })
                 .action("check status", () -> {
-                    if (data.players.online() != 1) {
-                        throw new IllegalStateException("expected 1 player online in the status response, got " + data.players.online());
+                    int online = onlinePlayers(data);
+                    if (online != 1) {
+                        throw new IllegalStateException("expected 1 player online in the status response, got " + online);
                     }
-                    DropIn.LOGGER.info("Status response: motd='{}' players={}/{}", data.motd.getString(),
-                            data.players.online(), data.players.max());
-                    pinger.removeAll();
+                    DropIn.LOGGER.info("Status response: motd='{}' players={}", data.serverMOTD,
+                            TextFormatting.getTextWithoutFormattingCodes(data.populationInfo));
+                    pinger.clearPendingNetworks();
                 })
                 .action("tell host", () -> ctx.writeShared(PEER_DONE, "ok"));
     }
 
     // ---- helpers --------------------------------------------------------------------------------
 
+    /** 1.12.2 port: there is no loading overlay; a screen without a world is the menu. */
     static boolean atMainMenu(Minecraft mc) {
-        return mc.getOverlay() == null && mc.screen != null && mc.level == null;
+        return mc.currentScreen != null && mc.world == null;
     }
 
     static boolean inWorld(Minecraft mc) {
-        return mc.player != null && mc.level != null && mc.getOverlay() == null;
+        return mc.player != null && mc.world != null;
     }
 
     static void failIfDisconnected(Minecraft mc) {
-        Screen screen = mc.screen;
-        if (screen instanceof DisconnectedScreen) {
-            throw new IllegalStateException("disconnected: " + screen.getTitle().getString());
+        GuiScreen screen = mc.currentScreen;
+        if (screen instanceof GuiDisconnected) {
+            throw new IllegalStateException("disconnected: " + disconnectText(screen));
         }
+    }
+
+    /**
+     * 1.12.2 port: {@code GuiDisconnected} keeps its title ({@code reason}, a String) and message (an
+     * ITextComponent) in private fields and has no getters; read them by type (development only).
+     */
+    static String disconnectText(GuiScreen screen) {
+        StringBuilder text = new StringBuilder();
+        for (Field field : GuiDisconnected.class.getDeclaredFields()) {
+            try {
+                if (field.getType() == String.class || field.getType() == ITextComponent.class) {
+                    field.setAccessible(true);
+                    Object value = field.get(screen);
+                    if (value != null) {
+                        text.append(text.length() == 0 ? "" : " - ")
+                                .append(value instanceof ITextComponent c ? c.getUnformattedText() : value);
+                    }
+                }
+            } catch (ReflectiveOperationException | RuntimeException e) {
+                // keep what was read
+            }
+        }
+        return text.toString();
+    }
+
+    /**
+     * Creates and opens the scenarios' flat creative world with commands on and no structures (26.x:
+     * {@code createFreshLevel} with the flat preset). 1.12.2 port: {@code launchIntegratedServer} with
+     * {@code WorldSettings}; a new world takes its difficulty from the game options, so peaceful is set there.
+     */
+    static void createFlatWorld(Minecraft mc) {
+        mc.gameSettings.difficulty = EnumDifficulty.PEACEFUL;
+        WorldSettings settings = new WorldSettings(SEED, GameType.CREATIVE, false, false, WorldType.FLAT).enableCommands();
+        mc.launchIntegratedServer(WORLD_ID, WORLD_ID, settings);
+    }
+
+    /**
+     * Connects to a server by address, as the multiplayer screen does. 1.12.2 port: 26.x
+     * {@code ConnectScreen.startConnecting} is a {@code GuiConnecting} screen.
+     */
+    static void connect(Minecraft mc, String address) {
+        mc.displayGuiScreen(new GuiConnecting(new GuiMainMenu(), mc, new ServerData("dropin-selftest", address, false)));
+    }
+
+    /** A command typed by this client's player (no leading slash). 1.12.2 port: 26.x {@code connection.sendCommand}. */
+    static void sendCommand(Minecraft mc, String command) {
+        mc.player.sendChatMessage("/" + command);
+    }
+
+    /** A command run by the server itself (operator rights), on the server thread. */
+    static void serverCommand(MinecraftServer server, String command) {
+        server.addScheduledTask(() -> server.getCommandManager().executeCommand(server, command));
+    }
+
+    /** The block at a position of the server's overworld, loading its chunk if needed. */
+    static Block blockAt(MinecraftServer server, BlockPos pos) {
+        return server.getWorld(0).getBlockState(pos).getBlock();
+    }
+
+    private static volatile boolean chunkCallback;
+
+    /**
+     * Keeps one overworld chunk loaded, as 26.x {@code /forceload add} does. 1.12.2 port: there is no forceload
+     * command; Forge's chunk manager does it with a ticket of DropIn's mod (whose callback releases the tickets
+     * again when the world is next loaded).
+     */
+    static void forceLoadChunk(MinecraftServer server, int cx, int cz) {
+        server.addScheduledTask(() -> {
+            ModContainer container = Loader.instance().getIndexedModList().get(E4mcClient.MOD_ID);
+            if (container == null) {
+                throw new IllegalStateException("mod " + E4mcClient.MOD_ID + " is not loaded");
+            }
+            Object mod = container.getMod();
+            if (!chunkCallback) {
+                ForgeChunkManager.setForcedChunkLoadingCallback(mod, (tickets, world) -> { });
+                chunkCallback = true;
+            }
+            WorldServer world = server.getWorld(0);
+            ForgeChunkManager.Ticket ticket = ForgeChunkManager.requestTicket(mod, world, ForgeChunkManager.Type.NORMAL);
+            if (ticket == null) {
+                DropIn.LOGGER.error("Self-test: no chunk-loading ticket for chunk {},{}", cx, cz);
+                return;
+            }
+            ForgeChunkManager.forceChunk(ticket, new ChunkPos(cx, cz));
+            world.getChunkProvider().provideChunk(cx, cz);
+        });
+    }
+
+    /**
+     * Generates (and so saves) every overworld chunk in the given chunk range. 1.12.2 port: 26.x scenarios
+     * force-load a few hundred chunks to make the world bigger; here they are generated once and kept by the save.
+     */
+    static void generateChunks(MinecraftServer server, int minCx, int minCz, int maxCx, int maxCz) {
+        server.addScheduledTask(() -> {
+            WorldServer world = server.getWorld(0);
+            for (int cx = minCx; cx <= maxCx; cx++) {
+                for (int cz = minCz; cz <= maxCz; cz++) {
+                    world.getChunkProvider().provideChunk(cx, cz);
+                }
+            }
+        });
+    }
+
+    /**
+     * True if a chunk record (the chunk's NBT as stored, {@link ChunkBytes}) holds the block anywhere.
+     * 1.12.2 port: 26.x chunks name their blocks in palettes, so the scenarios searched the bytes for the name;
+     * 1.12.2 stores numeric ids ({@code Blocks} with the high bits in {@code Add}) per section.
+     */
+    static boolean chunkHasBlock(byte[] chunk, Block block) throws IOException {
+        int wanted = Block.getIdFromBlock(block);
+        NBTTagCompound level = ChunkBytes.parse(chunk).getCompoundTag("Level");
+        NBTTagList sections = level.getTagList("Sections", 10);
+        for (int s = 0; s < sections.tagCount(); s++) {
+            NBTTagCompound section = sections.getCompoundTagAt(s);
+            byte[] ids = section.getByteArray("Blocks");
+            byte[] add = section.hasKey("Add", 7) ? section.getByteArray("Add") : null;
+            for (int i = 0; i < ids.length; i++) {
+                int id = ids[i] & 0xFF;
+                if (add != null && i / 2 < add.length) {
+                    id |= ((add[i / 2] >> ((i & 1) * 4)) & 0xF) << 8;
+                }
+                if (id == wanted) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** True if the player carries a matching stack anywhere (26.x {@code Inventory.contains(Predicate)}). */
+    static boolean holds(EntityPlayer player, Predicate<ItemStack> test) {
+        if (player == null) {
+            return false;
+        }
+        for (List<ItemStack> part : List.of(player.inventory.mainInventory, player.inventory.armorInventory,
+                player.inventory.offHandInventory)) {
+            for (ItemStack stack : part) {
+                if (!stack.isEmpty() && test.test(stack)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static final Pattern POPULATION = Pattern.compile("(\\d+)/(\\d+)");
+
+    /**
+     * The number of players online in a status response, or null before one arrived. 1.12.2 port: the pinger
+     * keeps it only as the formatted text {@code online/max} in {@code ServerData.populationInfo}.
+     */
+    static Integer onlinePlayers(ServerData data) {
+        String text = TextFormatting.getTextWithoutFormattingCodes(data.populationInfo);
+        if (text == null) {
+            return null;
+        }
+        Matcher m = POPULATION.matcher(text.trim());
+        return m.matches() ? Integer.parseInt(m.group(1)) : null;
     }
 
     /** Polls once a second whether something listens on the host's LAN port. */

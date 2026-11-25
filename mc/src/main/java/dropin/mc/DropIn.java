@@ -26,8 +26,15 @@ public final class DropIn {
         // DESIGN 4.6: world sync shares the game's listener; the first bytes decide which protocol it is.
         E4mcClient.childHandlerWrapper = dropin.mc.net.ProtocolSniffer::wrap;
         if (Agnos.isClient()) {
+            dropin.mc.menu.ui.DScreen.hookFileDrops();
             SWITCHES.selfTest().ifPresent(DropIn::startSelfTest);
         }
+    }
+
+    /** 1.12.2: commands are registered at {@code FMLServerStartingEvent}, not by a Brigadier mixin (DropInCommands). */
+    public static void registerServerCommands(net.minecraft.server.MinecraftServer server,
+                                              java.util.function.Consumer<net.minecraft.command.ICommand> registrar) {
+        dropin.mc.commands.DropInCommands.register(server, registrar);
     }
 
     /**

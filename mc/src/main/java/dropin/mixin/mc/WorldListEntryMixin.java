@@ -4,28 +4,31 @@ import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import dropin.mc.menu.CoopActions;
 import net.minecraft.client.Minecraft;
-import net.minecraft.network.chat.Component;
-import net.minecraft.world.level.storage.LevelSummary;
+import net.minecraft.client.gui.GuiListWorldSelectionEntry;
+import net.minecraft.client.resources.I18n;
+import net.minecraft.world.storage.WorldSummary;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 
 /**
- * DESIGN 4.4: co-op worlds stay in the Singleplayer list, with a badge. The entry builds its name widget
- * from {@code summary.getLevelName()} in its constructor; the badge is appended there.
+ * DESIGN 4.4: co-op worlds stay in the Singleplayer list, with a badge.
+ * <p>1.12.2 port: {@code GuiListWorldSelectionEntry.drawEntry} reads {@code worldSummary.getDisplayName()} on every
+ * frame; the badge is appended there, and the shown name is worked out once per entry.
  */
-@Mixin(targets = "net.minecraft.client.gui.screens.worldselection.WorldSelectionList$WorldListEntry")
+@Mixin(GuiListWorldSelectionEntry.class)
 public class WorldListEntryMixin {
-    /** The shown name, worked out once: 1.21.1 reads the name on every frame in render (26.x: in the constructor). */
-    @org.spongepowered.asm.mixin.Unique
+    @Unique
     private String dropin$shownName;
 
-    @WrapOperation(method = "render", at = @At(value = "INVOKE",
-            target = "Lnet/minecraft/world/level/storage/LevelSummary;getLevelName()Ljava/lang/String;"))
-    private String dropin$coopBadge(LevelSummary summary, Operation<String> original) {
+    @WrapOperation(method = "drawEntry", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/world/storage/WorldSummary;getDisplayName()Ljava/lang/String;"))
+    private String dropin$coopBadge(WorldSummary summary, Operation<String> original) {
         if (dropin$shownName == null) {
             String name = original.call(summary);
-            dropin$shownName = CoopActions.isCoopLevel(Minecraft.getInstance(), summary.getLevelId())
-                    ? name + " " + Component.translatable("text.dropin_coop.badge").getString() : name;
+            // An empty name stays empty, so the game still shows its "World N" fallback.
+            dropin$shownName = name != null && !name.isEmpty() && CoopActions.isCoopLevel(Minecraft.getMinecraft(), summary.getFileName())
+                    ? name + " " + I18n.format("text.dropin_coop.badge") : name;
         }
         return dropin$shownName;
     }

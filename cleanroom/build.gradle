@@ -63,6 +63,27 @@ tasks.named('test', Test) {
     useJUnitPlatform()
 }
 
+// 1.12.2 reads key=value .lang files, not the JSON lang files of later versions. The JSON files stay the one source;
+// this writes assets/<ns>/lang/en_us.lang from each of them.
+def legacyLangDir = layout.buildDirectory.dir('generated/legacyLang')
+def jsonLangs = files('../tunnel/src/main/resources', '../mc/src/main/resources').asFileTree.matching { include 'assets/*/lang/*.json' }
+def generateLegacyLang = tasks.register('generateLegacyLang') {
+    inputs.files(jsonLangs)
+    outputs.dir(legacyLangDir)
+    def outRoot = legacyLangDir.get().asFile
+    doLast {
+        project.delete(outRoot)
+        jsonLangs.visit { details ->
+            if (details.directory) return
+            def parsed = new groovy.json.JsonSlurper().parse(details.file, 'UTF-8')
+            def target = new File(outRoot, details.relativePath.pathString.replaceAll(/\.json$/, '.lang'))
+            target.parentFile.mkdirs()
+            target.withWriter('UTF-8') { w -> parsed.each { k, v -> w.write("${k}=${v}\n") } }
+        }
+    }
+}
+sourceSets.main.resources.srcDir(files(legacyLangDir).builtBy(generateLegacyLang))
+
 processResources {
     from(quicJar) {
         into 'dropin/libs'
@@ -89,6 +110,66 @@ jar {
                 'Built-On-Minecraft'    : minecraft_version
         ])
     }
+}
+
+// Test mods for the m2b self-tests (MILESTONES M2b): tiny Forge 1.12.2 jars built by the test build only, written to
+// <root>/build/testmods/cleanroom/dropin-testmod-<x|y|z>.jar. X and Y each add one item; Z adds nothing and only sets
+// the system property dropin.testmod.z. They name no Minecraft method (only Forge's registry API and constructors),
+// so the same jar runs in dev and production without reobfuscation.
+def testmodNames = ['x', 'y', 'z']
+def testmodSrc = layout.buildDirectory.dir('testmods-src')
+def generateTestmods = tasks.register('generateTestmods') {
+    inputs.property('revision', 1)
+    outputs.dir(testmodSrc)
+    def outDir = testmodSrc.get().asFile
+    doLast {
+        project.delete(outDir)
+        testmodNames.each { String n ->
+            def id = "dropin_testmod_${n}"
+            def cls = "TestMod${n.toUpperCase()}"
+            def body = n == 'z' ? '''    public ''' + cls + '''() {
+        System.setProperty("dropin.testmod.z", "loaded");
+    }
+''' : '''    @net.minecraftforge.fml.common.eventhandler.SubscribeEvent
+    public static void items(net.minecraftforge.event.RegistryEvent.Register<net.minecraft.item.Item> event) {
+        event.getRegistry().register(new net.minecraft.item.Item().setRegistryName("''' + id + '''", "item"));
+    }
+'''
+            def java = """package dropin.testmod.${n};
+
+@net.minecraftforge.fml.common.Mod(modid = "${id}", name = "DropIn test mod ${n.toUpperCase()}", version = "1.0.0", acceptedMinecraftVersions = "[1.12.2]")
+@net.minecraftforge.fml.common.Mod.EventBusSubscriber(modid = "${id}")
+public final class ${cls} {
+${body}}
+"""
+            def javaFile = new File(outDir, "java/dropin/testmod/${n}/${cls}.java")
+            javaFile.parentFile.mkdirs()
+            javaFile.setText(java, 'UTF-8')
+            def meta = new File(outDir, "meta/${n}/mcmod.info")
+            meta.parentFile.mkdirs()
+            meta.setText("""[{"modid": "${id}", "name": "DropIn test mod ${n.toUpperCase()}", "version": "1.0.0", "mcversion": "1.12.2"}]
+""", 'UTF-8')
+        }
+    }
+}
+def compileTestmods = tasks.register('compileTestmods', JavaCompile) {
+    dependsOn(generateTestmods)
+    source(testmodSrc.map { it.dir('java') })
+    classpath = sourceSets.main.compileClasspath
+    options.release = 25
+    destinationDirectory = layout.buildDirectory.dir('testmods-classes')
+}
+def testmodJarTasks = testmodNames.collect { String n ->
+    tasks.register("testmod${n.toUpperCase()}Jar", Jar) {
+        dependsOn(compileTestmods)
+        archiveFileName = "dropin-testmod-${n}.jar"
+        destinationDirectory = rootProject.layout.buildDirectory.dir('testmods/cleanroom')
+        from(layout.buildDirectory.dir('testmods-classes')) { include "dropin/testmod/${n}/**" }
+        from(testmodSrc.map { it.dir("meta/${n}") })
+    }
+}
+tasks.register('testmodJars') {
+    dependsOn(testmodJarTasks)
 }
 
 // Runs. runClient: a normal dev client (game folder cleanroom/run/client). runClientA/B/C: the self-test slots

@@ -12,16 +12,15 @@ import dropin.mc.handoff.CrashFailover;
 import dropin.mc.host.HostSync;
 import dropin.mc.member.SyncClient;
 import dropin.mc.menu.SessionLine;
+import dropin.mc.coop.Prompts;
 import dropin.mc.selftest.M1Scenarios.State;
 import dropin.mc.selftest.Scenarios.Context;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.ConfirmScreen;
-import net.minecraft.client.gui.screens.PauseScreen;
-import net.minecraft.client.gui.screens.TitleScreen;
-import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.server.IntegratedServer;
-import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.block.Blocks;
+import net.minecraft.client.gui.GuiIngameMenu;
+import net.minecraft.client.gui.GuiMainMenu;
+import net.minecraft.init.Blocks;
+import net.minecraft.server.integrated.IntegratedServer;
+import net.minecraft.util.math.BlockPos;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -41,10 +40,12 @@ import static dropin.mc.selftest.M2Scenarios.copyComplete;
 import static dropin.mc.selftest.M2Scenarios.folder;
 import static dropin.mc.selftest.M2Scenarios.hostA;
 import static dropin.mc.selftest.M2Scenarios.joinB;
+import static dropin.mc.selftest.M3Scenarios.blockAt;
+import static dropin.mc.selftest.M3Scenarios.loadChunk;
+import static dropin.mc.selftest.M3Scenarios.myUuid;
 import static dropin.mc.selftest.M3Scenarios.players;
 import static dropin.mc.selftest.Scenarios.PEER_TICKS;
 import static dropin.mc.selftest.Scenarios.SHORT_TICKS;
-import static dropin.mc.selftest.Scenarios.WORLD_ID;
 import static dropin.mc.selftest.Scenarios.WORLD_TICKS;
 import static dropin.mc.selftest.Scenarios.failIfDisconnected;
 import static dropin.mc.selftest.Scenarios.inWorld;
@@ -92,13 +93,17 @@ final class M4Scenarios {
     // ---- building blocks --------------------------------------------------------------------------
 
     private static void command(Minecraft mc, String command) {
-        IntegratedServer server = mc.getSingleplayerServer();
-        server.execute(() -> server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), command));
+        IntegratedServer server = mc.getIntegratedServer();
+        server.addScheduledTask(() -> M3Scenarios.runCommand(server, command));
+    }
+
+    /** 1.21.1 {@code forceload add 0 0}; 1.12.2 has no forceload command (see {@link M3Scenarios#loadChunk}). */
+    private static void forceLoadProbeChunk(Minecraft mc) {
+        loadChunk(mc.getIntegratedServer(), 0, 0);
     }
 
     private static boolean blockOnServer(Minecraft mc) {
-        IntegratedServer server = mc.getSingleplayerServer();
-        return server != null && server.overworld().getBlockState(BLOCK_POS).is(Blocks.DIAMOND_BLOCK);
+        return Boolean.TRUE.equals(blockAt(mc, BLOCK_POS, Blocks.DIAMOND_BLOCK));
     }
 
     private static Election.Peer peer(List<Election.Peer> peers, String uuid) {
@@ -122,6 +127,8 @@ final class M4Scenarios {
                 .step("B and C have full copies", 2 * PEER_TICKS, () -> ctx.sharedExists("b-copied") && ctx.sharedExists("c-copied"))
                 .action("place a block", () -> {
                     before[0] = HostSync.current().seq();
+                    // 1.12.2 port: setblock needs the chunk loaded (M3Scenarios.loadChunk).
+                    forceLoadProbeChunk(mc);
                     command(mc, BLOCK_COMMAND);
                 })
                 .step("block placed", SHORT_TICKS, () -> blockOnServer(mc))
@@ -155,7 +162,7 @@ final class M4Scenarios {
                 .step("copy complete", 2 * PEER_TICKS, copyComplete(mc, state))
                 .action("tell A", () -> {
                     freeLanPort();
-                    ctx.writeShared(who + "-uuid", mc.getUser().getProfileId().toString());
+                    ctx.writeShared(who + "-uuid", myUuid(mc));
                     ctx.writeShared(who + "-copied", "ok");
                 })
                 .step("the checkpoint with the block is here, and the host's list shows B and C at it", 2 * PEER_TICKS, () -> {
@@ -183,18 +190,18 @@ final class M4Scenarios {
                     require(info.percent() == 100, "the status line says " + info.percent() + "%, the copy is complete");
                     require(ctx.online() || Boolean.TRUE.equals(info.direct()), "the status line does not say the path is direct: " + info.direct());
                     require(info.ageSeconds() >= 0 && info.ageSeconds() < 60, "the last checkpoint is said to be " + info.ageSeconds() + " s old");
-                    String text = SessionLine.text(info).getString();
+                    String text = SessionLine.text(info).getUnformattedText();
                     require(text.contains("DevA") && text.contains("100"), "the status line reads '" + text + "'");
                     DropIn.LOGGER.info("Self-test: {} sees the order B, C; status line: {}", who.toUpperCase(), text);
-                    mc.setScreen(new PauseScreen(true));
+                    mc.displayGuiScreen(new GuiIngameMenu());
                 })
                 .step("the pause menu is drawn with the line", SHORT_TICKS, () -> {
                     failIfDisconnected(mc);
-                    require(mc.screen instanceof PauseScreen, "the screen is " + mc.screen);
+                    require(mc.currentScreen instanceof GuiIngameMenu, "the screen is " + mc.currentScreen);
                     return ++drawn[0] > 20;
                 })
                 .action("tell A", () -> {
-                    mc.setScreen(null);
+                    mc.displayGuiScreen(null);
                     ctx.writeShared(who + "-ready", "ok");
                 });
     }
@@ -212,7 +219,7 @@ final class M4Scenarios {
                             who + " took over with root " + CrashFailover.takeoverRoot() + ", A's checkpoint " + seq + " has " + reported[1]);
                     DropIn.LOGGER.info("Self-test: {} took over {} ms after losing the host, at checkpoint {} with root {}", who,
                             CrashFailover.resolvedAfterMs(), CrashFailover.takeoverSeq(), CrashFailover.takeoverRoot());
-                    command(mc, "forceload add 0 0");
+                    forceLoadProbeChunk(mc);
                 })
                 .step("the block placed before the last checkpoint is there", SHORT_TICKS, () -> blockOnServer(mc))
                 .action("the status line says so", () -> {
@@ -230,7 +237,7 @@ final class M4Scenarios {
         StepRunner runner = member(ctx, state, "b")
                 .step("took over as host", 3 * PEER_TICKS, () -> CrashFailover.lastRole() == CrashFailover.Role.ELECTED && hosting(ctx))
                 .action("it was B's turn at once", () -> {
-                    String me = mc.getUser().getProfileId().toString();
+                    String me = myUuid(mc);
                     require(!CrashFailover.lastOrder().isEmpty() && CrashFailover.lastOrder().get(0).equals(me),
                             "B took over although the order was " + CrashFailover.lastOrder());
                     require(CrashFailover.resolvedAfterMs() < Election.STEP_MS, "B took " + CrashFailover.resolvedAfterMs()
@@ -250,11 +257,11 @@ final class M4Scenarios {
         // No input from here on: A is killed, B takes over, and this game must be back in the world by itself.
         return member(ctx, state, "c")
                 .step("back in the world, on B's session", 4 * PEER_TICKS, () -> CrashFailover.lastRole() == CrashFailover.Role.FOLLOWER
-                        && ctx.sharedExists("b-hosting") && inWorld(mc) && mc.getSingleplayerServer() == null
+                        && ctx.sharedExists("b-hosting") && inWorld(mc) && mc.getIntegratedServer() == null
                         && SyncClient.status(state.world.worldId()) != null)
                 .step("C sees the block", SHORT_TICKS, () -> {
                     failIfDisconnected(mc);
-                    return mc.level != null && mc.level.getBlockState(BLOCK_POS).is(Blocks.DIAMOND_BLOCK);
+                    return mc.world != null && mc.world.getBlockState(BLOCK_POS).getBlock() == Blocks.DIAMOND_BLOCK;
                 })
                 .action("the host is B now", () -> {
                     SessionLine.Info info = SessionLine.info(mc);
@@ -283,7 +290,7 @@ final class M4Scenarios {
         StepRunner runner = member(ctx, state, "c")
                 .step("took over as host after B's turn", 3 * PEER_TICKS, () -> CrashFailover.lastRole() == CrashFailover.Role.ELECTED && hosting(ctx))
                 .action("C waited for B first", () -> {
-                    String me = mc.getUser().getProfileId().toString();
+                    String me = myUuid(mc);
                     require(CrashFailover.lastOrder().equals(List.of(ctx.readShared("b-uuid"), me)),
                             "the order was " + CrashFailover.lastOrder() + ", expected B then C");
                     require(CrashFailover.resolvedAfterMs() >= Election.STEP_MS, "C took over after " + CrashFailover.resolvedAfterMs()
@@ -303,11 +310,14 @@ final class M4Scenarios {
         StepRunner second = quitToTitle(first, ctx)
                 .action("press Play", () -> pressPlay(mc, state))
                 .step("hosting again", WORLD_TICKS, () -> hosting(ctx))
-                .action("place a block", () -> command(mc, BLOCK_COMMAND))
+                .action("place a block", () -> {
+                    forceLoadProbeChunk(mc);
+                    command(mc, BLOCK_COMMAND);
+                })
                 .step("block placed", SHORT_TICKS, () -> blockOnServer(mc));
         return quitToTitle(second, ctx)
                 .action("report the last checkpoint", () -> {
-                    Path file = mc.getLevelSource().getLevelPath(WORLD_ID).resolve(CoopWorldStore.MARKER_DIR).resolve("ledger.jsonl");
+                    Path file = M3Scenarios.worldFolder(mc).resolve(CoopWorldStore.MARKER_DIR).resolve("ledger.jsonl");
                     LedgerEntry last = Ledger.load(state.world.keys().auth(), file).last();
                     require(last != null, "A has no checkpoint");
                     DropIn.LOGGER.info("Self-test: A's second session ended on checkpoint {}", last.seq());
@@ -334,9 +344,10 @@ final class M4Scenarios {
                             "0000aaaa-0000-0000-0000-00000000beef", "Rival", RIVAL_SESS, now)
                             .with(RendezvousRecord.HOST, "", "127.0.0.1:1", now));
                 })
-                .step("A closed its world and says why", WORLD_TICKS, () -> mc.getSingleplayerServer() == null && mc.level == null
+                .step("A closed its world and says why", WORLD_TICKS, () -> mc.getIntegratedServer() == null && mc.world == null
                         && "Rival".equals(dropin.mc.handoff.HostHandoff.lastRivalClosed())
-                        && mc.screen instanceof net.minecraft.client.gui.screens.AlertScreen)
+                        // 1.12.2 port: the 26.x AlertScreen is dropin.mc.coop.Prompts.Alert.
+                        && mc.currentScreen instanceof Prompts.Alert)
                 .action("no handoff, and the record is still the other session's", () -> {
                     require(HostSync.lastHandedTo() == null || HostSync.lastHandedTo().isEmpty(),
                             "A handed the world to " + HostSync.lastHandedTo());
@@ -357,9 +368,9 @@ final class M4Scenarios {
         return joinB(ctx, state, Map.of())
                 .step("copy complete", 2 * PEER_TICKS, copyComplete(mc, state))
                 .action("leave", () -> dropin.mc.compat.Compat.disconnectFromWorld(mc, dropin.mc.compat.Compat.DEFAULT_QUIT_MESSAGE))
-                .step("left", SHORT_TICKS, () -> mc.level == null)
+                .step("left", SHORT_TICKS, () -> mc.world == null)
                 .action("tell A", () -> {
-                    mc.setScreen(new TitleScreen());
+                    mc.displayGuiScreen(new GuiMainMenu());
                     ctx.writeShared("b-left", "ok");
                 })
                 .step("A played a session without B and quit", 3 * WORLD_TICKS, () -> ctx.sharedExists("a-done"))
@@ -370,7 +381,7 @@ final class M4Scenarios {
                     require(before.size() > 3, "the copy has only " + before.size() + " files");
                     pressPlay(mc, state);
                 })
-                .step("the warning is shown", SHORT_TICKS, () -> CoopLauncher.staleWarning() != null && mc.screen instanceof ConfirmScreen)
+                .step("the warning is shown", SHORT_TICKS, () -> CoopLauncher.staleWarning() != null && mc.currentScreen instanceof Prompts.Confirm)
                 .action("it is about A's last session; Cancel", () -> {
                     RendezvousRecord record = CoopLauncher.staleWarning();
                     long seq = Long.parseLong(ctx.readShared("a-done"));
@@ -385,9 +396,9 @@ final class M4Scenarios {
                     CoopLauncher.answerStale(false);
                 })
                 .step("nothing was opened", SHORT_TICKS, () -> {
-                    require(mc.getSingleplayerServer() == null && mc.level == null && HostSession.current() == null,
+                    require(mc.getIntegratedServer() == null && mc.world == null && HostSession.current() == null,
                             "the world was opened after Cancel");
-                    require(CoopLauncher.staleWarning() == null && !(mc.screen instanceof ConfirmScreen), "the warning is still shown");
+                    require(CoopLauncher.staleWarning() == null && !(mc.currentScreen instanceof Prompts.Confirm), "the warning is still shown");
                     return ++stayed[0] > 100;
                 })
                 .action("the copy is untouched", () -> {
@@ -400,14 +411,19 @@ final class M4Scenarios {
                     DropIn.LOGGER.info("Self-test: Cancel left all {} files of B's copy as they were", after.size());
                     pressPlay(mc, state);
                 })
-                .step("the warning is shown again", SHORT_TICKS, () -> CoopLauncher.staleWarning() != null && mc.screen instanceof ConfirmScreen)
+                .step("the warning is shown again", SHORT_TICKS, () -> CoopLauncher.staleWarning() != null && mc.currentScreen instanceof Prompts.Confirm)
                 .action("Play anyway", () -> CoopLauncher.answerStale(true))
                 .step("B hosts its older copy", WORLD_TICKS, () -> hosting(ctx))
-                .action("load the block's chunk", () -> command(mc, "forceload add 0 0"))
+                .action("load the block's chunk", () -> forceLoadProbeChunk(mc))
                 .step("the block of A's second session is not in it", SHORT_TICKS, () -> {
-                    IntegratedServer server = mc.getSingleplayerServer();
-                    require(!blockOnServer(mc), "B's copy has the block A placed while B was away");
-                    return server.overworld().getBlockState(Scenarios.PROBE_POS).is(Blocks.GOLD_BLOCK);
+                    // 1.12.2 port: a block of a chunk that is not loaded yet reads as unknown (null): wait for it.
+                    Boolean diamond = blockAt(mc, BLOCK_POS, Blocks.DIAMOND_BLOCK);
+                    Boolean probe = blockAt(mc, Scenarios.PROBE_POS, Blocks.GOLD_BLOCK);
+                    if (diamond == null || probe == null) {
+                        return false;
+                    }
+                    require(!diamond, "B's copy has the block A placed while B was away");
+                    return probe;
                 })
                 .action("tell A", () -> ctx.writeShared("b-checked", "ok"));
     }

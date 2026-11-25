@@ -750,3 +750,24 @@ Decisions (flag to the owner; the design describes 26.x):
 - `PlayerFaceRenderer: public static void draw(GuiGraphics, PlayerSkin, int, int, int)`
 - `Attributes.MAX_HEALTH` is registered as `"generic.max_health"`; `StateHolder.NAME_TAG = "Name"` (chunk palette entries are
   `{Name, Properties}`). Self-test commands and readers use these.
+
+## Port to 1.12.2 on Cleanroom (branch port/1.12.2, 2026-11-25, in progress)
+
+Base: `port/1.21.1` (bb6d1c5), which already has the pre-26.x world layout (DIM-1/DIM1, playerdata/stats/advancements)
+and the 1.21.1 self-test fixes. The tunnel takes 26.3's QuiclimeSession, because Cleanroom ships Netty 4.2 as 26.3 does.
+Toolchain: CleanroomGradle 0.22.0 + Cleanroom 0.7.16-alpha (Java 25, MCP names, reobfJar to SRG).
+
+### Core layout extension: a mod's dimensions (owner approved 2026-11-25, only on port/1.12.2)
+1.12.2 (Forge) keeps dimension N in the folder that `WorldProvider.getSaveFolder()` names. Quoted from the decompiled
+1.12.2 source (cleanroom-ref/src-mc/net/minecraft/world/WorldProvider.java:193):
+`@Nullable public String getSaveFolder() { return this.dimensionId == 0 ? null : "DIM" + this.dimensionId; }`
+and `AnvilSaveHandler.getChunkLoader` makes `new File(worldDir, provider.getSaveFolder())`.
+So `RecordKey` now maps `forge:dim<N>` to and from `DIM<N>` (N other than -1, 0 and 1; DIM-1 and DIM1 stay the
+Nether and the End). `DIM<N>/data/**` is a game file, and `DIM*/forcedchunks.dat` is allowed: ForgeChunkManager keeps it
+in each dimension folder, `new File(worldServer.getChunkSaveLocation(), "forcedchunks.dat")`. `Branches.worldLevel` covers
+`DIM<N>/data/`. Case aliases such as `dim2/...` are refused.
+ManifestTest: the null list loses "DIM2" and gains DIMx, DIM02, DIM0, DIM+2, DIM, dim2 and DIM99999999999. New test
+`legacyForgeDimensionFolders`. `:core:test`: 212 tests, 0 failures.
+Core `ChunkContent` (merge content hash): 1.12.2 chunks keep `LastUpdate`/`InhabitedTime` inside the root's `Level`
+compound (pre-1.18 layout), so the strip now also covers that compound. New test
+`contentHashOfA1122ChunkLeavesOutTheFieldsInLevel`; the 1.18+ test is unchanged.

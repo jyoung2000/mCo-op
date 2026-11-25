@@ -3,26 +3,22 @@ package dropin.mc.menu;
 import dropin.core.world.CoopWorld;
 import dropin.mc.coop.CoopWorlds;
 import dropin.mc.coop.HostSession;
+import dropin.mc.menu.ui.DScreen;
 import dropin.tunnel.Config;
-import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.screens.ConfirmScreen;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.network.chat.CommonComponents;
-import net.minecraft.network.chat.Component;
+import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.gui.GuiYesNo;
+import net.minecraft.client.resources.I18n;
 
 /** What every player can do with one co-op world (DESIGN 4.4): see its players and mods, invite, remove it here. */
-public class WorldInfoScreen extends Screen {
+public class WorldInfoScreen extends DScreen {
     private static final String K = "text.dropin_coop.";
 
-    private final Screen parent;
     private final String worldId;
     private CoopWorld world;
-    private Component notice = Component.empty();
+    private String notice = "";
 
-    public WorldInfoScreen(Screen parent, String worldId) {
-        super(Component.translatable(K + "tooltip.info"));
-        this.parent = parent;
+    public WorldInfoScreen(GuiScreen parent, String worldId) {
+        super(parent, I18n.format(K + "tooltip.info"));
         this.worldId = worldId;
     }
 
@@ -33,56 +29,51 @@ public class WorldInfoScreen extends Screen {
         } catch (Exception e) {
             world = null;
         }
+        title = world == null ? I18n.format(K + "tooltip.info") : world.name();
         int x = this.width / 2 - 100;
         int y = 58;
         if (world != null) {
-            button(K + "button.players", x, y, () -> this.minecraft.setScreen(new PlayersScreen(this, worldId)));
-            button(K + "button.mods", x, y + 24, () -> this.minecraft.setScreen(new ModsScreen(this, worldId)));
-            button(K + "button.invite", x, y + 48, () -> this.minecraft.setScreen(new InviteScreen(this, world)));
-            button(K + "info.remove", x, y + 72, this::confirmRemove);
+            button(x, y, 200, I18n.format(K + "button.players"), b -> mc.displayGuiScreen(new PlayersScreen(this, worldId)));
+            button(x, y + 24, 200, I18n.format(K + "button.mods"), b -> mc.displayGuiScreen(new ModsScreen(this, worldId)));
+            button(x, y + 48, 200, I18n.format(K + "button.invite"), b -> mc.displayGuiScreen(new InviteScreen(this, world)));
+            button(x, y + 72, 200, I18n.format(K + "info.remove"), b -> confirmRemove());
         }
-        this.addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, button -> onClose())
-                .bounds(x, this.height - 26, 200, 20).build());
-    }
-
-    private void button(String key, int x, int y, Runnable action) {
-        this.addRenderableWidget(Button.builder(Component.translatable(key), button -> action.run()).bounds(x, y, 200, 20).build());
+        button(x, this.height - 26, 200, I18n.format("gui.done"), b -> onClose());
     }
 
     private void confirmRemove() {
-        this.minecraft.setScreen(new ConfirmScreen(yes -> {
+        // 1.12.2 port: GuiYesNo with a callback stands in for 26.x's ConfirmScreen.
+        mc.displayGuiScreen(new GuiYesNo((yes, id) -> {
             if (yes) {
-                CoopActions.Outcome outcome = CoopActions.remove(this.minecraft, world);
+                CoopActions.Outcome outcome = CoopActions.remove(mc, world);
                 if (outcome.ok()) {
-                    this.minecraft.setScreen(parent);
+                    mc.displayGuiScreen(parent);
                     return;
                 }
-                notice = outcome.message();
+                notice = outcome.message().getFormattedText();
             }
-            this.minecraft.setScreen(this);
-        }, Component.translatable(K + "remove.title", world.name()), Component.translatable(K + "remove.question")));
+            mc.displayGuiScreen(this);
+        }, I18n.format(K + "remove.title", world.name()), I18n.format(K + "remove.question"), 0));
     }
 
     @Override
-    public void onClose() {
-        this.minecraft.setScreen(parent);
+    protected int titleY() {
+        return 14;
     }
 
     @Override
-    public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
-        super.render(graphics, mouseX, mouseY, a);
-        graphics.drawCenteredString(this.font, world == null ? this.title : Component.literal(world.name()), this.width / 2, 14, -1);
+    protected void drawContents(int mouseX, int mouseY, float partialTicks) {
         if (world != null) {
-            String folder = CoopActions.folders(this.minecraft).get(worldId);
-            graphics.drawCenteredString(this.font, CoopWorldsScreen.statusLine(this.minecraft, world, folder), this.width / 2, 28, 0xFFA0A0A0);
+            String folder = CoopActions.folders(mc).get(worldId);
+            drawCenteredString(this.fontRenderer, CoopWorldsScreen.statusLine(mc, world, folder), this.width / 2, 28, 0xFFA0A0A0);
             // The relay address is shown here instead of in chat, and only while this PC hosts the world.
             HostSession session = HostSession.current();
             if (session != null && session.world().worldId().equals(worldId) && !session.announcedAddr().isEmpty()
                     && !Config.INSTANCE.hideDomainInChat.value()) {
-                graphics.drawCenteredString(this.font, Component.translatable(K + "info.address", session.announcedAddr()),
+                drawCenteredString(this.fontRenderer, I18n.format(K + "info.address", session.announcedAddr()),
                         this.width / 2, 40, 0xFF55FF55);
             }
         }
-        graphics.drawCenteredString(this.font, notice, this.width / 2, this.height - 40, -9216);
+        drawCenteredString(this.fontRenderer, notice, this.width / 2, this.height - 40, 0xFFFFDC00);
     }
 }

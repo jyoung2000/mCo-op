@@ -25,7 +25,10 @@ import dropin.mc.menu.ModConsentScreen;
 import dropin.mc.net.SyncPipe;
 import dropin.mc.policy.WorldPolicy;
 import net.minecraft.client.Minecraft;
-import net.minecraft.network.chat.Component;
+import net.minecraft.util.text.ITextComponent;
+import net.minecraft.util.text.TextComponentTranslation;
+import net.minecraft.world.storage.ISaveFormat;
+import net.minecraft.world.storage.SaveFormatOld;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -165,16 +168,16 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
      *
      * @param folder the world's folder under saves/, or null if there is none yet
      */
-    public static Component statusLine(String worldId, Path folder) {
+    public static ITextComponent statusLine(String worldId, Path folder) {
         SyncClientSession.Status live = status(worldId);
         if (live != null) {
             switch (live.phase()) {
                 case WAITING_DIRECT:
-                    return Component.translatable(K + "sync.waiting_direct");
+                    return new TextComponentTranslation(K + "sync.waiting_direct");
                 case COMPARING, DOWNLOADING:
-                    return Component.translatable(K + "sync.downloading", percent(live.have(), live.total()));
+                    return new TextComponentTranslation(K + "sync.downloading", percent(live.have(), live.total()));
                 case DIVERGED:
-                    return Component.translatable(K + "sync.diverged");
+                    return new TextComponentTranslation(K + "sync.diverged");
                 default:
                     return null;
             }
@@ -184,7 +187,7 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
             if (Files.isRegularFile(file)) {
                 SyncState saved = SyncState.load(file);
                 if (!saved.complete()) {
-                    return Component.translatable(K + "sync.incomplete", saved.percent());
+                    return new TextComponentTranslation(K + "sync.incomplete", saved.percent());
                 }
             }
         }
@@ -396,7 +399,7 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
 
     /** True while this player is in a remote session (the local copy is therefore not open). */
     private boolean connected() {
-        return !stop && mc.player != null && mc.getSingleplayerServer() == null && mc.getConnection() != null;
+        return !stop && mc.player != null && mc.getIntegratedServer() == null && mc.getConnection() != null;
     }
 
     /**
@@ -404,7 +407,7 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
      * download at once (DESIGN 4.7), so it is never taken for a world before a checkpoint is complete.
      */
     public static synchronized Path ensureFolder(Minecraft mc, CoopWorld world) throws IOException {
-        Path saves = mc.getLevelSource().getBaseDir();
+        Path saves = savesDir(mc);
         String known = CoopActions.folders(mc).get(world.worldId());
         if (known != null) {
             return saves.resolve(known);
@@ -421,6 +424,18 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
         CoopWorlds.store().attachFolder(folder, world.worldId());
         SyncState.EMPTY.save(folder.resolve(CoopWorldStore.MARKER_DIR).resolve("state.json"));
         return folder;
+    }
+
+    /**
+     * 1.12.2 port: the saves/ folder of the game's save format (26.x {@code LevelStorageSource.getBaseDir()}).
+     * The client's ISaveFormat is an AnvilSaveConverter (a SaveFormatOld) over {@code gameDir/saves}.
+     */
+    private static Path savesDir(Minecraft mc) {
+        ISaveFormat format = mc.getSaveLoader();
+        if (format instanceof SaveFormatOld old) {
+            return old.savesDirectory.toPath();
+        }
+        return mc.gameDir.toPath().resolve("saves");
     }
 
     // ---- SyncClientSession.Local ----------------------------------------------------------------
@@ -442,7 +457,7 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
 
     @Override
     public String playerUuid() {
-        return mc.getUser().getProfileId().toString();
+        return mc.getSession().getProfile().getId().toString();
     }
 
     @Override
@@ -543,7 +558,7 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
             lastSplit = "separate:" + saved;
             DropIn.LOGGER.warn("The copy of '{}' left the main world at a checkpoint its deltas no longer reach; it was saved as the "
                     + "separate world '{}' and now follows the host", world.name(), saved);
-            chat(Component.translatable(K + "merge.too_old", saved));
+            chat(new TextComponentTranslation(K + "merge.too_old", saved));
         } else {
             Map<String, Branches.Change> keys = Branches.bundle(changed,
                     key -> leftoverBase.containsKey(key) ? emptyToNull(leftoverBase.get(key)) : manifest.get(key),
@@ -587,7 +602,7 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
             DropIn.LOGGER.info("The copy of '{}' left the main world after checkpoint {}: {} records of {}'s session are preserved as "
                     + "branch {} and are merged when the world starts next", world.name(), ancestor.seq(), records, head.name(),
                     head.hash().substring(0, 16));
-            chat(Component.translatable(K + "merge.preserved"));
+            chat(new TextComponentTranslation(K + "merge.preserved"));
         }
         ledger.truncate(ancestor == null ? 0 : ancestor.seq());
         state = new SyncState(ancestor == null ? "" : ancestor.hash(), ancestor == null ? 0 : ancestor.seq(), state.complete(),
@@ -601,10 +616,10 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
         return hash == null || hash.isEmpty() ? null : hash;
     }
 
-    private void chat(Component message) {
-        mc.execute(() -> {
+    private void chat(ITextComponent message) {
+        mc.addScheduledTask(() -> {
             if (mc.player != null) {
-                mc.gui.getChat().addMessage(message);
+                mc.ingameGUI.getChatGUI().printChatMessage(message);
             }
         });
     }
@@ -709,9 +724,9 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
         if (now.phase() == Phase.WAITING_DIRECT && !waitingTold) {
             waitingTold = true;
             DropIn.LOGGER.info("World sync of '{}' is waiting for a direct connection", world.name());
-            mc.execute(() -> {
+            mc.addScheduledTask(() -> {
                 if (mc.player != null) {
-                    mc.gui.getChat().addMessage(Component.translatable(K + "sync.waiting_direct"));
+                    mc.ingameGUI.getChatGUI().printChatMessage(new TextComponentTranslation(K + "sync.waiting_direct"));
                     waitingShown = true;
                 }
             });

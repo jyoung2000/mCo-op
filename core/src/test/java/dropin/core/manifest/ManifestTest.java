@@ -201,7 +201,8 @@ class ManifestTest {
         for (String dim : List.of("minecraft:overworld", "minecraft:the_nether", "minecraft:the_end", "somemod:deep/sky")) {
             assertEquals(dim, RecordKey.dimensionOfFolder(RecordKey.storageFolder(dim)), dim);
         }
-        for (String none : List.of("dim-1", "DIM2", "region", "dimensions/minecraft", "dimensions/minecraft/the_nether/x/..",
+        // 1.12.2 port: DIM2 is a mod's dimension folder there (legacyForgeDimensionFolders); these are no folder at all
+        for (String none : List.of("dim-1", "DIMx", "DIM02", "DIM0", "DIM+2", "DIM", "dim2", "DIM99999999999", "region", "dimensions/minecraft", "dimensions/minecraft/the_nether/x/..",
                 "data", "dimensions/Some/thing")) {
             assertNull(RecordKey.dimensionOfFolder(none), none);
         }
@@ -216,5 +217,29 @@ class ManifestTest {
         }
         assertTrue(RecordKey.fileAllowed("DIM-1/data/huge.dat", RecordKey.MAX_MOD_FILE + 1));
         assertTrue(RecordKey.fileAllowed("playerdata/huge.dat", RecordKey.MAX_MOD_FILE + 1));
+    }
+
+    /** 1.12.2 (Forge): a mod's dimension N is forge:dim<N>, kept in DIM<N> (WorldProvider.getSaveFolder()). */
+    @Test
+    void legacyForgeDimensionFolders() {
+        for (int n : new int[] {2, -7}) {
+            assertEquals("DIM" + n, RecordKey.storageFolder("forge:dim" + n));
+            assertEquals("forge:dim" + n, RecordKey.dimensionOfFolder("DIM" + n));
+        }
+        // the Nether and the End keep their own ids
+        assertEquals("minecraft:the_nether", RecordKey.dimensionOfFolder("DIM-1"));
+        assertEquals("minecraft:the_end", RecordKey.dimensionOfFolder("DIM1"));
+        assertNotEquals("DIM1", RecordKey.storageFolder("forge:dim1"));
+        assertNotEquals("DIM-1", RecordKey.storageFolder("forge:dim-1"));
+        // their saved data and Forge's forced chunks travel, as game files; their region folders never do
+        for (String ok : List.of("DIM2/data/villages.dat", "DIM-7/data/x/y.dat", "DIM2/forcedchunks.dat",
+                "DIM-1/forcedchunks.dat", "DIM1/forcedchunks.dat")) {
+            assertTrue(RecordKey.fileAllowed(ok), ok);
+        }
+        assertTrue(RecordKey.fileAllowed("DIM2/data/huge.dat", RecordKey.MAX_MOD_FILE + 1));
+        for (String no : List.of("DIM2/region/r.0.0.mca", "DIM2/region/notes.txt", "DIM2/level.dat", "dim2/data/villages.dat",
+                "Dim2/data/villages.dat", "dim2/forcedchunks.dat", "DIM-7/region/r.0.0.mca")) {
+            assertFalse(RecordKey.fileAllowed(no), no);
+        }
     }
 }

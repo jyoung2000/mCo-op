@@ -3,7 +3,7 @@ package dropin.mc.handoff;
 import dropin.core.sync.Election;
 import dropin.core.world.CoopWorld;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.GuiScreen;
 
 import java.util.List;
 import java.util.Map;
@@ -81,22 +81,24 @@ public final class CrashFailover {
         expected = true;
     }
 
-    /** Head of {@code Minecraft.disconnectFromWorld}: a member that leaves on purpose has not lost its host. */
+    /** Head of {@code Compat.disconnectFromWorld}: a member that leaves on purpose has not lost its host. */
     public static void leaving(Minecraft mc) {
-        if (mc.getSingleplayerServer() == null) {
+        if (mc.getIntegratedServer() == null) {
             expected = true;
         }
     }
 
     /**
-     * The game connection ended and the game is about to show {@code vanilla} ("Connection lost"). Client thread.
+     * The game connection ended and the game shows {@code vanilla} ("Connection lost"). Client thread.
+     * (1.12.2 port: called at the end of {@code NetHandlerPlayClient.onDisconnect}, after {@code loadWorld(null)};
+     * the caller passes a null address when the connection was to this game's own integrated server.)
      *
      * @param address the address of the connection that ended, as the game was given it
      * @return the screen to show instead, or null if this was not a co-op member losing its host unexpectedly
      */
-    public static Screen lost(Minecraft mc, String address, Screen vanilla) {
+    public static GuiScreen lost(Minecraft mc, String address, GuiScreen vanilla) {
         Session now = session;
-        if (now == null || expected || mc.getSingleplayerServer() != null || !now.address().equals(address)) {
+        if (now == null || expected || mc.getIntegratedServer() != null || !now.address().equals(address)) {
             return null;
         }
         session = null;

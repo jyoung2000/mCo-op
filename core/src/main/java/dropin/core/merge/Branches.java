@@ -83,9 +83,22 @@ public final class Branches {
             return true;
         }
         // 26.x keeps a dimension's saved data in dimensions/<namespace>/<name>/data/; 1.21.1 and older keep the
-        // Nether's and the End's in DIM-1/data/ and DIM1/data/.
-        return path.startsWith("dimensions/") && path.contains("/data/")
-                || path.startsWith("DIM-1/data/") || path.startsWith("DIM1/data/");
+        // Nether's and the End's in DIM-1/data/ and DIM1/data/; 1.12.2 a mod's dimension N in DIM<N>/data/.
+        if (path.startsWith("dimensions/") && path.contains("/data/")) {
+            return true;
+        }
+        // 1.12.2: Forge's force-loaded chunks (forcedchunks.dat in the root and in each dimension folder) are what
+        // 26.x keeps in data/chunks.dat, so they are world-level too.
+        if (path.equals("forcedchunks.dat")) {
+            return true;
+        }
+        int slash = path.indexOf('/');
+        if (slash > 0 && path.substring(slash + 1).equals("forcedchunks.dat")
+                && RecordKey.dimensionOfFolder(path.substring(0, slash)) != null) {
+            return true;
+        }
+        return slash > 0 && path.startsWith("/data/", slash)
+                && RecordKey.dimensionOfFolder(path.substring(0, slash)) != null;
     }
 
     private static final java.util.Set<String> LEGACY_PLAYER_FOLDERS = java.util.Set.of("playerdata", "advancements", "stats");

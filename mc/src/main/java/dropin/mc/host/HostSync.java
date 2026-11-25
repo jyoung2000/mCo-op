@@ -23,13 +23,18 @@ import dropin.mc.net.SyncPipe;
 import dropin.mc.policy.DevHooks;
 import dropin.mc.policy.WorldPolicy;
 import io.netty.channel.Channel;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.chat.Component;
-import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerPlayer;
 import dropin.mc.compat.LevelBasedPermissionSet;
-import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.storage.LevelResource;
+import dropin.mixin.mc.NetworkSystemAccess;
+import net.minecraft.entity.player.EntityPlayerMP;
+import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.network.NetworkManager;
+import net.minecraft.network.NetworkSystem;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.text.ITextComponent;
+import net.minecraft.util.text.TextComponentTranslation;
+import net.minecraft.util.text.TextFormatting;
+import net.minecraft.world.WorldServer;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -45,11 +50,8 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
@@ -66,7 +68,6 @@ public final class HostSync implements SyncServerSession.Host {
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final Pattern REGION_FILE = Pattern.compile("r\\.(-?\\d+)\\.(-?\\d+)\\.mca");
     private static final long SAVE_TIMEOUT_MS = 120_000;
-    private static final long READ_TIMEOUT_S = 60;
     /** How long a quitting host waits for the members to take its last checkpoint. */
     private static final long QUIT_WAIT_MS = 10_000;
     /** DESIGN 4.9: how long a host that hands the world over waits for the members to confirm its last checkpoint. */
@@ -208,7 +209,7 @@ public final class HostSync implements SyncServerSession.Host {
     /** @param announcer publishes this session's last rendezvous record when the server stops (null: none) */
     public static void start(MinecraftServer server, CoopWorld world, String hostUuid, String hostName, String sess,
                              Announcer announcer) {
-        Path root = server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize();
+        Path root = worldFolder(server);
         Path dropin = root.resolve(CoopWorldStore.MARKER_DIR);
         unsynced = null;
         ChunkStores.track(root);
@@ -241,15 +242,39 @@ public final class HostSync implements SyncServerSession.Host {
             DropIn.LOGGER.error("World sync of '{}' could not start; friends can play but will not get a copy", world.name(), e);
             unsynced = new Unsynced(server, world);
             String reason = e.getMessage() == null ? e.toString() : e.getMessage();
-            net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
-            mc.execute(() -> mc.gui.getChat().addMessage(net.minecraft.network.chat.Component
-                    .translatable("text.dropin_coop.sync.start_failed", reason).withStyle(net.minecraft.ChatFormatting.RED)));
+            net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getMinecraft();
+            mc.addScheduledTask(() -> {
+                ITextComponent message = new TextComponentTranslation("text.dropin_coop.sync.start_failed", reason);
+                message.getStyle().setColor(TextFormatting.RED);
+                mc.ingameGUI.getChatGUI().printChatMessage(message);
+            });
         }
+    }
+
+    /** 1.12.2 port: the folder of the overworld's save handler is the world folder (26.x {@code LevelResource.ROOT}). */
+    private static Path worldFolder(MinecraftServer server) {
+        WorldServer overworld = server.getWorld(0);
+        return overworld.getSaveHandler().getWorldDirectory().toPath().toAbsolutePath().normalize();
+    }
+
+    /**
+     * Saves everything the game keeps of the hosted world, on the server thread. 1.12.2 port: the player data first
+     * (members in {@code playerdata/}; the singleplayer owner's in {@code playerdata/} and also inside
+     * {@code level.dat}, which {@code IntegratedPlayerList} fills from that same save), then every world with
+     * {@code saveAllChunks(true)} through {@code saveAllWorlds}: every changed chunk, {@code level.dat} and the saved
+     * data. 1.12.2's {@code saveChunks(false)} stops after 24 chunks, so a checkpoint never uses it. The chunks go to
+     * the loaders' pending maps, which is where a checkpoint reads them first (ChunkStores.read).
+     */
+    private static void saveAll(MinecraftServer server) {
+        if (server.getPlayerList() != null) {
+            server.getPlayerList().saveAllPlayerData();
+        }
+        server.saveAllWorlds(true);
     }
 
     private void run() {
         long next = 0;
-        while (!stopping && server.isRunning()) {
+        while (!stopping && server.isServerRunning()) {
             try {
                 long now = System.currentTimeMillis();
                 if (now >= next) {
@@ -295,10 +320,14 @@ public final class HostSync implements SyncServerSession.Host {
      */
     private LedgerEntry checkpoint(boolean save, boolean last) throws IOException, InterruptedException {
         AtomicLong saveNanos = new AtomicLong();
-        if (save && !server.isSameThread()) {
-            CompletableFuture<Void> saved = server.submit(() -> {
+        if (save && !server.isCallingFromMinecraftThread()) {
+            if (server.isServerStopped()) {
+                // callFromMainThread would run the save on this thread.
+                return null;
+            }
+            com.google.common.util.concurrent.ListenableFuture<Object> saved = server.addScheduledTask(() -> {
                 long from = System.nanoTime();
-                server.saveEverything(true, false, false);
+                saveAll(server);
                 saveNanos.set(System.nanoTime() - from);
             });
             long deadline = System.currentTimeMillis() + SAVE_TIMEOUT_MS;
@@ -538,7 +567,7 @@ public final class HostSync implements SyncServerSession.Host {
         return all;
     }
 
-    /** The chunk as the game's storage worker has it (a pending write, else what is on disk), or null. */
+    /** The chunk as the game's chunk loader has it (a pending write, else what is on disk), or null. */
     private byte[] readChunk(String key) throws IOException {
         RecordKey.Chunk chunk = RecordKey.parseChunk(key);
         ChunkStores.Store store = ChunkStores.find(root, chunk.dim(), chunk.kind());
@@ -546,12 +575,10 @@ public final class HostSync implements SyncServerSession.Host {
             return null;
         }
         try {
-            Optional<CompoundTag> tag = store.worker().loadAsync(new ChunkPos(chunk.cx(), chunk.cz()))
-                    .get(READ_TIMEOUT_S, TimeUnit.SECONDS);
-            return tag.map(ChunkBytes::canonical).orElse(null);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Interrupted reading " + key);
+            NBTTagCompound tag = ChunkStores.read(store, chunk.cx(), chunk.cz());
+            return tag == null ? null : ChunkBytes.canonical(tag);
+        } catch (IOException e) {
+            throw e;
         } catch (Exception e) {
             throw new IOException("Could not read " + key, e);
         }
@@ -564,9 +591,9 @@ public final class HostSync implements SyncServerSession.Host {
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
                 String relative = root.relativize(dir).toString().replace('\\', '/');
-                // A region-type folder of a dimension (1.21.1 layout: <world>/region, DIM-1/region, dimensions/<ns>/<path>/region)
-                boolean regionFolder = !relative.isEmpty() && RecordKey.KINDS.contains(dir.getFileName().toString())
-                        && RecordKey.dimensionOfFolder(root.relativize(dir.getParent()).toString().replace('\\', '/')) != null;
+                // The region folder of a dimension (1.12.2 layout: <world>/region, DIM-1/region, DIM1/region, DIM<N>/region)
+                boolean regionFolder = !relative.isEmpty() && dir.getFileName().toString().equals(ChunkStores.KIND)
+                        && ChunkStores.dimensionOfFolder(root.relativize(dir.getParent()).toString().replace('\\', '/')) != null;
                 return relative.equals(CoopWorldStore.MARKER_DIR) || regionFolder
                         ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
             }
@@ -642,9 +669,8 @@ public final class HostSync implements SyncServerSession.Host {
             sync.finalAnnounceTaken = true;
         }
         try {
-            if (server.getPlayerList() != null) {
-                server.saveEverything(true, true, false);
-            }
+            // 1.12.2 port: IntegratedServer.initiateShutdown has already logged the members out (their data saved).
+            saveAll(server);
             sync.checkpoint(false, true);
             long seq = sync.ledger.headSeq();
             // DESIGN 4.9 step 1: 30 s for a handoff. A host that already heard "nobody has a full copy" and quits
@@ -672,24 +698,25 @@ public final class HostSync implements SyncServerSession.Host {
     }
 
     /**
-     * 1.21.1: {@code IntegratedServer.halt} takes the members off the player list, so {@code stopServer} never sends them
-     * "Server closed"; their game connections end only when they next send a packet (up to a second for a player
-     * standing still). By then the host may have reopened the world and announced "starting", and a member reading that
-     * takes the quit for a crash. 26.x closes them right after the last record; this does the same, once the last
-     * checkpoint and the last record are out.
+     * 1.12.2 port: {@code IntegratedServer.initiateShutdown} takes the members off the player list
+     * ({@code playerLoggedOut}) without telling them, so {@code stopServer}'s {@code removeAllPlayers} never sends them
+     * "Server closed"; their game connections end only when they next send a packet. By then the host may have reopened
+     * the world and announced "starting", and a member reading that takes the quit for a crash. 26.x closes them right
+     * after the last record; this does the same, once the last checkpoint and the last record are out.
      */
     private static void closeMemberConnections(MinecraftServer server) {
-        net.minecraft.server.network.ServerConnectionListener listener = server.getConnection();
-        if (listener == null) {
+        NetworkSystem system = server.getNetworkSystem();
+        if (system == null) {
             return;
         }
-        List<net.minecraft.network.Connection> connections;
-        synchronized (listener.getConnections()) {
-            connections = new ArrayList<>(listener.getConnections());
+        List<NetworkManager> list = ((NetworkSystemAccess) system).dropin$networkManagers();
+        List<NetworkManager> connections;
+        synchronized (list) {
+            connections = new ArrayList<>(list);
         }
-        for (net.minecraft.network.Connection connection : connections) {
-            if (!connection.isMemoryConnection() && connection.isConnected()) {
-                connection.disconnect(Component.translatable("multiplayer.disconnect.server_shutdown"));
+        for (NetworkManager connection : connections) {
+            if (!connection.isLocalChannel() && connection.isChannelOpen()) {
+                connection.closeChannel(new TextComponentTranslation("multiplayer.disconnect.server_shutdown"));
             }
         }
     }
@@ -887,7 +914,7 @@ public final class HostSync implements SyncServerSession.Host {
         DropIn.LOGGER.warn("Not every member took the final checkpoint {} of '{}' in time", seq, world.name());
     }
 
-    /** Tail of {@code MinecraftServer.stopServer}: the storage workers are closed. */
+    /** Tail of {@code MinecraftServer.stopServer}: the worlds are saved and flushed. */
     public static void serverStopped(MinecraftServer server) {
         HostSync sync = current;
         if (sync == null || sync.server != server) {
@@ -1072,10 +1099,10 @@ public final class HostSync implements SyncServerSession.Host {
         for (Peer peer : peers) {
             peer.session().sendPolicy();
         }
-        server.execute(() -> {
-            for (ServerPlayer player : new ArrayList<>(server.getPlayerList().getPlayers())) {
-                if (now.policy().isBanned(player.getUUID().toString())) {
-                    player.connection.disconnect(Component.translatable("text.dropin_coop.policy.banned"));
+        server.addScheduledTask(() -> {
+            for (EntityPlayerMP player : new ArrayList<>(server.getPlayerList().getPlayers())) {
+                if (now.policy().isBanned(player.getUniqueID().toString())) {
+                    player.connection.disconnect(new TextComponentTranslation("text.dropin_coop.policy.banned"));
                 }
             }
         });
@@ -1110,10 +1137,11 @@ public final class HostSync implements SyncServerSession.Host {
     }
 
     /** Why this player may not log in to the hosted co-op world, or null. */
-    public static Component banMessage(MinecraftServer server, java.util.UUID id) {
+    public static ITextComponent banMessage(MinecraftServer server, java.util.UUID id) {
         HostSync sync = current;
         WorldPolicy.Held policy = sync == null || sync.server != server ? null : sync.held;
-        return policy != null && policy.policy().isBanned(id.toString()) ? Component.translatable("text.dropin_coop.policy.banned") : null;
+        return policy != null && policy.policy().isBanned(id.toString())
+                ? new TextComponentTranslation("text.dropin_coop.policy.banned") : null;
     }
 
     /** Sends the member list to the connected members when someone new is on it. */
@@ -1286,7 +1314,8 @@ public final class HostSync implements SyncServerSession.Host {
             pace(session, bytes, devDirectRate >= 0 ? devDirectRate : rate("directRateKBps", 2048));
         }
         // Bulk transfer must not slow the game down: wait while the server is behind (below about 18 TPS).
-        for (int waited = 0; !stopping && waited < 5000 && server.getAverageTickTimeNanos() > 55_000_000L; waited += 100) {
+        // 1.12.2 port: the mean of tickTimeArray (nanoseconds) is the game's own average tick time.
+        for (int waited = 0; !stopping && waited < 5000 && MathHelper.average(server.tickTimeArray) > 55_000_000L; waited += 100) {
             Thread.sleep(100);
         }
         peer.pipe().awaitWritable(30_000);
@@ -1369,8 +1398,8 @@ public final class HostSync implements SyncServerSession.Host {
                 peer.session().offerBranches();
             }
         }
-        server.execute(() -> server.getPlayerList().broadcastSystemMessage(
-                Component.translatable("text.dropin_coop.merge.pending", player), false));
+        server.addScheduledTask(() -> server.getPlayerList().sendMessage(
+                new TextComponentTranslation("text.dropin_coop.merge.pending", player), true));
     }
 
     /** For the self-tests: the head of the branch this game received last as a host; "" if none. */

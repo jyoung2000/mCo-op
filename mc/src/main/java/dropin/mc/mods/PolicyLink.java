@@ -162,7 +162,7 @@ public final class PolicyLink implements PolicyClientSession.Local, AutoCloseabl
 
     @Override
     public String playerUuid() {
-        return mc.getUser().getProfileId().toString();
+        return mc.getSession().getProfile().getId().toString();
     }
 
     @Override

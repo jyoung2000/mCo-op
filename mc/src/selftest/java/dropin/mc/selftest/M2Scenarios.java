@@ -18,17 +18,14 @@ import dropin.mc.net.ProtocolSniffer;
 import dropin.mc.selftest.M1Scenarios.State;
 import dropin.mc.selftest.Scenarios.Context;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.ConnectScreen;
-import net.minecraft.client.gui.screens.DisconnectedScreen;
-import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.client.gui.GuiDisconnected;
+import net.minecraft.client.gui.GuiMainMenu;
 import net.minecraft.client.multiplayer.ServerData;
-import net.minecraft.client.multiplayer.ServerStatusPinger;
-import net.minecraft.client.multiplayer.resolver.ServerAddress;
-import net.minecraft.client.server.IntegratedServer;
-import net.minecraft.network.chat.Component;
-import net.minecraft.world.level.block.Blocks;
+import net.minecraft.client.network.ServerPinger;
+import net.minecraft.init.Blocks;
+import net.minecraft.server.integrated.IntegratedServer;
+import net.minecraft.util.text.ITextComponent;
 
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
@@ -62,7 +59,6 @@ final class M2Scenarios {
     private static final String K = "text.dropin_coop.";
     private static final int INTERVAL_SECONDS = 5;
     private static final String PROBE_CHUNK = RecordKey.chunk("minecraft:overworld", "region", 0, 0);
-    private static final byte[] DIAMOND = "minecraft:diamond_block".getBytes(StandardCharsets.UTF_8);
     /** Written by B when it is in the middle of a download; the orchestrator then kills B's process. */
     private static final String KILL_B = "kill-b";
 
@@ -97,8 +93,7 @@ final class M2Scenarios {
     }
 
     private static void command(Minecraft mc, String command) {
-        IntegratedServer server = mc.getSingleplayerServer();
-        server.execute(() -> server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), command));
+        Scenarios.serverCommand(mc.getIntegratedServer(), command);
     }
 
     /**
@@ -117,15 +112,17 @@ final class M2Scenarios {
                 .action("press Play", () -> pressPlay(mc, state))
                 .step("hosting, announced", WORLD_TICKS, () -> hosting(ctx))
                 .action("place the probe block", () -> {
-                    command(mc, "forceload add 0 0");
+                    IntegratedServer server = mc.getIntegratedServer();
+                    Scenarios.forceLoadChunk(server, 0, 0);
                     command(mc, Scenarios.PROBE_COMMAND);
                     if (minRecords > 0) {
-                        command(mc, "forceload add -128 -128 127 127");
-                        command(mc, "forceload add 128 -128 383 127");
+                        // 1.12.2 port: no /forceload; the same chunks (blocks -128..383 x -128..127) are generated.
+                        Scenarios.generateChunks(server, -8, -8, 7, 7);
+                        Scenarios.generateChunks(server, 8, -8, 23, 7);
                     }
                 })
                 .step("probe block placed", SHORT_TICKS,
-                        () -> mc.getSingleplayerServer().overworld().getBlockState(Scenarios.PROBE_POS).is(Blocks.GOLD_BLOCK))
+                        () -> Scenarios.blockAt(mc.getIntegratedServer(), Scenarios.PROBE_POS) == Blocks.GOLD_BLOCK)
                 .step("first checkpoint", WORLD_TICKS, () -> {
                     HostSync sync = HostSync.current();
                     return sync != null && sync.seq() >= 1 && sync.records() >= Math.max(1, minRecords);
@@ -149,7 +146,7 @@ final class M2Scenarios {
                 .step("A shared the invite", STARTUP_TICKS + WORLD_TICKS, () -> ctx.sharedExists(WORLD_READY))
                 .action("join with invite", () -> {
                     CoopActions.Outcome outcome = CoopActions.joinWithInvite(mc, ctx.readShared(INVITE_FILE));
-                    require(outcome.ok(), "join with invite failed: " + outcome.message().getString());
+                    require(outcome.ok(), "join with invite failed: " + outcome.message().getUnformattedText());
                     state.world = outcome.world();
                     require(!CoopActions.folders(mc).containsKey(state.world.worldId()), "B already has a copy");
                 })
@@ -161,7 +158,7 @@ final class M2Scenarios {
     /** B's folder of the world under saves/, or null while there is none. */
     static Path folder(Minecraft mc, State state) {
         String name = CoopActions.folders(mc).get(state.world.worldId());
-        return name == null ? null : mc.getLevelSource().getLevelPath(name);
+        return name == null ? null : CoopActions.levelPath(mc, name);
     }
 
     /** True once B's copy is complete and the sync is waiting for the next checkpoint. Polled twice a second. */
@@ -187,7 +184,7 @@ final class M2Scenarios {
         Minecraft mc = ctx.mc();
         return quitToTitle(runner.step("B's copy is complete", completeTicks, () -> ctx.sharedExists("b-complete")), ctx)
                 .action("report the root", () -> {
-                    Path file = mc.getLevelSource().getLevelPath(WORLD_ID).resolve(CoopWorldStore.MARKER_DIR).resolve("ledger.jsonl");
+                    Path file = CoopActions.levelPath(mc, WORLD_ID).resolve(CoopWorldStore.MARKER_DIR).resolve("ledger.jsonl");
                     LedgerEntry last = Ledger.load(state.world.keys().auth(), file).last();
                     require(last != null, "A has no checkpoint");
                     DropIn.LOGGER.info("Self-test: A ended on checkpoint {} with root {}", last.seq(), last.root());
@@ -201,9 +198,9 @@ final class M2Scenarios {
         Minecraft mc = ctx.mc();
         return runner
                 .action("tell A", () -> ctx.writeShared("b-complete", "ok"))
-                .step("A quit", PEER_TICKS, () -> mc.screen instanceof DisconnectedScreen
-                        || (mc.level == null && mc.screen instanceof TitleScreen))
-                .action("title screen", () -> mc.setScreen(new TitleScreen()))
+                .step("A quit", PEER_TICKS, () -> mc.currentScreen instanceof GuiDisconnected
+                        || (mc.world == null && mc.currentScreen instanceof GuiMainMenu))
+                .action("title screen", () -> mc.displayGuiScreen(new GuiMainMenu()))
                 .step("A reported its root", WORLD_TICKS, () -> ctx.sharedExists("a-root"))
                 .action("the copy on disk has A's root", () -> {
                     String[] reported = ctx.readShared("a-root").split(" ");
@@ -231,7 +228,7 @@ final class M2Scenarios {
     private static StepRunner snifferA(Context ctx) {
         Minecraft mc = ctx.mc();
         return hostA(ctx, new State(), Map.of(), 0)
-                .step("B logged in", PEER_TICKS, () -> mc.getSingleplayerServer().getPlayerList().getPlayerCount() == 2)
+                .step("B logged in", PEER_TICKS, () -> mc.getIntegratedServer().getCurrentPlayerCount() == 2)
                 .step("B finished", SHORT_TICKS, () -> ctx.sharedExists(Scenarios.PEER_DONE))
                 .action("both went through the sniffer", () -> {
                     require(ProtocolSniffer.vanillaConnections() >= 2, "the sniffer passed on "
@@ -243,25 +240,25 @@ final class M2Scenarios {
     /** B is a plain client here: a status ping and an ordinary login by address, no invite and no world sync. */
     private static StepRunner snifferB(Context ctx) {
         Minecraft mc = ctx.mc();
-        ServerData data = new ServerData("dropin-selftest", ctx.localAddress(), ServerData.Type.OTHER);
-        ServerStatusPinger pinger = new ServerStatusPinger();
+        ServerData data = new ServerData("dropin-selftest", ctx.localAddress(), false);
+        ServerPinger pinger = new ServerPinger();
         return base(ctx)
                 .step("A is hosting", STARTUP_TICKS + WORLD_TICKS + PEER_TICKS, () -> ctx.sharedExists(A_HOSTING))
-                .action("send status ping", () -> pinger.pingServer(data, () -> {}, () -> {}))
+                .action("send status ping", () -> pinger.ping(data))
                 .step("status response", SHORT_TICKS, () -> {
-                    pinger.tick();
-                    return data.players != null;
+                    pinger.pingPendingNetworks();
+                    return Scenarios.onlinePlayers(data) != null;
                 })
                 .action("check status", () -> {
-                    require(data.players.online() == 1, "expected 1 player online in the status response, got " + data.players.online());
-                    pinger.removeAll();
+                    int online = Scenarios.onlinePlayers(data);
+                    require(online == 1, "expected 1 player online in the status response, got " + online);
+                    pinger.clearPendingNetworks();
                 })
-                .action("connect", () -> ConnectScreen.startConnecting(new TitleScreen(), mc,
-                        ServerAddress.parseString(ctx.localAddress()), data, false, null))
+                .action("connect", () -> Scenarios.connect(mc, ctx.localAddress()))
                 .step("joined world", SHORT_TICKS, () -> joinedRemote(mc))
                 .step("sees A", SHORT_TICKS, () -> {
                     failIfDisconnected(mc);
-                    return mc.level != null && mc.level.players().size() == 2;
+                    return mc.world != null && mc.world.playerEntities.size() == 2;
                 })
                 .action("tell A", () -> ctx.writeShared(Scenarios.PEER_DONE, "ok"));
     }
@@ -280,7 +277,7 @@ final class M2Scenarios {
         State state = new State();
         StepRunner runner = joinB(ctx, state, Map.of())
                 .action("plays while downloading", () -> {
-                    require(mc.player != null && mc.getSingleplayerServer() == null, "B is not playing on A's session");
+                    require(mc.player != null && mc.getIntegratedServer() == null, "B is not playing on A's session");
                     Path folder = folder(mc, state);
                     DropIn.LOGGER.info("Self-test: B is in the world; copy so far: {}",
                             folder == null ? "none" : SyncClient.savedState(folder).percent() + "%");
@@ -289,9 +286,9 @@ final class M2Scenarios {
         return verifyRoot(runner, ctx, state)
                 .action("press Play", () -> pressPlay(mc, state))
                 .step("B hosts its own copy", WORLD_TICKS, () -> hosting(ctx))
-                .action("load the probe chunk", () -> command(mc, "forceload add 0 0"))
+                .action("load the probe chunk", () -> Scenarios.forceLoadChunk(mc.getIntegratedServer(), 0, 0))
                 .step("the block A placed is there", SHORT_TICKS,
-                        () -> mc.getSingleplayerServer().overworld().getBlockState(Scenarios.PROBE_POS).is(Blocks.GOLD_BLOCK))
+                        () -> Scenarios.blockAt(mc.getIntegratedServer(), Scenarios.PROBE_POS) == Blocks.GOLD_BLOCK)
                 .action("tell A", () -> ctx.writeShared("b-verified", "ok"));
     }
 
@@ -366,10 +363,9 @@ final class M2Scenarios {
         return hostA(ctx, new State(), Map.of(), 0)
                 .step("B's copy is complete", 2 * PEER_TICKS, () -> ctx.sharedExists("b-live"))
                 .action("place a block", () -> {
-                    IntegratedServer server = mc.getSingleplayerServer();
-                    server.execute(() -> {
-                        server.getCommands().performPrefixedCommand(server.createCommandSourceStack(),
-                                "setblock 0 251 0 minecraft:diamond_block");
+                    IntegratedServer server = mc.getIntegratedServer();
+                    server.addScheduledTask(() -> {
+                        server.getCommandManager().executeCommand(server, "setblock 0 251 0 minecraft:diamond_block");
                         try {
                             ctx.writeShared("a-placed", Long.toString(System.currentTimeMillis()));
                         } catch (java.io.IOException e) {
@@ -390,7 +386,7 @@ final class M2Scenarios {
                 .action("the block is not in the copy yet", () -> {
                     byte[] chunk = SyncClient.localChunk(state.world.worldId(), PROBE_CHUNK);
                     require(chunk != null, "the probe chunk is not in B's copy");
-                    require(!contains(chunk, DIAMOND), "the block is there before A placed it");
+                    require(!Scenarios.chunkHasBlock(chunk, Blocks.DIAMOND_BLOCK), "the block is there before A placed it");
                     ctx.writeShared("b-live", "ok");
                 })
                 .step("A placed the block", SHORT_TICKS, () -> {
@@ -404,7 +400,7 @@ final class M2Scenarios {
                         return false;
                     }
                     byte[] chunk = SyncClient.localChunk(state.world.worldId(), PROBE_CHUNK);
-                    if (chunk == null || !contains(chunk, DIAMOND)) {
+                    if (chunk == null || !Scenarios.chunkHasBlock(chunk, Blocks.DIAMOND_BLOCK)) {
                         return false;
                     }
                     seen[0] = System.currentTimeMillis();
@@ -417,19 +413,6 @@ final class M2Scenarios {
                             + INTERVAL_SECONDS + " s");
                     ctx.writeShared("b-saw", "ok");
                 });
-    }
-
-    private static boolean contains(byte[] data, byte[] part) {
-        outer:
-        for (int i = 0; i <= data.length - part.length; i++) {
-            for (int j = 0; j < part.length; j++) {
-                if (data[i + j] != part[j]) {
-                    continue outer;
-                }
-            }
-            return true;
-        }
-        return false;
     }
 
     // ---- path-policy ----------------------------------------------------------------------------------
@@ -469,10 +452,10 @@ final class M2Scenarios {
                     require(SyncClient.appliedRecords(id) == 0, SyncClient.appliedRecords(id) + " records arrived over a relayed path");
                     Path folder = folder(mc, state);
                     require(folder == null || !Files.exists(folder.resolve("level.dat")), "B has world data");
-                    Component line = SyncClient.statusLine(id, folder);
-                    require(line != null && line.getString().equals("Waiting for a direct connection to sync world data."),
-                            "status line is '" + (line == null ? "" : line.getString()) + "'");
-                    require(!line.getString().startsWith(K), "the waiting message has no translation");
+                    ITextComponent line = SyncClient.statusLine(id, folder);
+                    require(line != null && line.getUnformattedText().equals("Waiting for a direct connection to sync world data."),
+                            "status line is '" + (line == null ? "" : line.getUnformattedText()) + "'");
+                    require(!line.getUnformattedText().startsWith(K), "the waiting message has no translation");
                     ctx.writeShared("b-waiting", "ok");
                 })
                 .step("A checked", SHORT_TICKS, () -> {

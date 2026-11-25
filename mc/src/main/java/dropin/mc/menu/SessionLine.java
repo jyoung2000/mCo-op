@@ -7,11 +7,14 @@ import dropin.mc.handoff.CrashFailover;
 import dropin.mc.host.HostSync;
 import dropin.mc.member.SyncClient;
 import net.minecraft.client.Minecraft;
-import net.minecraft.network.chat.Component;
+import net.minecraft.util.text.ITextComponent;
+import net.minecraft.util.text.TextComponentString;
+import net.minecraft.util.text.TextComponentTranslation;
 
 /**
  * The status line of the pause menu while in a co-op session (MILESTONES M4): who hosts, how complete the
  * copy is, whether the sync goes straight to the host or through a relay, and how old the newest checkpoint is.
+ * <p>1.12.2 port: the line is an {@code ITextComponent} (translated on the client through the resource-pack lang).
  */
 public final class SessionLine {
     private static final String K = "text.dropin_coop.line.";
@@ -35,17 +38,17 @@ public final class SessionLine {
 
     /** What the line says right now, or null when the game is not in a co-op session. */
     public static Info info(Minecraft mc) {
-        if (mc.level == null) {
+        if (mc.world == null) {
             return null;
         }
         long now = System.currentTimeMillis() / 1000;
-        if (mc.getSingleplayerServer() != null) {
+        if (mc.getIntegratedServer() != null) {
             HostSync sync = HostSync.current();
             if (sync == null) {
                 return null;
             }
             long at = sync.lastCheckpointSeconds();
-            return new Info(true, mc.getUser().getName(), sync.slowestPeerPercent(), null, at == 0 ? -1 : Math.max(0, now - at));
+            return new Info(true, mc.getSession().getUsername(), sync.slowestPeerPercent(), null, at == 0 ? -1 : Math.max(0, now - at));
         }
         CoopWorld world = CrashFailover.world();
         SyncClientSession.Status status = world == null ? null : SyncClient.status(world.worldId());
@@ -59,16 +62,16 @@ public final class SessionLine {
                 last == null ? -1 : Math.max(0, now - last.ts()));
     }
 
-    public static Component text(Info info) {
-        Component age = info.ageSeconds() < 0 ? Component.translatable(K + "age_none")
-                : info.ageSeconds() < 120 ? Component.translatable(K + "age_seconds", info.ageSeconds())
-                : Component.translatable(K + "age_minutes", info.ageSeconds() / 60);
+    public static ITextComponent text(Info info) {
+        ITextComponent age = info.ageSeconds() < 0 ? new TextComponentTranslation(K + "age_none")
+                : info.ageSeconds() < 120 ? new TextComponentTranslation(K + "age_seconds", info.ageSeconds())
+                : new TextComponentTranslation(K + "age_minutes", info.ageSeconds() / 60);
         if (info.hosting()) {
-            return info.percent() < 0 ? Component.translatable(K + "host_alone", age)
-                    : Component.translatable(K + "host", info.percent(), age);
+            return info.percent() < 0 ? new TextComponentTranslation(K + "host_alone", age)
+                    : new TextComponentTranslation(K + "host", info.percent(), age);
         }
-        Component path = Component.translatable(K + (info.direct() == null ? "connecting" : info.direct() ? "direct" : "relayed"));
-        Component name = info.hostName().isEmpty() ? Component.translatable("text.dropin_coop.handoff.a_friend") : Component.literal(info.hostName());
-        return Component.translatable(K + "member", name, info.percent(), path, age);
+        ITextComponent path = new TextComponentTranslation(K + (info.direct() == null ? "connecting" : info.direct() ? "direct" : "relayed"));
+        ITextComponent name = info.hostName().isEmpty() ? new TextComponentTranslation("text.dropin_coop.handoff.a_friend") : new TextComponentString(info.hostName());
+        return new TextComponentTranslation(K + "member", name, info.percent(), path, age);
     }
 }

@@ -3,36 +3,33 @@
   "package": "dropin.mixin",
   "compatibilityLevel": "JAVA_25",
   "minVersion": "0.8",
+  "refmap": "dropin.refmap.json",
   "mixins": [
-    "mc.IOWorkerMixin",
-    "mc.MinecraftServerPacketsMixin",
-    "mc.ChunkMapSaveMixin",
+    "mc.AnvilChunkLoaderAccess",
+    "mc.AnvilChunkLoaderMixin",
     "mc.MinecraftServerStopMixin",
+    "mc.NetworkSystemAccess",
     "mc.PlayerListBanMixin",
     "mc.PlayerListOwnDataMixin",
-    "mc.RegionFileStorageAccess",
-    "tunnel.BanListCommandsMixin",
-    "tunnel.BanPlayerCommandsMixin",
+    "mc.RegionFileAccess",
+    "tunnel.ClientboundHelloPacketMixin",
     "tunnel.ConnectionMixin",
     "tunnel.DirsUtilMixin",
-    "tunnel.PardonCommandMixin",
     "tunnel.ServerboundKeyPacketMixin",
-    "tunnel.ServerCommonPacketListenerImplAccessor",
     "tunnel.ServerConnectionListenerMixin",
-    "tunnel.ServerLoginPacketListenerImplMixin",
-    "tunnel.WhitelistCommandMixin"
+    "tunnel.ServerLoginAuthenticatorMixin",
+    "tunnel.ServerLoginPacketListenerImplMixin"
   ],
   "injectors": {
     "defaultRequire": 1
   },
   "client": [
     "mc.ClientCommonPacketListenerImplMixin",
-    "mc.CommandsMixin",
-    "mc.IntegratedServerGameModeMixin",
+    "mc.IntegratedServerLanPortMixin",
     "mc.IntegratedServerNewCoopMixin",
     "mc.IntegratedServerPermissionsMixin",
-    "mc.MinecraftDisconnectMixin",
     "mc.PauseScreenMixin",
+    "mc.PlayerListPermissionsMixin",
     "mc.SelectWorldScreenMixin",
     "mc.TitleScreenMixin",
     "mc.WorldListEntryMixin",
@@ -40,9 +37,7 @@
     "mc.dev.IntegratedServerOfflineLanMixin",
     "mc.dev.MinecraftTickMixin",
     "tunnel.ClientHandshakePacketListenerImplMixin",
-    "tunnel.PlayerListMixin",
-    "tunnel.ServerAddressMixin",
-    "tunnel.ServerNameResolverMixin"
+    "tunnel.PlayerListMixin"
   ],
   "plugin": "dropin.mc.DropInMixinPlugin"
 }

@@ -24,7 +24,7 @@ public final class PolicyActions {
     /** The world's folder under saves/, or null if this PC has no copy. */
     public static Path folder(Minecraft mc, CoopWorld world) {
         String name = CoopActions.folders(mc).get(world.worldId());
-        return name == null ? null : mc.getLevelSource().getLevelPath(name);
+        return name == null ? null : CoopActions.levelPath(mc, name);
     }
 
     /** The policy this PC holds for the world, or null. */
@@ -44,7 +44,7 @@ public final class PolicyActions {
                 return member;
             }
         }
-        return new Member(mc.getUser().getProfileId().toString(), mc.getUser().getName(), 0, 0, Member.OWNER);
+        return new Member(mc.getSession().getProfile().getId().toString(), mc.getSession().getUsername(), 0, 0, Member.OWNER);
     }
 
     /**

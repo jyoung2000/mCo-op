@@ -1,54 +1,64 @@
 package dropin.mc.compat;
 
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.NumericTag;
-import net.minecraft.nbt.StringTag;
-import net.minecraft.nbt.Tag;
+import net.minecraft.nbt.NBTBase;
+import net.minecraft.nbt.NBTPrimitive;
+import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.nbt.NBTTagList;
+import net.minecraft.nbt.NBTTagString;
 
 import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 /**
- * 1.21.1 port: the "value or default" readers that 26.x has on {@code CompoundTag} and {@code ListTag}
- * ({@code getIntOr}, {@code getListOrEmpty}, {@code compoundStream} and so on), with the same results.
+ * 1.12.2 port: the "value or default" readers that 26.x has on {@code CompoundTag} and {@code ListTag}
+ * ({@code getIntOr}, {@code getListOrEmpty}, {@code compoundStream} and so on), with the same results, over
+ * 1.12.2's {@code NBTTagCompound} / {@code NBTTagList}.
  */
 public final class Nbt {
     private Nbt() {
     }
 
-    public static ListTag listOrEmpty(CompoundTag tag, String key) {
-        return tag.get(key) instanceof ListTag list ? list : new ListTag();
+    public static NBTTagList listOrEmpty(NBTTagCompound tag, String key) {
+        return tag.getTag(key) instanceof NBTTagList list ? list : new NBTTagList();
     }
 
-    public static int intOr(CompoundTag tag, String key, int fallback) {
-        return tag.get(key) instanceof NumericTag n ? n.getAsInt() : fallback;
+    public static NBTTagCompound compoundOrEmpty(NBTTagCompound tag, String key) {
+        return tag.getTag(key) instanceof NBTTagCompound c ? c : new NBTTagCompound();
     }
 
-    public static float floatOr(CompoundTag tag, String key, float fallback) {
-        return tag.get(key) instanceof NumericTag n ? n.getAsFloat() : fallback;
+    public static int intOr(NBTTagCompound tag, String key, int fallback) {
+        return tag.getTag(key) instanceof NBTPrimitive n ? n.getInt() : fallback;
     }
 
-    public static byte byteOr(CompoundTag tag, String key, byte fallback) {
-        return tag.get(key) instanceof NumericTag n ? n.getAsByte() : fallback;
+    public static long longOr(NBTTagCompound tag, String key, long fallback) {
+        return tag.getTag(key) instanceof NBTPrimitive n ? n.getLong() : fallback;
     }
 
-    public static String stringOr(CompoundTag tag, String key, String fallback) {
-        return tag.get(key) instanceof StringTag s ? s.getAsString() : fallback;
+    public static float floatOr(NBTTagCompound tag, String key, float fallback) {
+        return tag.getTag(key) instanceof NBTPrimitive n ? n.getFloat() : fallback;
     }
 
-    public static String stringOr(ListTag list, int index, String fallback) {
-        return index >= 0 && index < list.size() && list.get(index) instanceof StringTag s ? s.getAsString() : fallback;
+    public static byte byteOr(NBTTagCompound tag, String key, byte fallback) {
+        return tag.getTag(key) instanceof NBTPrimitive n ? n.getByte() : fallback;
     }
 
-    public static double doubleOr(ListTag list, int index, double fallback) {
-        return index >= 0 && index < list.size() && list.get(index) instanceof NumericTag n ? n.getAsDouble() : fallback;
+    public static String stringOr(NBTTagCompound tag, String key, String fallback) {
+        return tag.getTag(key) instanceof NBTTagString s ? s.getString() : fallback;
     }
 
-    public static Stream<CompoundTag> compounds(ListTag list) {
-        return list.stream().filter(t -> t instanceof CompoundTag).map(t -> (CompoundTag) t);
+    public static String stringOr(NBTTagList list, int index, String fallback) {
+        return index >= 0 && index < list.tagCount() && list.get(index) instanceof NBTTagString s ? s.getString() : fallback;
     }
 
-    static boolean isTag(Object o) {
-        return o instanceof Tag;
+    public static double doubleOr(NBTTagList list, int index, double fallback) {
+        return index >= 0 && index < list.tagCount() && list.get(index) instanceof NBTPrimitive n ? n.getDouble() : fallback;
+    }
+
+    public static Stream<NBTBase> stream(NBTTagList list) {
+        return StreamSupport.stream(list.spliterator(), false);
+    }
+
+    public static Stream<NBTTagCompound> compounds(NBTTagList list) {
+        return stream(list).filter(t -> t instanceof NBTTagCompound).map(t -> (NBTTagCompound) t);
     }
 }

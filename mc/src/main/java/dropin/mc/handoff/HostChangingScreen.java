@@ -4,17 +4,16 @@ import dropin.core.world.CoopWorld;
 import dropin.mc.DropIn;
 import dropin.mc.coop.CoopLauncher;
 import dropin.mc.menu.CoopStatus;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.screens.GenericMessageScreen;
-import net.minecraft.client.gui.screens.TitleScreen;
-import net.minecraft.network.chat.CommonComponents;
-import net.minecraft.network.chat.Component;
+import dropin.mc.menu.ui.DScreen;
+import net.minecraft.client.gui.GuiMainMenu;
+import net.minecraft.client.resources.I18n;
 
 /**
  * "Host is changing…" (DESIGN 4.9 step 5): polls the rendezvous until someone other than the old host is
  * hosting and answers a ping, then reconnects. A Cancel button, no time limit (failover is a later milestone).
+ * 1.12.2 port: 26.x GenericMessageScreen is a DScreen whose title is the message, in the middle of the screen.
  */
-public final class HostChangingScreen extends GenericMessageScreen {
+public final class HostChangingScreen extends DScreen {
     private static final long POLL_MS = 1_000;
 
     private final CoopWorld world;
@@ -23,14 +22,13 @@ public final class HostChangingScreen extends GenericMessageScreen {
     private final String endedSess;
     private volatile boolean done;
     private boolean started;
-    private Button cancel;
 
     public HostChangingScreen(CoopWorld world, String oldHostUuid) {
         this(world, oldHostUuid, null);
     }
 
     public HostChangingScreen(CoopWorld world, String oldHostUuid, String endedSess) {
-        super(Component.translatable("text.dropin_coop.handoff.changing"));
+        super(null, I18n.format("text.dropin_coop.handoff.changing"));
         this.world = world;
         this.oldHostUuid = oldHostUuid;
         this.endedSess = endedSess;
@@ -48,12 +46,17 @@ public final class HostChangingScreen extends GenericMessageScreen {
     }
 
     @Override
+    protected int titleY() {
+        return this.height / 2 - 12;
+    }
+
+    @Override
     protected void init() {
-        super.init();
-        this.cancel = this.addRenderableWidget(Button.builder(CommonComponents.GUI_CANCEL, button -> {
+        // 1.12.2 port: init runs on every resize, so the button is simply built at its place (26.x repositionElements).
+        button(this.width / 2 - 100, this.height / 2 + 24, 200, I18n.format("gui.cancel"), b -> {
             done = true;
-            this.minecraft.setScreen(new TitleScreen());
-        }).bounds(this.width / 2 - 100, this.height / 2 + 24, 200, 20).build());
+            this.mc.displayGuiScreen(new GuiMainMenu());
+        });
         if (!started) {
             started = true;
             Thread thread = new Thread(this::poll, "dropin-coop-host-changing");
@@ -62,18 +65,16 @@ public final class HostChangingScreen extends GenericMessageScreen {
         }
     }
 
+    /** 26.x GenericMessageScreen cannot be closed with Escape. */
     @Override
-    protected void repositionElements() {
-        super.repositionElements();
-        if (this.cancel != null) {
-            this.cancel.setPosition(this.width / 2 - 100, this.height / 2 + 24);
-        }
+    public void onClose() {
     }
 
+    /** 26.x {@code Screen.removed()}: another screen replaced this one. */
     @Override
-    public void removed() {
+    public void onGuiClosed() {
         done = true;
-        super.removed();
+        super.onGuiClosed();
     }
 
     private void poll() {
@@ -90,7 +91,7 @@ public final class HostChangingScreen extends GenericMessageScreen {
                     DropIn.LOGGER.info("Co-op world '{}': {} is the new host after {} ms, reconnecting to {}", world.name(),
                             status.hostName(), System.currentTimeMillis() - started, status.address());
                     CoopLauncher.rememberHost(world, status.hostUuid(), status.hostName());
-                    CoopLauncher.join(this.minecraft, world, status.address());
+                    CoopLauncher.join(this.mc, world, status.address());
                     return;
                 }
                 Thread.sleep(POLL_MS);

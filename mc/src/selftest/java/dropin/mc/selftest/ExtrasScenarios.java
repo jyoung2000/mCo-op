@@ -55,7 +55,7 @@ final class ExtrasScenarios {
         // Both members count as "over the internet" here, so the cap applies although they are on this PC.
         return hostA(ctx, state, Map.of("dropin.dev.forcePath", "internet", "dropin.dev.directRateKBps", Integer.toString(CAP_KBPS)), 450)
                 .action("a mod's files appear in the world's root", () -> {
-                    Path root = mc.getLevelSource().getLevelPath(WORLD_ID);
+                    Path root = dropin.mc.menu.CoopActions.levelPath(mc, WORLD_ID);
                     Files.createDirectories(root.resolve(CONFIG).getParent());
                     Files.createDirectories(root.resolve(STATE).getParent());
                     Files.writeString(root.resolve(CONFIG), CONFIG_TEXT, StandardCharsets.UTF_8);
@@ -125,7 +125,7 @@ final class ExtrasScenarios {
                     DropIn.LOGGER.info("Self-test sync-extras: {} and {} are in the copy of {}, equal to the host's", CONFIG, STATE, who.toUpperCase());
                     return true;
                 })
-                .action("tell A", () -> ctx.writeShared(who + "-ready", mc.getUser().getProfileId().toString()))
+                .action("tell A", () -> ctx.writeShared(who + "-ready", mc.getSession().getProfile().getId().toString()))
                 .step("A checked the cap and who would take over", 4 * PEER_TICKS, () -> {
                     failIfDisconnected(mc);
                     return ctx.sharedExists("a-done");

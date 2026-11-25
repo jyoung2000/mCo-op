@@ -7,10 +7,9 @@ import dropin.mc.DropIn;
 import dropin.tunnel.Config;
 import dropin.tunnel.E4mcClient;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.server.IntegratedServer;
-import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.util.HttpUtil;
+import net.minecraft.entity.player.EntityPlayerMP;
+import net.minecraft.server.integrated.IntegratedServer;
+import net.minecraft.util.text.TextComponentTranslation;
 
 import java.net.InetAddress;
 import java.util.concurrent.CompletableFuture;
@@ -122,7 +121,7 @@ public final class HostSession implements Runnable {
             long lastRivalCheck = System.currentTimeMillis();
             long rivalCheckMs = DropIn.switches().read("dropin.dev.rivalCheckSeconds").map(seconds -> Long.parseLong(seconds) * 1000)
                     .orElse(RIVAL_CHECK_MS);
-            while (!cancelled && mc.getSingleplayerServer() == server && server.isRunning()) {
+            while (!cancelled && mc.getIntegratedServer() == server && server.isServerRunning()) {
                 long now = System.currentTimeMillis();
                 String wanted = domain;
                 // Until the tunnel has a domain, friends outside the LAN could not reach this session. They are
@@ -229,7 +228,7 @@ public final class HostSession implements Runnable {
     private IntegratedServer awaitWorld() throws InterruptedException {
         long deadline = System.currentTimeMillis() + WORLD_START_TIMEOUT_MS;
         while (!cancelled && System.currentTimeMillis() < deadline) {
-            IntegratedServer server = mc.getSingleplayerServer();
+            IntegratedServer server = mc.getIntegratedServer();
             if (server != null && mc.player != null) {
                 return server;
             }
@@ -241,23 +240,25 @@ public final class HostSession implements Runnable {
     /** Opens the world to LAN on the client thread, as the Open to LAN screen does. Returns the LAN hint. */
     private String openToLan(IntegratedServer server) throws InterruptedException {
         CompletableFuture<Integer> port = new CompletableFuture<>();
-        mc.execute(() -> {
+        mc.addScheduledTask(() -> {
             try {
-                if (!server.isPublished()) {
-                    int wanted = DropIn.switches().read("dropin.dev.lanPort").map(Integer::parseInt)
-                            .orElseGet(HttpUtil::getAvailablePort);
+                if (!server.getPublic()) {
                     // Members get no commands by default; the self-tests drive the game with commands.
                     boolean commands = DropIn.switches().selfTest().isPresent();
-                    // DESIGN 4.4 "Game modes": a published integrated server forces every player without game-master
-                    // rights into the host copy's default game type (level.dat), so members flipped to creative
-                    // whenever a copy's default said creative. A co-op world keeps each player's own saved mode.
-                    ((dropin.mc.compat.ForceGameModeAccess) server).dropin$setForceGameMode(false);
-                    if (!server.publishServer(null, commands, wanted)) {
+                    // DESIGN 4.4 "Game modes": a co-op world keeps each player's own saved mode. 1.12.2 port: the
+                    // game type given to shareToLAN is forced on every player who joins (PlayerList.gameType, used by
+                    // setPlayerGameTypeBasedOnOther); with null nothing is forced, as 26.x's setForceGameMode(false).
+                    // The port is HttpUtil.getSuitableLanPort() (dropin.dev.lanPort: see dev/IntegratedServerOfflineLanMixin).
+                    String published = server.shareToLAN(null, commands);
+                    if (published == null) {
                         port.complete(-1);
                         return;
                     }
+                    // shareToLAN set the host's own client-side level to 4 or 0; DESIGN 4.13 decides it (PlayerListPermissionsMixin).
+                    server.addScheduledTask(() -> server.getPlayerList().getPlayers()
+                            .forEach(player -> server.getPlayerList().updatePermissionLevel(player)));
                 }
-                port.complete(server.getPort());
+                port.complete(lanPort(server));
             } catch (RuntimeException e) {
                 port.completeExceptionally(e);
             }
@@ -273,6 +274,28 @@ public final class HostSession implements Runnable {
             DropIn.LOGGER.error("Could not open co-op world '{}' to LAN", world.name(), e);
             return "";
         }
+    }
+
+    /** 1.12.2 port: the LAN port each integrated server was published on (26.x {@code server.getPort()}). */
+    private static final java.util.Map<IntegratedServer, Integer> LAN_PORTS =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
+    /** Return of {@code IntegratedServer.shareToLAN} (IntegratedServerLanPortMixin), whoever published the world. */
+    public static void lanPublished(IntegratedServer server, String port) {
+        if (port == null) {
+            return;
+        }
+        try {
+            LAN_PORTS.put(server, Integer.parseInt(port));
+        } catch (NumberFormatException e) {
+            DropIn.LOGGER.warn("The world was opened to LAN on an unreadable port '{}'", port);
+        }
+    }
+
+    /** The LAN port of a published integrated server, or -1 if not known. */
+    public static int lanPort(IntegratedServer server) {
+        Integer port = LAN_PORTS.get(server);
+        return port == null ? -1 : port;
     }
 
     private static String localAddress() {
@@ -324,9 +347,9 @@ public final class HostSession implements Runnable {
             if (server != null) {
                 // Two sessions of one world must not both go on: this one closes (its play is kept and merged later).
                 String name = other.name();
-                server.execute(() -> server.getPlayerList().broadcastSystemMessage(
-                        net.minecraft.network.chat.Component.translatable("text.dropin_coop.host.rival", name), false));
-                mc.execute(() -> dropin.mc.handoff.HostHandoff.quitForRival(mc, name));
+                server.addScheduledTask(() -> server.getPlayerList().sendMessage(
+                        new TextComponentTranslation("text.dropin_coop.host.rival", name)));
+                mc.addScheduledTask(() -> dropin.mc.handoff.HostHandoff.quitForRival(mc, name));
             }
         }
         return true;
@@ -357,9 +380,9 @@ public final class HostSession implements Runnable {
     }
 
     private void recordPlayers(IntegratedServer server) {
-        server.execute(() -> {
+        server.addScheduledTask(() -> {
             java.util.List<String> now = new java.util.ArrayList<>();
-            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            for (EntityPlayerMP player : server.getPlayerList().getPlayers()) {
                 CoopLauncher.remember(world, player.getGameProfile().getId().toString(), player.getGameProfile().getName());
                 now.add(player.getGameProfile().getId().toString());
             }

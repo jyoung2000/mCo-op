@@ -3,16 +3,16 @@ package dropin.mc.menu;
 import dropin.core.mods.ModDiff;
 import dropin.core.world.CoopWorld;
 import dropin.mc.DropIn;
+import dropin.mc.menu.ui.DButton;
+import dropin.mc.menu.ui.DScreen;
 import dropin.mc.mods.ModInstall;
 import dropin.mc.policy.WorldPolicy;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.network.chat.CommonComponents;
-import net.minecraft.network.chat.Component;
-import net.minecraft.util.FormattedCharSequence;
+import net.minecraft.client.gui.GuiMainMenu;
+import net.minecraft.client.resources.I18n;
+import net.minecraft.util.text.ITextComponent;
+import net.minecraft.util.text.TextComponentString;
+import net.minecraft.util.text.TextComponentTranslation;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -22,7 +22,7 @@ import java.util.List;
  * remove. [Show list] [Download and restart] [Cancel]". Nothing is downloaded without the click, and the
  * screen says in plain words that mods are programs the owner chose.
  */
-public class ModConsentScreen extends Screen {
+public class ModConsentScreen extends DScreen {
     private static final String K = "text.dropin_coop.";
     /** Long enough to read "the game closes now", and for the helper to be up before the game is gone. */
     private static final int CLOSE_AFTER_TICKS = 60;
@@ -36,18 +36,18 @@ public class ModConsentScreen extends Screen {
     private final String address;
     private final boolean changed;
     private volatile State state = State.ASKING;
-    private volatile Component progress = Component.empty();
-    private volatile Component error = Component.empty();
+    private volatile ITextComponent progress = new TextComponentString("");
+    private volatile ITextComponent error = new TextComponentString("");
     private int closingTicks;
-    private Button downloadButton;
-    private Button listButton;
+    private DButton downloadButton;
+    private DButton listButton;
 
     /**
      * @param address the live host this PC was about to join, or null when nobody is known to be hosting
      * @param changed true when the mod list changed while this player was in the world
      */
     public ModConsentScreen(Runnable onCancel, CoopWorld world, WorldPolicy.Held held, ModDiff diff, String address, boolean changed) {
-        super(Component.translatable(K + "mods.consent.title", world.name()));
+        super(null, I18n.format(K + "mods.consent.title", world.name()));
         this.onCancel = onCancel;
         this.world = world;
         this.held = held;
@@ -58,8 +58,8 @@ public class ModConsentScreen extends Screen {
 
     /** The host's mod list moved on and this PC is behind: leave the session and show what is needed (DESIGN 4.14). */
     public static void leaveAndShow(CoopWorld world, WorldPolicy.Held held) {
-        Minecraft mc = Minecraft.getInstance();
-        mc.execute(() -> {
+        Minecraft mc = Minecraft.getMinecraft();
+        mc.addScheduledTask(() -> {
             ModDiff diff;
             try {
                 diff = WorldPolicy.diff(held);
@@ -68,10 +68,10 @@ public class ModConsentScreen extends Screen {
                 return;
             }
             DropIn.LOGGER.info("The mods of '{}' changed (policy version {}); leaving the session", world.name(), held.version());
-            if (mc.level != null) {
+            if (mc.world != null) {
                 dropin.mc.compat.Compat.disconnectFromWorld(mc, dropin.mc.compat.Compat.DEFAULT_QUIT_MESSAGE);
             }
-            mc.setScreen(new ModConsentScreen(() -> mc.setScreen(new CoopWorldsScreen(new net.minecraft.client.gui.screens.TitleScreen())),
+            mc.displayGuiScreen(new ModConsentScreen(() -> mc.displayGuiScreen(new CoopWorldsScreen(new GuiMainMenu())),
                     world, held, diff, null, true));
         });
     }
@@ -90,7 +90,7 @@ public class ModConsentScreen extends Screen {
         return state;
     }
 
-    public Component error() {
+    public ITextComponent error() {
         return error;
     }
 
@@ -101,24 +101,27 @@ public class ModConsentScreen extends Screen {
     // ---- layout -------------------------------------------------------------------------------
 
     @Override
+    protected int titleY() {
+        return 14;
+    }
+
+    @Override
     protected void init() {
         int width = Math.min(300, this.width - 20);
         int left = (this.width - width) / 2;
         int third = (width - 8) / 3;
         int y = this.height - 30;
-        listButton = this.addRenderableWidget(Button.builder(Component.translatable(K + "mods.consent.show"),
-                button -> this.minecraft.setScreen(new ModsScreen(this, world.worldId()))).bounds(left, y, third, 20).build());
-        downloadButton = this.addRenderableWidget(Button.builder(Component.translatable(K + "mods.consent.download"),
-                button -> approve()).bounds(left + third + 4, y, third, 20).build());
-        this.addRenderableWidget(Button.builder(CommonComponents.GUI_CANCEL, button -> cancel())
-                .bounds(left + 2 * (third + 4), y, third, 20).build());
+        listButton = button(left, y, third, I18n.format(K + "mods.consent.show"),
+                b -> this.mc.displayGuiScreen(new ModsScreen(this, world.worldId())));
+        downloadButton = button(left + third + 4, y, third, I18n.format(K + "mods.consent.download"), b -> approve());
+        button(left + 2 * (third + 4), y, third, I18n.format("gui.cancel"), b -> cancel());
         refreshButtons();
     }
 
     private void refreshButtons() {
         if (downloadButton != null) {
-            downloadButton.active = state == State.ASKING || state == State.FAILED;
-            listButton.active = state != State.CLOSING;
+            downloadButton.enabled = state == State.ASKING || state == State.FAILED;
+            listButton.enabled = state != State.CLOSING;
         }
     }
 
@@ -128,13 +131,13 @@ public class ModConsentScreen extends Screen {
             return;
         }
         state = State.DOWNLOADING;
-        error = Component.empty();
+        error = new TextComponentString("");
         refreshButtons();
-        Minecraft mc = this.minecraft;
+        Minecraft mc = this.mc != null ? this.mc : Minecraft.getMinecraft();
         Thread thread = new Thread(() -> {
             try {
                 ModInstall.downloadAndPlan(mc, world, held, address, line -> progress = line);
-                progress = Component.translatable(K + "mods.consent.closing");
+                progress = new TextComponentTranslation(K + "mods.consent.closing");
                 state = State.CLOSING;
             } catch (ModInstall.InstallException e) {
                 error = e.shown();
@@ -144,7 +147,7 @@ public class ModConsentScreen extends Screen {
                 state = State.FAILED;
             } catch (Exception e) {
                 DropIn.LOGGER.error("Installing the mods of '{}' failed", world.name(), e);
-                error = Component.translatable(K + "mods.error.failed", String.valueOf(e.getMessage()));
+                error = new TextComponentTranslation(K + "mods.error.failed", String.valueOf(e.getMessage()));
                 state = State.FAILED;
             }
         }, "dropin-coop-mod-install");
@@ -158,23 +161,19 @@ public class ModConsentScreen extends Screen {
         }
     }
 
+    /** Escape (26.x {@code shouldCloseOnEsc} was true only while asking or failed; {@link #cancel()} checks the same). */
     @Override
     public void onClose() {
         cancel();
     }
 
     @Override
-    public boolean shouldCloseOnEsc() {
-        return state == State.ASKING || state == State.FAILED;
-    }
-
-    @Override
-    public void tick() {
-        super.tick();
+    protected void tick() {
         refreshButtons();
         if (state == State.CLOSING && ++closingTicks == CLOSE_AFTER_TICKS) {
             // The helper waits for this process to end, then changes mods/. The player starts the game again.
-            this.minecraft.stop();
+            // 1.12.2 port: 26.x Minecraft.stop() is Minecraft.shutdown().
+            this.mc.shutdown();
         }
     }
 
@@ -182,41 +181,39 @@ public class ModConsentScreen extends Screen {
         return bytes < 1024 * 1024 ? Math.max(1, bytes / 1024) + " KB" : String.format(java.util.Locale.ROOT, "%.1f MB", bytes / 1048576.0);
     }
 
-    private List<Component> lines() {
-        List<Component> lines = new ArrayList<>();
+    private List<String> lines() {
+        List<String> lines = new ArrayList<>();
         if (changed) {
-            lines.add(Component.translatable(K + "mods.consent.changed"));
+            lines.add(I18n.format(K + "mods.consent.changed"));
         }
         if (address == null && !changed) {
-            lines.add(Component.translatable(K + "policy.mods_mismatch"));
+            lines.add(I18n.format(K + "policy.mods_mismatch"));
         }
-        lines.add(Component.translatable(K + "mods.consent.summary", held.manifest().files().size(), diff.toDownload().size(),
+        lines.add(I18n.format(K + "mods.consent.summary", held.manifest().files().size(), diff.toDownload().size(),
                 megabytes(diff.downloadBytes()), diff.toRemove().size()));
-        lines.add(Component.empty());
-        lines.add(Component.translatable(K + "mods.consent.trust", held.policy().ownerName()));
-        lines.add(Component.translatable(K + "mods.consent.restart"));
+        lines.add("");
+        lines.add(I18n.format(K + "mods.consent.trust", held.policy().ownerName()));
+        lines.add(I18n.format(K + "mods.consent.restart"));
         if (!diff.toRemove().isEmpty()) {
-            lines.add(Component.translatable(K + "mods.consent.moved"));
+            lines.add(I18n.format(K + "mods.consent.moved"));
         }
         return lines;
     }
 
     @Override
-    public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
-        super.render(graphics, mouseX, mouseY, a);
-        graphics.drawCenteredString(this.font, this.title, this.width / 2, 14, -1);
+    protected void drawContents(int mouseX, int mouseY, float partialTicks) {
         int y = 40;
         int wrap = Math.min(340, this.width - 20);
-        for (Component line : lines()) {
-            for (FormattedCharSequence part : this.font.split(line, wrap)) {
-                graphics.drawCenteredString(this.font, part, this.width / 2, y, -1);
+        for (String line : lines()) {
+            for (String part : this.fontRenderer.listFormattedStringToWidth(line, wrap)) {
+                drawCenteredString(this.fontRenderer, part, this.width / 2, y, 0xFFFFFF);
                 y += 11;
             }
             y += 3;
         }
-        Component status = state == State.FAILED ? error : progress;
-        for (FormattedCharSequence part : this.font.split(status, wrap)) {
-            graphics.drawCenteredString(this.font, part, this.width / 2, y + 6, state == State.FAILED ? -43691 : -9216);
+        ITextComponent status = state == State.FAILED ? error : progress;
+        for (String part : this.fontRenderer.listFormattedStringToWidth(status.getFormattedText(), wrap)) {
+            drawCenteredString(this.fontRenderer, part, this.width / 2, y + 6, state == State.FAILED ? 0xFF5555 : 0xFFDC00);
             y += 11;
         }
     }

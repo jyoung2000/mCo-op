@@ -451,6 +451,47 @@ class MergeTest {
         assertFalse(ChunkContent.applies(poi(0, 0)));
     }
 
+    /** A 1.12.2 chunk: {DataVersion, Level: {xPos, LastUpdate, InhabitedTime, block}}, volatile fields in Level. */
+    private static byte[] legacyChunk(long lastUpdate, long inhabited, String block) throws IOException {
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        java.io.DataOutputStream out = new java.io.DataOutputStream(bytes);
+        out.writeByte(10);
+        out.writeUTF("");
+        out.writeByte(3);
+        out.writeUTF("DataVersion");
+        out.writeInt(1343);
+        out.writeByte(10);
+        out.writeUTF("Level");
+        out.writeByte(3);
+        out.writeUTF("xPos");
+        out.writeInt(0);
+        out.writeByte(4);
+        out.writeUTF("LastUpdate");
+        out.writeLong(lastUpdate);
+        out.writeByte(4);
+        out.writeUTF("InhabitedTime");
+        out.writeLong(inhabited);
+        out.writeByte(8);
+        out.writeUTF("block");
+        out.writeUTF(block);
+        out.writeByte(0);
+        out.writeByte(0);
+        return bytes.toByteArray();
+    }
+
+    @Test
+    void contentHashOfA1122ChunkLeavesOutTheFieldsInLevel() throws IOException {
+        String key = region(0, 0);
+        byte[] first = legacyChunk(100, 5, "minecraft:stone");
+        byte[] savedAgain = legacyChunk(900, 77, "minecraft:stone");
+        byte[] edited = legacyChunk(100, 5, "minecraft:glass");
+        assertFalse(Manifest.hash(first).equals(Manifest.hash(savedAgain)));
+        assertEquals(ChunkContent.hash(key, first), ChunkContent.hash(key, savedAgain));
+        assertFalse(ChunkContent.hash(key, first).equals(ChunkContent.hash(key, edited)));
+        byte[] cut = java.util.Arrays.copyOf(first, first.length - 3);
+        assertEquals(Manifest.hash(cut), ChunkContent.hash(key, cut));
+    }
+
     @Test
     void aChunkOnlySavedAgainIsNotAChangeOnEitherSide() {
         // Record hashes differ everywhere (the game saved the chunks again); the content says what really changed.
@@ -548,6 +589,14 @@ class MergeTest {
         assertNull(Branches.playerOf(RecordKey.file("somemod/" + id + ".dat")));
         assertTrue(Branches.worldLevel(RecordKey.file("DIM-1/data/raids.dat")));
         assertTrue(Branches.worldLevel(RecordKey.file("DIM1/data/raids_end.dat")));
+        // 1.12.2: a mod's dimension keeps its saved data in DIM<N>/data/
+        assertTrue(Branches.worldLevel(RecordKey.file("DIM2/data/villages.dat")));
+        assertTrue(Branches.worldLevel(RecordKey.file("DIM-7/data/x.dat")));
+        // Forge's force-loaded chunks: 26.x keeps them in data/chunks.dat, which is world-level
+        assertTrue(Branches.worldLevel(RecordKey.file("forcedchunks.dat")));
+        assertTrue(Branches.worldLevel(RecordKey.file("DIM2/forcedchunks.dat")));
+        assertTrue(Branches.worldLevel(RecordKey.file("DIM-1/forcedchunks.dat")));
+        assertFalse(Branches.worldLevel(RecordKey.file("DIM0/forcedchunks.dat")));
         assertTrue(Branches.worldLevel(RecordKey.file("data/raids.dat")));
         assertFalse(Branches.worldLevel(RecordKey.file("playerdata/" + id + ".dat")));
     }

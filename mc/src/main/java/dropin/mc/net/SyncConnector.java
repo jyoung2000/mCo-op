@@ -2,6 +2,7 @@ package dropin.mc.net;
 
 import dropin.core.sync.Wire;
 import dropin.mc.coop.StatusPing;
+import dropin.tunnel.DialtoneResolver;
 import dropin.tunnel.SmugglersInetSocketAddress;
 import dropin.tunnel.dialtone.DialtoneAddress;
 import dropin.tunnel.dialtone.DialtoneAmbientSession;
@@ -12,9 +13,13 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
-import net.minecraft.client.multiplayer.resolver.ResolvedServerAddress;
-import net.minecraft.client.multiplayer.resolver.ServerAddress;
-import net.minecraft.client.multiplayer.resolver.ServerNameResolver;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.epoll.Epoll;
+import io.netty.channel.epoll.EpollSocketChannel;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioSocketChannel;
+import net.minecraft.client.Minecraft;
+import net.minecraft.network.NetworkManager;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -38,11 +43,13 @@ public final class SyncConnector {
         // Upstream's Dialtone session start is not safe to run from two threads at once; status pings
         // take the same lock.
         synchronized (StatusPing.class) {
-            Optional<ResolvedServerAddress> resolved = ServerNameResolver.DEFAULT.resolveAddress(ServerAddress.parseString(address));
-            if (resolved.isEmpty()) {
+            // 1.12.2 port: the tunnel's DialtoneResolver resolves like ServerAddress.fromString + InetAddress.getByName
+            // and returns a SmugglersInetSocketAddress when the server is reached over Dialtone.
+            Optional<InetSocketAddress> resolved = DialtoneResolver.resolve(address);
+            if (!resolved.isPresent()) {
                 throw new IOException("Cannot resolve " + address);
             }
-            InetSocketAddress socket = resolved.get().asInetSocketAddress();
+            InetSocketAddress socket = resolved.get();
             Bootstrap bootstrap = new Bootstrap().handler(new ChannelInitializer<Channel>() {
                 @Override
                 protected void initChannel(Channel channel) {
@@ -53,9 +60,13 @@ public final class SyncConnector {
                 future = bootstrap.channel(DialtoneChannel.class).group(DialtoneAmbientSession.INSTANCE.group)
                         .connect(new DialtoneAddress(smuggled.ticket));
             } else {
-                // 1.21.1 port: the game's own client worker group and channel class (Connection.connect, NIO).
-                future = bootstrap.channel(io.netty.channel.socket.nio.NioSocketChannel.class)
-                        .group(net.minecraft.network.Connection.NETWORK_WORKER_GROUP.get())
+                // 1.12.2 port: the game's own client worker group and channel class, chosen the way
+                // NetworkManager.createNetworkManagerAndConnect chooses them (epoll if available and enabled).
+                boolean epoll = Epoll.isAvailable() && Minecraft.getMinecraft().gameSettings.isUsingNativeTransport();
+                Class<? extends SocketChannel> type = epoll ? EpollSocketChannel.class : NioSocketChannel.class;
+                EventLoopGroup group = epoll ? NetworkManager.CLIENT_EPOLL_EVENTLOOP.getValue()
+                        : NetworkManager.CLIENT_NIO_EVENTLOOP.getValue();
+                future = bootstrap.channel(type).group(group)
                         .option(ChannelOption.TCP_NODELAY, true)
                         .connect(socket.getAddress(), socket.getPort());
             }

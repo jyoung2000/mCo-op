@@ -2,34 +2,51 @@ package dropin.mixin.mc;
 
 import dropin.mc.handoff.CrashFailover;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.multiplayer.ClientCommonPacketListenerImpl;
+import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.multiplayer.ServerData;
-import net.minecraft.network.DisconnectionDetails;
-import org.spongepowered.asm.mixin.Final;
+import net.minecraft.client.network.NetHandlerPlayClient;
+import net.minecraft.util.text.ITextComponent;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * DESIGN 4.9 (crash): a member whose game connection ends without a handoff and without leaving gets the
- * failover screen instead of "Connection lost". {@code onDisconnect} shows whatever
- * {@code createDisconnectScreen} returns.
+ * failover screen instead of "Connection lost".
+ * <p>
+ * 1.12.2 port: 26.x {@code ClientCommonPacketListenerImpl.createDisconnectScreen} is
+ * {@code NetHandlerPlayClient.onDisconnect(ITextComponent)} here, which calls {@code loadWorld(null)} (that clears
+ * the current server data and the integrated server) and then shows {@code GuiDisconnected}. The address and
+ * whether the connection was to this game's own server are read at its head; the screen is replaced at its end.
  */
-@Mixin(ClientCommonPacketListenerImpl.class)
+@Mixin(NetHandlerPlayClient.class)
 public abstract class ClientCommonPacketListenerImplMixin {
     @Shadow
-    @Final
-    protected ServerData serverData;
+    private Minecraft client;
 
-    @Inject(method = "createDisconnectScreen", at = @At("RETURN"), cancellable = true)
-    private void dropin$hostLost(DisconnectionDetails details, CallbackInfoReturnable<Screen> cir) {
-        Screen replaced = CrashFailover.lost(Minecraft.getInstance(), this.serverData == null ? null : this.serverData.ip,
-                cir.getReturnValue());
+    @Unique
+    private String dropin$address;
+
+    @Inject(method = "onDisconnect", at = @At("HEAD"))
+    private void dropin$remember(ITextComponent reason, CallbackInfo ci) {
+        ServerData data = this.client.getCurrentServerData();
+        // A connection to this game's own integrated server is never a lost co-op host.
+        this.dropin$address = this.client.getIntegratedServer() != null || data == null ? null : data.serverIP;
+    }
+
+    @Inject(method = "onDisconnect", at = @At("RETURN"))
+    private void dropin$hostLost(ITextComponent reason, CallbackInfo ci) {
+        String address = this.dropin$address;
+        this.dropin$address = null;
+        if (address == null) {
+            return;
+        }
+        GuiScreen replaced = CrashFailover.lost(this.client, address, this.client.currentScreen);
         if (replaced != null) {
-            cir.setReturnValue(replaced);
+            this.client.displayGuiScreen(replaced);
         }
     }
 }

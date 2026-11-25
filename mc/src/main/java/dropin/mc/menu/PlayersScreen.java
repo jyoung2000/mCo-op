@@ -4,15 +4,12 @@ import dropin.core.world.CoopWorld;
 import dropin.core.world.Member;
 import dropin.mc.DropIn;
 import dropin.mc.coop.CoopWorlds;
+import dropin.mc.menu.ui.DScreen;
 import dropin.mc.policy.PolicyActions;
 import dropin.mc.policy.WorldPolicy;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.network.chat.CommonComponents;
-import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.resources.I18n;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -25,19 +22,17 @@ import java.util.UUID;
  * kept current by the member lists hosts and members exchange (DESIGN 4.13). The owner also gets the
  * policy controls here: who is banned, and whether members may use commands.
  */
-public class PlayersScreen extends Screen {
+public class PlayersScreen extends DScreen {
     private static final String K = "text.dropin_coop.";
 
     public record Row(String uuid, String name, boolean owner, boolean playingNow, long lastSeen, boolean banned, boolean admin) {
     }
 
-    private final Screen parent;
     private final String worldId;
     private List<Row> rows = List.of();
 
-    public PlayersScreen(Screen parent, String worldId) {
-        super(Component.translatable(K + "players.title"));
-        this.parent = parent;
+    public PlayersScreen(GuiScreen parent, String worldId) {
+        super(parent, I18n.format(K + "players.title"));
         this.worldId = worldId;
     }
 
@@ -51,7 +46,7 @@ public class PlayersScreen extends Screen {
         try {
             CoopWorld world = CoopWorlds.store().get(worldId).orElse(null);
             if (world != null) {
-                WorldPolicy.Held held = PolicyActions.held(Minecraft.getInstance(), world);
+                WorldPolicy.Held held = PolicyActions.held(Minecraft.getMinecraft(), world);
                 CoopStatus.Status status = CoopStatus.of(worldId);
                 for (Member member : world.members()) {
                     rows.add(new Row(member.uuid(), member.name(), member.isOwner(), status.isOnline(member.uuid()), member.lastSeen(),
@@ -82,14 +77,19 @@ public class PlayersScreen extends Screen {
         } catch (Exception e) {
             DropIn.LOGGER.error("Could not change the policy of {}", worldId, e);
         }
-        this.rebuildWidgets();
+        this.initGui();
+    }
+
+    @Override
+    protected int titleY() {
+        return 14;
     }
 
     @Override
     protected void init() {
         rows = rowsOf(worldId);
         CoopWorld world = world();
-        WorldPolicy.Held held = world == null ? null : PolicyActions.held(this.minecraft, world);
+        WorldPolicy.Held held = world == null ? null : PolicyActions.held(this.mc, world);
         boolean owner = false;
         try {
             owner = held != null && CoopWorlds.store().isOwner(worldId);
@@ -99,9 +99,9 @@ public class PlayersScreen extends Screen {
         if (owner) {
             // DESIGN 4.13: only the owner changes the policy; every change is a new signed version.
             boolean allowed = held.policy().membersMayUseCommands();
-            this.addRenderableWidget(Button.builder(Component.translatable(K + (allowed ? "players.commands_on" : "players.commands_off")),
-                    button -> change(() -> PolicyActions.setMembersMayUseCommands(this.minecraft, world, !allowed)))
-                    .bounds(this.width / 2 - 100, this.height - 50, 200, 20).build());
+            button(this.width / 2 - 100, this.height - 50, 200,
+                    I18n.format(K + (allowed ? "players.commands_on" : "players.commands_off")),
+                    b -> change(() -> PolicyActions.setMembersMayUseCommands(this.mc, world, !allowed)));
             int left = Math.max(10, this.width / 2 - 150);
             int y = 36;
             for (Row row : rows) {
@@ -109,71 +109,62 @@ public class PlayersScreen extends Screen {
                     break;
                 }
                 if (!row.owner()) {
-                    this.addRenderableWidget(Button.builder(Component.translatable(K + (row.banned() ? "players.unban" : "players.ban")),
-                            button -> change(() -> PolicyActions.setBanned(this.minecraft, world, row.uuid(), !row.banned())))
-                            .bounds(left + 250, y - 2, 50, 20).build());
+                    button(left + 250, y - 2, 50, I18n.format(K + (row.banned() ? "players.unban" : "players.ban")),
+                            b -> change(() -> PolicyActions.setBanned(this.mc, world, row.uuid(), !row.banned())));
                     // DESIGN 4.13: admins get operator rights in every session.
-                    this.addRenderableWidget(Button.builder(Component.translatable(K + (row.admin() ? "players.unadmin" : "players.admin")),
-                            button -> change(() -> PolicyActions.setAdmin(this.minecraft, world, row.uuid(), !row.admin())))
-                            .bounds(left + 176, y - 2, 70, 20).build());
+                    button(left + 176, y - 2, 70, I18n.format(K + (row.admin() ? "players.unadmin" : "players.admin")),
+                            b -> change(() -> PolicyActions.setAdmin(this.mc, world, row.uuid(), !row.admin())));
                 }
                 y += 20;
             }
         }
-        this.addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, button -> onClose())
-                .bounds(this.width / 2 - 100, this.height - 26, 200, 20).build());
+        button(this.width / 2 - 100, this.height - 26, 200, I18n.format("gui.done"), b -> onClose());
     }
 
-    @Override
-    public void onClose() {
-        this.minecraft.setScreen(parent);
-    }
-
-    private Component line(Row row) {
-        MutableComponent text = Component.literal(row.name());
+    private static String line(Row row) {
+        StringBuilder text = new StringBuilder(row.name());
         if (row.owner()) {
-            text.append(" ").append(Component.translatable(K + "players.owner"));
+            text.append(' ').append(I18n.format(K + "players.owner"));
         }
         if (row.admin()) {
-            text.append(" ").append(Component.translatable(K + "players.admin_tag"));
+            text.append(' ').append(I18n.format(K + "players.admin_tag"));
         }
         if (row.banned()) {
-            text.append(" ").append(Component.translatable(K + "players.banned"));
+            text.append(' ').append(I18n.format(K + "players.banned"));
         }
         text.append("  ");
         if (row.playingNow()) {
-            return text.append(Component.translatable(K + "players.playing"));
+            return text.append(I18n.format(K + "players.playing")).toString();
         }
         long minutes = Math.max(0, System.currentTimeMillis() / 1000 - row.lastSeen()) / 60;
         if (minutes < 1) {
-            return text.append(Component.translatable(K + "players.seen_now"));
+            return text.append(I18n.format(K + "players.seen_now")).toString();
         } else if (minutes < 120) {
-            return text.append(Component.translatable(K + "players.seen_minutes", minutes));
+            return text.append(I18n.format(K + "players.seen_minutes", minutes)).toString();
         } else if (minutes < 48 * 60) {
-            return text.append(Component.translatable(K + "players.seen_hours", minutes / 60));
+            return text.append(I18n.format(K + "players.seen_hours", minutes / 60)).toString();
         }
-        return text.append(Component.translatable(K + "players.seen_days", minutes / (24 * 60)));
+        return text.append(I18n.format(K + "players.seen_days", minutes / (24 * 60))).toString();
     }
 
     @Override
-    public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
-        super.render(graphics, mouseX, mouseY, a);
-        graphics.drawCenteredString(this.font, this.title, this.width / 2, 14, -1);
+    protected void drawContents(int mouseX, int mouseY, float partialTicks) {
         int left = Math.max(10, this.width / 2 - 150);
         int y = 36;
         if (rows.isEmpty()) {
-            graphics.drawCenteredString(this.font, Component.translatable(K + "players.none"), this.width / 2, y, -6250336);
+            drawCenteredString(this.fontRenderer, I18n.format(K + "players.none"), this.width / 2, y, 0xA0A0A0);
         }
         for (Row row : rows) {
             if (y > this.height - 74) {
                 break;
             }
             try {
-                Faces.draw(graphics, UUID.fromString(row.uuid()), left, y, 16);
+                // 1.12.2 port: Faces.draw without the 26.x GuiGraphics (it binds and draws the skin itself).
+                Faces.draw(UUID.fromString(row.uuid()), left, y, 16);
             } catch (IllegalArgumentException e) {
                 // an unreadable uuid only loses the head
             }
-            graphics.drawString(this.font, line(row), left + 22, y + 4, -1);
+            drawString(this.fontRenderer, line(row), left + 22, y + 4, 0xFFFFFF);
             y += 20;
         }
     }

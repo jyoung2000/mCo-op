@@ -1,102 +1,101 @@
 package dropin.mc.savepoint;
 
-import com.mojang.brigadier.CommandDispatcher;
-import com.mojang.brigadier.arguments.StringArgumentType;
 import dropin.core.savepoint.SavePoints.Point;
 import dropin.mc.DropIn;
 import dropin.mc.coop.CoopWorlds;
 import dropin.mc.host.HostSync;
 import net.minecraft.client.Minecraft;
-import net.minecraft.commands.CommandSourceStack;
-import net.minecraft.commands.Commands;
-import net.minecraft.network.chat.Component;
+import net.minecraft.command.ICommandSender;
+import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.text.ITextComponent;
+import net.minecraft.util.text.TextComponentTranslation;
+import net.minecraft.util.text.TextFormatting;
 
 import java.util.List;
 
-/** {@code /dropin savepoint create|list|restore} (DESIGN 4.16): for the owner, while the owner hosts. */
+/**
+ * {@code /dropin savepoint create|list|restore} (DESIGN 4.16): for the owner, while the owner hosts.
+ *
+ * <p>1.12.2 port: there is no Brigadier; dropin.mc.commands.DropInCommands parses the arguments and calls these.
+ * A failure (26.x {@code sendFailure}) is a red message to the sender.
+ */
 public final class SavePointCommands {
     private static final String K = "text.dropin_coop.savepoint.";
 
     private SavePointCommands() {
     }
 
-    public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
-        dispatcher.register(Commands.literal("dropin").then(Commands.literal("savepoint")
-                .then(Commands.literal("create").then(Commands.argument("name", StringArgumentType.word())
-                        .executes(context -> create(context.getSource(), StringArgumentType.getString(context, "name")))))
-                .then(Commands.literal("list").executes(context -> list(context.getSource())))
-                .then(Commands.literal("restore").then(Commands.argument("name", StringArgumentType.word())
-                        .executes(context -> restore(context.getSource(), StringArgumentType.getString(context, "name")))))));
+    private static void success(ICommandSender sender, ITextComponent message) {
+        sender.sendMessage(message);
     }
 
-    /** The host's sync if the command comes from the owner playing at this PC, else null (and the source is told). */
-    private static HostSync owner(CommandSourceStack source) {
+    private static void failure(ICommandSender sender, ITextComponent message) {
+        message.getStyle().setColor(TextFormatting.RED);
+        sender.sendMessage(message);
+    }
+
+    /** The host's sync if the command comes from the owner playing at this PC, else null (and the sender is told). */
+    private static HostSync owner(ICommandSender sender) {
         HostSync sync = HostSync.current();
-        ServerPlayer player = source.getPlayer();
-        Minecraft mc = Minecraft.getInstance();
-        if (sync == null || player == null || !player.getUUID().equals(mc.getUser().getProfileId())
+        EntityPlayerMP player = sender.getCommandSenderEntity() instanceof EntityPlayerMP p ? p : null;
+        Minecraft mc = Minecraft.getMinecraft();
+        if (sync == null || player == null || !player.getUniqueID().equals(mc.getSession().getProfile().getId())
                 || !CoopWorlds.store().isOwner(sync.world().worldId())) {
-            source.sendFailure(Component.translatable(K + "owner_only"));
+            failure(sender, new TextComponentTranslation(K + "owner_only"));
             return null;
         }
         return sync;
     }
 
-    private static int create(CommandSourceStack source, String name) {
-        HostSync sync = owner(source);
+    public static void create(ICommandSender sender, String name) {
+        HostSync sync = owner(sender);
         if (sync == null) {
-            return 0;
+            return;
         }
-        MinecraftServer server = source.getServer();
+        MinecraftServer server = sender.getServer();
         Thread thread = new Thread(() -> {
             try {
                 Point point = SavePointActions.createHosted(sync, name);
                 DropIn.LOGGER.info("Save point '{}' of '{}': checkpoint {}, {} records", point.name(), sync.world().name(),
                         point.seq(), point.records());
-                server.execute(() -> source.sendSuccess(() -> Component.translatable(K + "created", point.name(), point.records()), false));
+                server.addScheduledTask(() -> success(sender, new TextComponentTranslation(K + "created", point.name(), point.records())));
             } catch (Exception e) {
                 DropIn.LOGGER.warn("Save point '{}' was not made: {}", name, e.toString());
-                server.execute(() -> source.sendFailure(Component.translatable(K + "failed", String.valueOf(e.getMessage()))));
+                server.addScheduledTask(() -> failure(sender, new TextComponentTranslation(K + "failed", String.valueOf(e.getMessage()))));
             }
         }, "dropin-coop-savepoint");
         thread.setDaemon(true);
         thread.start();
-        return 1;
     }
 
-    private static int list(CommandSourceStack source) {
-        HostSync sync = owner(source);
+    public static void list(ICommandSender sender) {
+        HostSync sync = owner(sender);
         if (sync == null) {
-            return 0;
+            return;
         }
         try {
             List<Point> points = SavePointActions.store(sync.folder()).list();
             if (points.isEmpty()) {
-                source.sendSuccess(() -> Component.translatable(K + "empty"), false);
+                success(sender, new TextComponentTranslation(K + "empty"));
             }
             for (Point point : points) {
-                source.sendSuccess(() -> Component.translatable(K + "line", point.name(), point.seq(), point.records()), false);
+                success(sender, new TextComponentTranslation(K + "line", point.name(), point.seq(), point.records()));
             }
-            return points.size();
         } catch (Exception e) {
-            source.sendFailure(Component.translatable(K + "failed", String.valueOf(e.getMessage())));
-            return 0;
+            failure(sender, new TextComponentTranslation(K + "failed", String.valueOf(e.getMessage())));
         }
     }
 
-    private static int restore(CommandSourceStack source, String name) {
-        HostSync sync = owner(source);
+    public static void restore(ICommandSender sender, String name) {
+        HostSync sync = owner(sender);
         if (sync == null) {
-            return 0;
+            return;
         }
         try {
-            SavePointActions.restoreHosted(Minecraft.getInstance(), name);
-            return 1;
+            SavePointActions.restoreHosted(Minecraft.getMinecraft(), name);
         } catch (Exception e) {
-            source.sendFailure(Component.translatable(K + "failed", String.valueOf(e.getMessage())));
-            return 0;
+            failure(sender, new TextComponentTranslation(K + "failed", String.valueOf(e.getMessage())));
         }
     }
 }

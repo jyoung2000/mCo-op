@@ -7,11 +7,10 @@ import dropin.core.world.CoopWorldStore;
 import dropin.mc.DropIn;
 import dropin.mc.coop.CoopLauncher;
 import dropin.mc.member.SyncClient;
+import dropin.mc.coop.Prompts;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.GenericMessageScreen;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.network.chat.Component;
+import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.util.text.TextComponentTranslation;
 
 import java.nio.file.Path;
 
@@ -47,7 +46,7 @@ public final class MemberHandoff {
 
     /** The host sent {@code HANDOFF}. Any thread. */
     public static void received(Minecraft mc, CoopWorld world, String successorUuid, LedgerEntry finalEntry, boolean applied) {
-        boolean me = successorUuid.equals(mc.getUser().getProfileId().toString());
+        boolean me = successorUuid.equals(mc.getSession().getProfile().getId().toString());
         DropIn.LOGGER.info("The host of '{}' is leaving at checkpoint {}; next host: {}{}", world.name(), finalEntry.seq(),
                 successorUuid, me ? " (this player)" : "");
         if (me && !applied) {
@@ -57,7 +56,7 @@ public final class MemberHandoff {
         if (me && applied) {
             lastRole = Role.SUCCESSOR;
             onClient(mc, () -> {
-                leave(mc, new GenericMessageScreen(Component.translatable(K + "taking_over")));
+                leave(mc, new Prompts.Message(new TextComponentTranslation(K + "taking_over")));
                 Thread thread = new Thread(() -> takeOver(mc, world, finalEntry), "dropin-coop-takeover");
                 thread.setDaemon(true);
                 thread.start();
@@ -74,13 +73,14 @@ public final class MemberHandoff {
      * Runs {@code task} once on the client thread. {@code Minecraft.disconnect} drops queued tasks
      * ({@code dropAllTasks}), and the old host closes the game connection right after it sent the handoff,
      * so a task queued with {@code execute} alone can be lost: it is queued again until it has run.
+     * (1.12.2 port: {@code addScheduledTask}; this version does not drop queued tasks, the retry is kept as it costs nothing.)
      */
     private static void onClient(Minecraft mc, Runnable task) {
         java.util.concurrent.atomic.AtomicBoolean ran = new java.util.concurrent.atomic.AtomicBoolean();
         Thread thread = new Thread(() -> {
             try {
                 while (!ran.get()) {
-                    mc.execute(() -> {
+                    mc.addScheduledTask(() -> {
                         if (ran.compareAndSet(false, true)) {
                             task.run();
                         }
@@ -96,11 +96,11 @@ public final class MemberHandoff {
     }
 
     /** Leaves the old host's session (if the game is still in it) and shows {@code screen}. Client thread. */
-    private static void leave(Minecraft mc, Screen screen) {
-        if (mc.level != null && mc.getSingleplayerServer() == null) {
+    private static void leave(Minecraft mc, GuiScreen screen) {
+        if (mc.world != null && mc.getIntegratedServer() == null) {
             dropin.mc.compat.Compat.disconnectFromWorld(mc, dropin.mc.compat.Compat.DEFAULT_QUIT_MESSAGE);
         }
-        mc.setScreen(screen);
+        mc.displayGuiScreen(screen);
     }
 
     private static void takeOver(Minecraft mc, CoopWorld world, LedgerEntry finalEntry) {
@@ -114,7 +114,7 @@ public final class MemberHandoff {
             if (!manifest.root().equals(finalEntry.root())) {
                 DropIn.LOGGER.error("The local copy of '{}' (root {}) is not the final checkpoint {} (root {}): not taking over",
                         world.name(), manifest.root(), finalEntry.seq(), finalEntry.root());
-                mc.execute(() -> mc.setScreen(new HostChangingScreen(world, finalEntry.host())));
+                mc.addScheduledTask(() -> mc.displayGuiScreen(new HostChangingScreen(world, finalEntry.host())));
                 lastRole = Role.FOLLOWER;
                 return;
             }
@@ -124,7 +124,7 @@ public final class MemberHandoff {
             CoopLauncher.hostAfterHandoff(mc, world, folder);
         } catch (Exception e) {
             DropIn.LOGGER.error("Could not take over '{}' as host", world.name(), e);
-            mc.execute(() -> mc.setScreen(new HostChangingScreen(world, finalEntry.host())));
+            mc.addScheduledTask(() -> mc.displayGuiScreen(new HostChangingScreen(world, finalEntry.host())));
         }
     }
 }

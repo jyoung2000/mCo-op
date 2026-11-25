@@ -6,13 +6,14 @@ import dropin.core.policy.Policy;
 import dropin.core.world.CoopWorld;
 import dropin.mc.DropIn;
 import dropin.mc.coop.CoopWorlds;
-import dropin.mc.menu.CoopWorldsScreen;
 import dropin.mc.menu.ModConsentScreen;
 import dropin.mc.menu.PolicyUpdateScreen;
+import dropin.mc.coop.Prompts;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.AlertScreen;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.network.chat.Component;
+import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.resources.I18n;
+import net.minecraft.util.text.ITextComponent;
+import net.minecraft.util.text.TextComponentTranslation;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -70,19 +71,19 @@ public final class HostGate {
             }
             DropIn.LOGGER.info("The owner's mods or datapacks of '{}' differ from policy version {}: added {}, removed {}",
                     world.name(), policy.version(), added, removed);
-            mc.execute(() -> mc.setScreen(new PolicyUpdateScreen(added, removed, !packsSame, !gameSame, () -> {
+            mc.addScheduledTask(() -> mc.displayGuiScreen(new PolicyUpdateScreen(added, removed, !packsSame, !gameSame, () -> {
                 try {
                     PolicyActions.signUpdate(mc, world, folder, held, manifest);
                     retry.run();
                 } catch (IOException | RuntimeException e) {
                     DropIn.LOGGER.error("Could not sign a new policy for '{}'", world.name(), e);
-                    alert(mc, onCancel, Component.translatable(K + "policy.failed", String.valueOf(e.getMessage())));
+                    alert(mc, onCancel, new TextComponentTranslation(K + "policy.failed", String.valueOf(e.getMessage())));
                 }
             }, onCancel)));
             return false;
         } catch (IOException | RuntimeException e) {
             DropIn.LOGGER.error("Could not check the policy of '{}'", world.name(), e);
-            alert(mc, onCancel, Component.translatable(K + "policy.failed", String.valueOf(e.getMessage())));
+            alert(mc, onCancel, new TextComponentTranslation(K + "policy.failed", String.valueOf(e.getMessage())));
             return false;
         }
     }
@@ -93,7 +94,7 @@ public final class HostGate {
      *
      * @return the screen that says why this PC cannot host, or null if it may
      */
-    public static Screen memberProblem(Minecraft mc, CoopWorld world, Path folder, Runnable onCancel) {
+    public static GuiScreen memberProblem(Minecraft mc, CoopWorld world, Path folder, Runnable onCancel) {
         if (CoopWorlds.store().isOwner(world.worldId())) {
             return null;
         }
@@ -102,9 +103,9 @@ public final class HostGate {
             return null;
         }
         try {
-            Component game = WorldPolicy.environmentProblem(held);
+            ITextComponent game = WorldPolicy.environmentProblem(held);
             if (game != null) {
-                return new AlertScreen(onCancel, CoopWorldsScreen.TITLE, game);
+                return new Prompts.Alert(onCancel, title(), game);
             }
             ModDiff diff = WorldPolicy.diff(held);
             if (!diff.mayJoin()) {
@@ -112,22 +113,27 @@ public final class HostGate {
             }
             if (!diff.keptExtras().isEmpty()) {
                 String names = diff.keptExtras().stream().map(ModManifest.Entry::path).collect(Collectors.joining(", "));
-                return new AlertScreen(onCancel, CoopWorldsScreen.TITLE, Component.translatable(K + "policy.kept_extras", names));
+                return new Prompts.Alert(onCancel, title(), new TextComponentTranslation(K + "policy.kept_extras", names));
             }
             Policy policy = held.policy();
             if (!policy.datapackFiles().equals(WorldPolicy.datapackFiles(folder))
                     || !policy.datapacksEnabled().equals(WorldPolicy.datapacksEnabled(folder))) {
-                return new AlertScreen(onCancel, CoopWorldsScreen.TITLE, Component.translatable(K + "policy.datapacks_mismatch"));
+                return new Prompts.Alert(onCancel, title(), new TextComponentTranslation(K + "policy.datapacks_mismatch"));
             }
             return null;
         } catch (IOException | RuntimeException e) {
             DropIn.LOGGER.error("Could not check the policy of '{}'", world.name(), e);
-            return new AlertScreen(onCancel, CoopWorldsScreen.TITLE,
-                    Component.translatable(K + "policy.failed", String.valueOf(e.getMessage())));
+            return new Prompts.Alert(onCancel, title(),
+                    new TextComponentTranslation(K + "policy.failed", String.valueOf(e.getMessage())));
         }
     }
 
-    private static void alert(Minecraft mc, Runnable onCancel, Component message) {
-        mc.execute(() -> mc.setScreen(new AlertScreen(onCancel, CoopWorldsScreen.TITLE, message)));
+    /** 26.x {@code CoopWorldsScreen.TITLE}. */
+    private static String title() {
+        return I18n.format("menu.dropin_coop.title");
+    }
+
+    private static void alert(Minecraft mc, Runnable onCancel, ITextComponent message) {
+        mc.addScheduledTask(() -> mc.displayGuiScreen(new Prompts.Alert(onCancel, title(), message)));
     }
 }

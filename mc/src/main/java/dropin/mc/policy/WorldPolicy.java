@@ -16,12 +16,13 @@ import dropin.core.world.Member;
 import dropin.mc.DropIn;
 import dropin.mc.coop.CoopWorlds;
 import dropin.tunnel.Agnos;
-import net.minecraft.SharedConstants;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.NbtAccounter;
-import net.minecraft.nbt.NbtIo;
-import net.minecraft.network.chat.Component;
+import net.minecraft.nbt.CompressedStreamTools;
+import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.nbt.NBTTagList;
+import net.minecraft.util.text.ITextComponent;
+import net.minecraft.util.text.TextComponentTranslation;
+import net.minecraftforge.fml.common.Loader;
+import net.minecraftforge.fml.common.ModContainer;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -91,8 +92,9 @@ public final class WorldPolicy {
         return Agnos.loaderName();
     }
 
+    /** 1.12.2 port: 26.x {@code SharedConstants.getCurrentVersion().getName()}. */
     public static String minecraftVersion() {
-        return SharedConstants.getCurrentVersion().getName();
+        return Loader.MC_VERSION;
     }
 
     /** {@code config/dropin/coop.json}: modMaxFileMB, modMaxTotalMB, modMaxFiles. */
@@ -103,9 +105,54 @@ public final class WorldPolicy {
                 CoopWorlds.configInt("modMaxFiles", fallback.maxFiles()));
     }
 
-    /** The jars directly in {@code mods/}, without DropIn itself. */
+    /**
+     * The jars directly in {@code mods/}, without DropIn itself.
+     * <p>
+     * 1.12.2 port: core's {@code ModScan} reads {@code fabric.mod.json} / {@code neoforge.mods.toml}, which Forge
+     * 1.12.2 jars do not have, so it finds no mod id in them. Ids and versions come from Forge's own mod list
+     * instead ({@code Loader.getModList()}, matched by {@code ModContainer.getSource()}), and DropIn's own jar is
+     * left out by that source file. A jar Forge did not load (not a mod, or a mod of another loader) keeps what
+     * the scan found.
+     */
     public static List<ModManifest.Entry> localMods() throws IOException {
-        return ModScan.scan(modsDir(), Set.of(MOD_ID), loader());
+        Map<String, ModContainer> loaded = loadedJars();
+        List<ModManifest.Entry> mods = new ArrayList<>();
+        for (ModManifest.Entry entry : ModScan.scan(modsDir(), Set.of(MOD_ID), loader())) {
+            ModContainer container = loaded.get(entry.path().toLowerCase(Locale.ROOT));
+            if (container == null) {
+                mods.add(entry);
+            } else if (!MOD_ID.equals(container.getModId())) {
+                String id = entry.modId().isEmpty() ? container.getModId() : entry.modId();
+                String version = entry.version().isEmpty() ? String.valueOf(container.getVersion()) : entry.version();
+                mods.add(new ModManifest.Entry(entry.path(), entry.size(), entry.sha512(), entry.sha1(), id, version, entry.source(),
+                        entry.versionId(), entry.url()));
+            }
+        }
+        return mods;
+    }
+
+    /**
+     * File name (lower case) of each jar directly in {@code mods/} that Forge loaded, to the mod it loaded from
+     * it. A jar with several mods maps to DropIn if DropIn is one of them, else to the first.
+     */
+    private static Map<String, ModContainer> loadedJars() {
+        Map<String, ModContainer> jars = new TreeMap<>();
+        Path mods = modsDir();
+        for (ModContainer container : Loader.instance().getModList()) {
+            java.io.File source = container.getSource();
+            if (source == null || !source.isFile()) {
+                continue;
+            }
+            Path file = source.toPath().toAbsolutePath().normalize();
+            if (!mods.equals(file.getParent())) {
+                continue;
+            }
+            String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
+            if (MOD_ID.equals(container.getModId()) || !jars.containsKey(name)) {
+                jars.put(name, container);
+            }
+        }
+        return jars;
     }
 
     /** File names the player marked "keep" ({@code config/dropin/keepmods.json}). */
@@ -149,6 +196,13 @@ public final class WorldPolicy {
                     if (name.toLowerCase(Locale.ROOT).endsWith(".jar") && MOD_ID.equals(ModScan.jarInfo(file, loader()).modId())) {
                         names.add(name);
                     }
+                }
+            }
+            // 1.12.2 port: ModScan cannot read a Forge 1.12.2 jar's mod id; Forge says which jar DropIn came from.
+            for (ModContainer container : loadedJars().values()) {
+                String name = container.getSource().getName();
+                if (MOD_ID.equals(container.getModId()) && !names.contains(name)) {
+                    names.add(name);
                 }
             }
         }
@@ -258,14 +312,14 @@ public final class WorldPolicy {
     }
 
     /** Why this game cannot play the world at all (wrong Minecraft version or loader), or null. */
-    public static Component environmentProblem(Held held) {
+    public static ITextComponent environmentProblem(Held held) {
         Policy policy = held.policy();
         if (!policy.minecraftVersion().equals(minecraftVersion())) {
-            return Component.translatable(K + "policy.version", policy.minecraftVersion(), minecraftVersion());
+            return new TextComponentTranslation(K + "policy.version", policy.minecraftVersion(), minecraftVersion());
         }
         // DESIGN 4.14: a world without mods stays cross-loader.
         if (!held.manifest().isEmpty() && !policy.loader().equals(loader())) {
-            return Component.translatable(K + "policy.loader", policy.loader(), loader());
+            return new TextComponentTranslation(K + "policy.loader", policy.loader(), loader());
         }
         return null;
     }
@@ -308,6 +362,7 @@ public final class WorldPolicy {
     /**
      * The world datapacks that are switched on: the {@code file/...} entries of {@code DataPacks.Enabled} in
      * level.dat. Packs that come with the game or a loader are left out, so they cannot make two loaders differ.
+     * (1.12.2 port: this version has no datapacks, so both lists are normally empty; the check is kept as it is.)
      */
     public static List<String> datapacksEnabled(Path worldFolder) throws IOException {
         List<String> enabled = new ArrayList<>();
@@ -315,9 +370,12 @@ public final class WorldPolicy {
         if (!Files.isRegularFile(levelDat)) {
             return enabled;
         }
-        CompoundTag root = NbtIo.readCompressed(levelDat, NbtAccounter.unlimitedHeap());
-        ListTag list = dropin.mc.compat.Nbt.listOrEmpty(root.getCompound("Data").getCompound("DataPacks"), "Enabled");
-        for (int i = 0; i < list.size(); i++) {
+        NBTTagCompound root;
+        try (java.io.InputStream in = Files.newInputStream(levelDat)) {
+            root = CompressedStreamTools.readCompressed(in);
+        }
+        NBTTagList list = dropin.mc.compat.Nbt.listOrEmpty(root.getCompoundTag("Data").getCompoundTag("DataPacks"), "Enabled");
+        for (int i = 0; i < list.tagCount(); i++) {
             String name = dropin.mc.compat.Nbt.stringOr(list, i, "");
             if (name.startsWith("file/")) {
                 enabled.add(name);

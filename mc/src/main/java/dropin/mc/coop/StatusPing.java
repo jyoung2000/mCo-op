@@ -1,11 +1,32 @@
 package dropin.mc.coop;
 
-import net.minecraft.client.multiplayer.ServerData;
-import net.minecraft.client.multiplayer.ServerStatusPinger;
+import com.mojang.authlib.GameProfile;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ServerAddress;
+import net.minecraft.network.EnumConnectionState;
+import net.minecraft.network.NetworkManager;
+import net.minecraft.network.ServerStatusResponse;
+import net.minecraft.network.handshake.client.C00Handshake;
+import net.minecraft.network.status.INetHandlerStatusClient;
+import net.minecraft.network.status.client.CPacketServerQuery;
+import net.minecraft.network.status.server.SPacketPong;
+import net.minecraft.network.status.server.SPacketServerInfo;
+import net.minecraft.util.text.ITextComponent;
+import net.minecraft.util.text.TextComponentString;
+
+import java.net.InetAddress;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * A blocking Minecraft status ping, for background threads. The address is resolved the way the game
  * resolves it, so an e4mc domain works (DESIGN 4.3: "Liveness is a ping, not the record").
+ * <p>
+ * 1.12.2 port: the game's {@code ServerPinger} keeps only the names of the players a server lists, so this
+ * sends the same two packets itself ({@code C00Handshake} for STATUS, then {@code CPacketServerQuery}) on a
+ * connection made with {@code NetworkManager.createNetworkManagerAndConnect}, where the tunnel's mixin picks
+ * Dialtone for an e4mc domain, and reads the profiles from the {@code SPacketServerInfo} answer.
  */
 public final class StatusPing {
     private StatusPing() {
@@ -28,18 +49,17 @@ public final class StatusPing {
     static final int LAN_CONNECT_MS = 1_000;
 
     /**
-     * The game's own status ping connects with {@code Connection.connectToServer}, which blocks until the TCP
-     * connect is done, with no time limit of its own (Netty's default is 30 s). From another network nothing
-     * answers the host's LAN address, so every such ping would hang for half a minute before the e4mc domain is
-     * tried. A plain {@code ip:port} therefore must accept a TCP connection within {@link #LAN_CONNECT_MS} first.
-     * Names (the e4mc domain) are left to the game: e4mc's mixins resolve and connect them through its tunnel.
+     * The connect of {@code NetworkManager.createNetworkManagerAndConnect} blocks until the TCP connect is done,
+     * with no time limit of its own (Netty's default is 30 s). From another network nothing answers the host's
+     * LAN address, so every such ping would hang for half a minute before the e4mc domain is tried. A plain
+     * {@code ip:port} therefore must accept a TCP connection within {@link #LAN_CONNECT_MS} first. Names (the
+     * e4mc domain) are left to the game: the tunnel resolves and connects them.
      */
     static boolean reachable(String address) {
-        net.minecraft.client.multiplayer.resolver.ServerAddress parsed =
-                net.minecraft.client.multiplayer.resolver.ServerAddress.parseString(address);
-        java.net.InetAddress ip;
+        ServerAddress parsed = ServerAddress.fromString(address);
+        InetAddress ip;
         try {
-            ip = com.google.common.net.InetAddresses.forString(parsed.getHost());
+            ip = com.google.common.net.InetAddresses.forString(parsed.getIP());
         } catch (IllegalArgumentException notAnIp) {
             return true;
         }
@@ -52,45 +72,102 @@ public final class StatusPing {
         }
     }
 
+    /** One status request on its own connection. */
+    private static final class Request implements INetHandlerStatusClient {
+        final NetworkManager connection;
+        final AtomicReference<List<Player>> answer = new AtomicReference<>();
+        volatile String closed = "";
+
+        private Request(NetworkManager connection) {
+            this.connection = connection;
+        }
+
+        static Request send(String address) throws java.io.IOException {
+            ServerAddress parsed = ServerAddress.fromString(address);
+            NetworkManager connection = NetworkManager.createNetworkManagerAndConnect(InetAddress.getByName(parsed.getIP()),
+                    parsed.getPort(), Minecraft.getMinecraft().gameSettings.isUsingNativeTransport());
+            Request request = new Request(connection);
+            connection.setNetHandler(request);
+            // As ServerPinger.ping: the FML marker tells a Forge server this is a Forge client.
+            connection.sendPacket(new C00Handshake(parsed.getIP(), parsed.getPort(), EnumConnectionState.STATUS, true));
+            connection.sendPacket(new CPacketServerQuery());
+            return request;
+        }
+
+        @Override
+        public void handleServerInfo(SPacketServerInfo packet) {
+            List<Player> list = new ArrayList<>();
+            ServerStatusResponse response = packet.getResponse();
+            if (response != null && response.getPlayers() != null && response.getPlayers().getPlayers() != null) {
+                for (GameProfile profile : response.getPlayers().getPlayers()) {
+                    if (profile != null && profile.getId() != null) {
+                        list.add(new Player(profile.getId().toString(), profile.getName()));
+                    }
+                }
+            }
+            answer.compareAndSet(null, list);
+            connection.closeChannel(new TextComponentString("Finished"));
+        }
+
+        @Override
+        public void handlePong(SPacketPong packet) {
+        }
+
+        @Override
+        public void onDisconnect(ITextComponent reason) {
+            closed = reason == null ? "" : reason.getUnformattedText();
+        }
+
+        /** As {@code ServerPinger.pingPendingNetworks}: flushes and notices a closed connection. */
+        void tick() {
+            if (connection.isChannelOpen()) {
+                connection.processReceivedPackets();
+            } else {
+                connection.handleDisconnection();
+            }
+        }
+
+        void close() {
+            if (connection.isChannelOpen()) {
+                connection.closeChannel(new TextComponentString("Cancelled"));
+            }
+        }
+    }
+
     /** The players the server names in its status answer (the game sends up to 12), or null if it did not answer. */
-    public static synchronized java.util.List<Player> players(String address, long timeoutMillis) {
+    public static synchronized List<Player> players(String address, long timeoutMillis) {
         if (!reachable(address)) {
             return null;
         }
-        ServerData data = new ServerData("dropin", address, ServerData.Type.OTHER);
-        ServerStatusPinger pinger = new ServerStatusPinger();
+        Request first = null;
+        Request second = null;
         try {
-            pinger.pingServer(data, () -> {
-            }, () -> {
-            });
+            first = Request.send(address);
             long started = System.currentTimeMillis();
             long deadline = started + timeoutMillis;
             // Seen on this project's test machine: now and then a status connection is made and never answered,
             // while the host is up. So after two seconds without an answer a second connection asks as well;
             // either answer counts, and the time limit stays the same.
-            ServerData second = null;
             while (System.currentTimeMillis() < deadline) {
-                pinger.tick();
-                ServerData answered = data.players != null ? data : second != null && second.players != null ? second : null;
+                first.tick();
+                if (second != null) {
+                    second.tick();
+                }
+                List<Player> answered = first.answer.get() != null ? first.answer.get() : second != null ? second.answer.get() : null;
                 if (answered != null) {
-                    java.util.List<Player> list = new java.util.ArrayList<>();
-                    answered.players.sample().forEach(player -> list.add(new Player(player.getId().toString(), player.getName())));
-                    if (answered == second) {
+                    if (first.answer.get() == null) {
                         dropin.mc.DropIn.LOGGER.info("The first status ping of {} got no answer; the second did", address);
                     }
-                    return list;
+                    return answered;
                 }
                 if (second == null && System.currentTimeMillis() - started >= SECOND_TRY_MS) {
-                    second = new ServerData("dropin", address, ServerData.Type.OTHER);
-                    pinger.pingServer(second, () -> {
-                    }, () -> {
-                    });
+                    second = Request.send(address);
                 }
                 Thread.sleep(50);
             }
             // To the log only: why a host that is announced counted as not there.
-            dropin.mc.DropIn.LOGGER.info("No status answer from {} within {} ms (the game's pinger says: {})", address, timeoutMillis,
-                    data.motd == null ? "" : data.motd.getString());
+            dropin.mc.DropIn.LOGGER.info("No status answer from {} within {} ms (the connection says: {})", address, timeoutMillis,
+                    first.closed);
             return null;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -99,7 +176,12 @@ public final class StatusPing {
             dropin.mc.DropIn.LOGGER.info("The status ping of {} failed: {}", address, e.toString());
             return null;
         } finally {
-            pinger.removeAll();
+            if (first != null) {
+                first.close();
+            }
+            if (second != null) {
+                second.close();
+            }
         }
     }
 }

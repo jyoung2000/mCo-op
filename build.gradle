@@ -20,10 +20,12 @@ evaluationDependsOn(':cleanroom')
 // One jar (DESIGN section 5): the reobfuscated (SRG) Cleanroom jar, core/, and the bundled libraries.
 // netty-quic is not flattened in: it is nested as dropin/libs/netty-quic.jar (see cleanroom/build.gradle).
 def reobf = project(':cleanroom').tasks.named('reobfJar')
+def coreContents = configurations.coreContents
+def bundledContents = configurations.bundled
 def modJar = tasks.register('modJar', ShadowJar) {
     group = 'build'
     description = 'Builds the single mod jar for Cleanroom (Minecraft 1.12.2).'
-    dependsOn(reobf, configurations.coreContents)
+    dependsOn(reobf, coreContents)
     // The released file is named after the mod's public name; the mod id stays "dropin".
     archiveFileName = "MCo-op-${project.version}+mc${minecraft_version}.jar"
     destinationDirectory = layout.buildDirectory.dir('libs')
@@ -32,7 +34,7 @@ def modJar = tasks.register('modJar', ShadowJar) {
     from({ zipTree(reobf.get().outputs.files.singleFile) })
     from(rootProject.file('LICENSE')) { rename { "LICENSE_${mod_id}" } }
 
-    configurations = [project.configurations.coreContents, project.configurations.bundled]
+    configurations.set([coreContents, bundledContents])
     dependencies {
         exclude(dependency('io.netty.incubator:netty-incubator-codec-classes-quic'))
     }

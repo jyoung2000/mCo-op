@@ -11,9 +11,10 @@ import dropin.mc.savepoint.SavePointActions;
 import dropin.mc.selftest.M1Scenarios.State;
 import dropin.mc.selftest.Scenarios.Context;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.server.IntegratedServer;
-import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.block.Blocks;
+import net.minecraft.init.Blocks;
+import net.minecraft.server.integrated.IntegratedServer;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.storage.WorldInfo;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -33,13 +34,14 @@ import static dropin.mc.selftest.M2Scenarios.quitAndReportRoot;
 import static dropin.mc.selftest.M2Scenarios.verifyRoot;
 import static dropin.mc.selftest.M3Scenarios.MARK_A;
 import static dropin.mc.selftest.M3Scenarios.MARK_B;
+import static dropin.mc.selftest.M3Scenarios.blockAt;
+import static dropin.mc.selftest.M3Scenarios.loadChunk;
 import static dropin.mc.selftest.M3Scenarios.mark;
 import static dropin.mc.selftest.M3Scenarios.marked;
 import static dropin.mc.selftest.M3Scenarios.markedOnServer;
 import static dropin.mc.selftest.M3Scenarios.players;
 import static dropin.mc.selftest.Scenarios.PEER_TICKS;
 import static dropin.mc.selftest.Scenarios.SHORT_TICKS;
-import static dropin.mc.selftest.Scenarios.WORLD_ID;
 import static dropin.mc.selftest.Scenarios.WORLD_TICKS;
 import static dropin.mc.selftest.Scenarios.failIfDisconnected;
 import static dropin.mc.selftest.Scenarios.inWorld;
@@ -62,12 +64,17 @@ final class SavePointScenarios {
     }
 
     private static Path folder(Minecraft mc) {
-        return mc.getLevelSource().getLevelPath(WORLD_ID);
+        return M3Scenarios.worldFolder(mc);
     }
 
     private static void serverCommand(Minecraft mc, String command) {
-        IntegratedServer server = mc.getSingleplayerServer();
-        server.execute(() -> server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), command));
+        IntegratedServer server = mc.getIntegratedServer();
+        server.addScheduledTask(() -> M3Scenarios.runCommand(server, command));
+    }
+
+    /** True only when the block's chunk is loaded on the server and the block is {@code block}. */
+    private static boolean block(Minecraft mc, BlockPos pos, net.minecraft.block.Block block) {
+        return Boolean.TRUE.equals(blockAt(mc, pos, block));
     }
 
     // ---- savepoint-rollback -------------------------------------------------------------------------
@@ -81,34 +88,36 @@ final class SavePointScenarios {
                 .step("B dropped in, has a full copy and its mark", 2 * PEER_TICKS, () -> players(mc) == 2 && ctx.sharedExists("b-marked"));
         runner = mark(runner, mc, MARK_A)
                 .step("the server knows both marks", SHORT_TICKS, () -> markedOnServer(mc, MARK_A) && markedOnServer(mc, MARK_B))
-                .action("/dropin savepoint create base", () -> mc.player.connection.sendCommand("dropin savepoint create base"))
+                .action("/dropin savepoint create base", () -> mc.player.sendChatMessage("/dropin savepoint create base"))
                 .step("the save point exists", WORLD_TICKS, () -> SavePointActions.store(folder(mc)).find("base").isPresent())
                 .action("change the world and A", () -> {
                     Point point = SavePointActions.store(folder(mc)).find("base").orElseThrow();
                     DropIn.LOGGER.info("Self-test: save point base at checkpoint {} with {} records, root {}", point.seq(),
                             point.records(), point.root());
+                    // 1.12.2 port: setblock needs the chunk loaded (M3Scenarios.loadChunk).
+                    loadChunk(mc.getIntegratedServer(), 0, 0);
                     serverCommand(mc, "setblock 0 252 0 minecraft:emerald_block");
-                    mc.player.connection.sendCommand("clear @s");
-                    mc.player.connection.sendCommand("tp @s 20 -60 20");
+                    mc.player.sendChatMessage("/clear @s");
+                    mc.player.sendChatMessage("/tp @s 20 " + M3Scenarios.GROUND_Y + " 20");
                     ctx.writeShared("a-changed", "ok");
                 })
                 .step("the block is there and neither player is as at the save point", 2 * PEER_TICKS,
                         () -> ctx.sharedExists("b-changed") && !markedOnServer(mc, MARK_A) && !markedOnServer(mc, MARK_B)
-                                && mc.getSingleplayerServer().overworld().getBlockState(LATER_POS).is(Blocks.EMERALD_BLOCK))
+                                && block(mc, LATER_POS, Blocks.EMERALD_BLOCK))
                 .action("note the checkpoint", () -> seq[0] = HostSync.current().seq())
                 .step("the changes are in a checkpoint", WORLD_TICKS, () -> HostSync.current().seq() > seq[0])
                 .action("/dropin savepoint restore base", () -> {
-                    before[0] = mc.getSingleplayerServer();
-                    mc.player.connection.sendCommand("dropin savepoint restore base");
+                    before[0] = mc.getIntegratedServer();
+                    mc.player.sendChatMessage("/dropin savepoint restore base");
                 })
                 // No input from here on: the world closes, is rolled back and is hosted again.
-                .step("hosting again", 3 * WORLD_TICKS, () -> mc.getSingleplayerServer() != null
-                        && mc.getSingleplayerServer() != before[0] && hosting(ctx) && HostSync.current() != null
+                .step("hosting again", 3 * WORLD_TICKS, () -> mc.getIntegratedServer() != null
+                        && mc.getIntegratedServer() != before[0] && hosting(ctx) && HostSync.current() != null
                         && HostSync.current().seq() > seq[0])
                 .step("B rejoined", 2 * PEER_TICKS, () -> players(mc) == 2)
                 .step("the world and both players are as at the save point", SHORT_TICKS,
-                        () -> mc.getSingleplayerServer().overworld().getBlockState(LATER_POS).isAir()
-                                && mc.getSingleplayerServer().overworld().getBlockState(Scenarios.PROBE_POS).is(Blocks.GOLD_BLOCK)
+                        () -> block(mc, LATER_POS, Blocks.AIR)
+                                && block(mc, Scenarios.PROBE_POS, Blocks.GOLD_BLOCK)
                                 && markedOnServer(mc, MARK_A) && markedOnServer(mc, MARK_B) && marked(mc.player, MARK_A))
                 .action("tell B", () -> {
                     SavePoints points = SavePointActions.store(folder(mc));
@@ -132,14 +141,14 @@ final class SavePointScenarios {
                     return ctx.sharedExists("a-changed");
                 })
                 .action("change B", () -> {
-                    mc.player.connection.sendCommand("clear @s");
-                    mc.player.connection.sendCommand("tp @s -20 -60 -20");
+                    mc.player.sendChatMessage("/clear @s");
+                    mc.player.sendChatMessage("/tp @s -20 " + M3Scenarios.GROUND_Y + " -20");
                 })
                 .step("B lost its item and place", SHORT_TICKS, () -> !marked(mc.player, MARK_B))
                 .action("tell A", () -> ctx.writeShared("b-changed", "ok"))
                 // No input from here on: A closes the world for the restore and this game must be back by itself.
                 .step("back in A's new session", 4 * PEER_TICKS, () -> MemberHandoff.lastRole() == MemberHandoff.Role.FOLLOWER
-                        && ctx.sharedExists("a-restored") && inWorld(mc) && mc.getSingleplayerServer() == null
+                        && ctx.sharedExists("a-restored") && inWorld(mc) && mc.getIntegratedServer() == null
                         && SyncClient.status(state.world.worldId()) != null)
                 .step("B has its item at its place again", SHORT_TICKS, () -> {
                     failIfDisconnected(mc);
@@ -158,11 +167,11 @@ final class SavePointScenarios {
         String[] solo = {null};
         StepRunner runner = createWorld(base(ctx), ctx)
                 .action("place the probe block", () -> {
-                    serverCommand(mc, "forceload add 0 0");
+                    // 1.21.1 forceload add 0 0; 1.12.2 has no forceload command (M3Scenarios.loadChunk).
+                    loadChunk(mc.getIntegratedServer(), 0, 0);
                     serverCommand(mc, Scenarios.PROBE_COMMAND);
                 })
-                .step("probe block placed", SHORT_TICKS,
-                        () -> mc.getSingleplayerServer().overworld().getBlockState(Scenarios.PROBE_POS).is(Blocks.GOLD_BLOCK));
+                .step("probe block placed", SHORT_TICKS, () -> block(mc, Scenarios.PROBE_POS, Blocks.GOLD_BLOCK));
         return importWorld(quitToTitle(runner, ctx), ctx, state)
                 .action("the eleventh save point removes the oldest", () -> {
                     Path folder = folder(mc);
@@ -194,18 +203,20 @@ final class SavePointScenarios {
                     Path folder = folder(mc);
                     Point point = SavePointActions.store(folder).find("p10").orElseThrow();
                     solo[0] = SavePointActions.makeSinglePlayer(mc, state.world, folder, point);
-                    Path made = mc.getLevelSource().getLevelPath(solo[0]);
+                    Path made = dropin.mc.menu.CoopActions.levelPath(mc, solo[0]);
                     require(Files.isRegularFile(made.resolve("level.dat")), "the new world has no level.dat");
                     require(!Files.exists(made.resolve(CoopWorldStore.MARKER_DIR)), "the new world is linked to the co-op world");
-                    mc.createWorldOpenFlows().openWorld(solo[0], () -> { });
+                    // 1.12.2 port: 26.x WorldOpenFlows.openWorld is Minecraft.launchIntegratedServer(folder, name, null).
+                    WorldInfo info = mc.getSaveLoader().getWorldInfo(solo[0]);
+                    mc.launchIntegratedServer(solo[0], info == null ? solo[0] : info.getWorldName(), null);
                 })
-                .step("the single-player world opens and has the block", WORLD_TICKS, () -> inWorld(mc) && mc.getSingleplayerServer() != null
+                .step("the single-player world opens and has the block", WORLD_TICKS, () -> inWorld(mc) && mc.getIntegratedServer() != null
                         && HostSync.current() == null
-                        && mc.getSingleplayerServer().overworld().getBlockState(Scenarios.PROBE_POS).is(Blocks.GOLD_BLOCK))
+                        && block(mc, Scenarios.PROBE_POS, Blocks.GOLD_BLOCK))
                 .action("save and quit", () -> {
                     DropIn.LOGGER.info("Self-test: single-player world {} opened with the probe block", solo[0]);
                     dropin.mc.compat.Compat.disconnectFromWorld(mc, dropin.mc.compat.Compat.DEFAULT_QUIT_MESSAGE);
                 })
-                .step("world closed", WORLD_TICKS, () -> mc.getSingleplayerServer() == null && mc.level == null);
+                .step("world closed", WORLD_TICKS, () -> mc.getIntegratedServer() == null && mc.world == null);
     }
 }

@@ -24,7 +24,13 @@ public class CleanroomPlatform implements Agnos.Platform {
 
     @Override
     public Path configDir() {
-        return Loader.instance().getConfigDir().toPath();
+        File dir = Loader.instance().getConfigDir();
+        if (dir == null) {
+            // Cleanroom constructs mods before Loader has set its config folder; FML's own game folder is known by then
+            // (FMLInjectionData.data()[6] is minecraftHome, what Loader.initializeLoader builds "config" from).
+            dir = new File((File) net.minecraftforge.fml.relauncher.FMLInjectionData.data()[6], "config");
+        }
+        return dir.toPath();
     }
 
     @Override

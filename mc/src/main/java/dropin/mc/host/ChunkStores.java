@@ -2,10 +2,21 @@ package dropin.mc.host;
 
 import dropin.core.manifest.RecordKey;
 import dropin.core.world.CoopWorldStore;
-import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.chunk.storage.IOWorker;
-import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
+import dropin.mc.compat.Dims;
+import dropin.mixin.mc.AnvilChunkLoaderAccess;
+import dropin.mixin.mc.RegionFileAccess;
+import net.minecraft.nbt.CompressedStreamTools;
+import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.util.math.ChunkPos;
+import net.minecraft.world.chunk.storage.AnvilChunkLoader;
+import net.minecraft.world.chunk.storage.RegionFile;
+import net.minecraft.world.chunk.storage.RegionFileCache;
 
+import java.io.DataInputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -14,65 +25,102 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * The game's chunk storage objects of the worlds that are open, and the dirty set of DESIGN 4.5: every
- * chunk, entity and POI write of a co-op world passes {@code IOWorker.store}, where its key is recorded.
- * World data is only ever read back through these objects, never from the region files.
+ * chunk write of a co-op world passes {@code AnvilChunkLoader.addChunkToPending}, where its key is recorded.
+ * World data is only ever read back through these objects (the loader's pending map and the game's
+ * {@code RegionFileCache}), never by opening the region files of an open world in any other way.
+ *
+ * <p>1.12.2 port: one {@code AnvilChunkLoader} per dimension, only the "region" kind (entities live in the chunk
+ * NBT; there is no POI storage). Its {@code chunkSaveLocation} is the dimension folder: the world folder for the
+ * overworld, {@code DIM-1}, {@code DIM1} and {@code DIM<N>} (Forge's default {@code WorldProvider.getSaveFolder()})
+ * for the others; the region files are in its {@code region/} subfolder.
  */
 public final class ChunkStores {
+    /** The only kind of chunk storage 1.12.2 has. */
+    public static final String KIND = "region";
+    private static final Pattern DIM_FOLDER = Pattern.compile("DIM(-?\\d+)");
+    /** How long a read waits for the file IO thread to finish writing the chunk it took from the pending map. */
+    private static final long BEING_SAVED_WAIT_MS = 10_000;
+
     /**
-     * @param dim       dimension id, for example {@code minecraft:overworld}
-     * @param kind      region, entities or poi
-     * @param dir       the folder of the region files
-     * @param worldRoot the world folder, derived from {@code dir}
+     * @param loader    the dimension's chunk loader
+     * @param dim       dimension id, for example {@code minecraft:overworld} (dropin.mc.compat.Dims)
+     * @param kind      always "region" on 1.12.2
+     * @param dir       the folder of the region files ({@code <dimension folder>/region})
+     * @param worldRoot the world folder, derived from the dimension folder
      */
-    public record Store(IOWorker worker, String dim, String kind, Path dir, Path worldRoot) {
+    public record Store(AnvilChunkLoader loader, String dim, String kind, Path dir, Path worldRoot) {
         /**
-         * False when another mod put its own class in place of the game's storage worker (C2ME does): such a
-         * class overrides the methods this mod watches, so its writes are not seen and must be found by comparing.
+         * False when another mod put its own class in place of the game's chunk loader: such a class may override
+         * the methods this mod watches, so its writes are not seen and must be found by comparing.
          */
         public boolean writesSeen() {
-            return worker.getClass() == IOWorker.class;
+            return loader.getClass() == AnvilChunkLoader.class;
+        }
+
+        /** The dimension folder the game hands to {@code RegionFileCache} ({@code chunkSaveLocation}). */
+        public File location() {
+            return loader.chunkSaveLocation;
         }
     }
 
-    private static final Map<IOWorker, Store> STORES = new ConcurrentHashMap<>();
+    private static final Map<AnvilChunkLoader, Store> STORES = new ConcurrentHashMap<>();
     private static final Set<Path> TRACKED = ConcurrentHashMap.newKeySet();
     private static final Map<Path, Set<String>> DIRTY = new ConcurrentHashMap<>();
 
     private ChunkStores() {
     }
 
-    /** Called when the game creates a chunk storage worker. */
-    public static void register(IOWorker worker, RegionStorageInfo info, Path dir) {
-        Path folder = dir.toAbsolutePath().normalize();
-        // The kind is the folder name: the storage type of region files is "chunk", not "region".
-        String kind = folder.getFileName() == null ? "" : folder.getFileName().toString();
-        if (!RecordKey.KINDS.contains(kind)) {
+    /** Called when the game creates a chunk loader (AnvilChunkLoaderMixin). */
+    public static void register(AnvilChunkLoader loader, File location) {
+        if (location == null) {
             return;
         }
-        String dim = info.dimension().location().toString();
-        Path root = worldRoot(folder, dim);
-        if (root == null) {
-            return;
+        Path folder = location.toPath().toAbsolutePath().normalize();
+        Path root;
+        String dim;
+        if (isWorldRoot(folder)) {
+            root = folder;
+            dim = Dims.OVERWORLD;
+        } else {
+            Matcher matcher = folder.getFileName() == null ? null : DIM_FOLDER.matcher(folder.getFileName().toString());
+            Path parent = folder.getParent();
+            if (matcher == null || !matcher.matches() || parent == null || !isWorldRoot(parent)) {
+                // TODO(1.12.2): a mod's dimension whose WorldProvider.getSaveFolder() is not DIM<N> is not tracked:
+                //  its record keys would name a folder (DIM<N>) the game does not use. Such chunks are not synced.
+                return;
+            }
+            int number;
+            try {
+                number = Integer.parseInt(matcher.group(1));
+            } catch (NumberFormatException e) {
+                return;
+            }
+            root = parent;
+            dim = Dims.idOf(number);
         }
-        // A worker of an earlier session of this world that was never reported closed (a replaced class's close()
-        // is not seen either) must not be asked for chunks again.
-        STORES.values().removeIf(old -> old.dir().equals(folder));
-        STORES.put(worker, new Store(worker, dim, kind, folder, root));
+        Path dir = folder.resolve(KIND);
+        // A loader of an earlier session of this world must not be asked for chunks again. 1.12.2 has no close()
+        // on the chunk loader, so the old one is dropped when the game makes a new one for the same folder.
+        STORES.values().removeIf(old -> old.dir().equals(dir));
+        STORES.put(loader, new Store(loader, dim, KIND, dir, root));
         if (CoopWorldStore.readMarker(root).isPresent()) {
             TRACKED.add(root);
         }
     }
 
-    public static void unregister(IOWorker worker) {
-        STORES.remove(worker);
+    /** The game makes {@code session.lock} in the world folder before it makes any chunk loader. */
+    private static boolean isWorldRoot(Path folder) {
+        return Files.isRegularFile(folder.resolve("session.lock")) || Files.isRegularFile(folder.resolve("level.dat"));
     }
 
-    /** Called after the game handed a chunk to a storage worker. */
-    public static void stored(IOWorker worker, ChunkPos pos) {
-        Store store = STORES.get(worker);
+    /** Called after the game handed a chunk to a chunk loader's pending map. */
+    public static void stored(AnvilChunkLoader loader, ChunkPos pos) {
+        Store store = STORES.get(loader);
         if (store != null && TRACKED.contains(store.worldRoot())) {
             DIRTY.computeIfAbsent(store.worldRoot(), root -> ConcurrentHashMap.newKeySet())
                     .add(RecordKey.chunk(store.dim(), store.kind(), pos.x, pos.z));
@@ -80,24 +128,88 @@ public final class ChunkStores {
     }
 
     /**
-     * {@code <world>/<storage folder of the dimension>/<kind>} (1.21.1 layout: {@link RecordKey#storageFolder}):
-     * the world folder, or null if the folder is not where the game keeps that dimension's chunks.
+     * 1.12.2 layout: the folder, relative to the world folder, that the game keeps a dimension's chunks and saved
+     * data in: "" for the overworld, {@code DIM-1}, {@code DIM1}, {@code DIM<N>} for {@code forge:dim<N>}; null if
+     * the id is not a 1.12.2 dimension. (core's {@code RecordKey.storageFolder} describes the 1.21.1 layout.)
      */
-    private static Path worldRoot(Path dir, String dim) {
-        if (!RecordKey.validDimension(dim)) {
+    public static String dimensionFolder(String dim) {
+        Integer number = Dims.numberOf(dim);
+        if (number == null) {
             return null;
         }
-        String storage = RecordKey.storageFolder(dim);
-        int depth = storage.isEmpty() ? 0 : storage.split("/").length;
-        Path root = dir.getParent();
-        for (int i = 0; i < depth && root != null; i++) {
-            root = root.getParent();
+        return number == 0 ? "" : "DIM" + number;
+    }
+
+    /** The dimension whose folder ({@link #dimensionFolder}) a path relative to the world folder is, or null. */
+    public static String dimensionOfFolder(String relative) {
+        if (relative.isEmpty()) {
+            return Dims.OVERWORLD;
         }
-        if (root == null || root.getNameCount() == 0) {
+        Matcher matcher = DIM_FOLDER.matcher(relative);
+        if (!matcher.matches()) {
             return null;
         }
-        String relative = root.relativize(dir.getParent()).toString().replace('\\', '/');
-        return relative.equals(storage) ? root : null;
+        try {
+            String dim = Dims.idOf(Integer.parseInt(matcher.group(1)));
+            return relative.equals(dimensionFolder(dim)) ? dim : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * A chunk of an open world as the game's loader has it: the pending write if there is one, else what the game's
+     * {@code RegionFileCache} reads from the region file ({@code AnvilChunkLoader.loadChunk__Async} does exactly
+     * this, without the data fixer, which leaves chunks of this version unchanged). Null if the chunk was never saved.
+     */
+    public static NBTTagCompound read(Store store, int cx, int cz) throws IOException {
+        AnvilChunkLoaderAccess access = (AnvilChunkLoaderAccess) store.loader();
+        ChunkPos pos = new ChunkPos(cx, cz);
+        long deadline = System.currentTimeMillis() + BEING_SAVED_WAIT_MS;
+        while (true) {
+            NBTTagCompound pending = access.dropin$chunksToSave().get(pos);
+            if (pending != null) {
+                return pending;
+            }
+            // The IO thread marks a chunk "being saved" before it takes it out of the pending map and clears the mark
+            // once the region file has it: while marked, the file may still hold the older chunk.
+            if (!access.dropin$chunksBeingSaved().contains(pos)) {
+                break;
+            }
+            if (System.currentTimeMillis() > deadline) {
+                throw new IOException("The game is still writing chunk " + cx + "," + cz);
+            }
+            try {
+                Thread.sleep(1);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted reading chunk " + cx + "," + cz);
+            }
+        }
+        for (int attempt = 0; ; attempt++) {
+            // getRegionFileIfExists, not getChunkInputStream: the latter creates an empty region file for a missing one.
+            RegionFile region = RegionFileCache.getRegionFileIfExists(store.location(), cx, cz);
+            if (region == null) {
+                return null;
+            }
+            DataInputStream in = region.getChunkDataInputStream(cx & 31, cz & 31);
+            if (in != null) {
+                // The stream reads from a byte array the region file filled already.
+                try (DataInputStream stream = in) {
+                    return CompressedStreamTools.read(stream);
+                }
+            }
+            // RegionFile answers null on an IO error too. The game's cache closes every region file when it holds 256;
+            // a file closed under this read is not a missing chunk (that would send members a deletion): ask again.
+            RandomAccessFile file = ((RegionFileAccess) (Object) region).dropin$dataFile();
+            boolean closed = file == null || !file.getChannel().isOpen();
+            if (!closed) {
+                return null;
+            }
+            if (attempt >= 3) {
+                throw new IOException("The region file of chunk " + cx + "," + cz + " was closed while it was read");
+            }
+        }
     }
 
     /** Starts recording writes of this world (a world made co-op while it is open). */
@@ -130,11 +242,11 @@ public final class ChunkStores {
         }
     }
 
-    /** The class of a storage worker of this world whose writes are not seen, or null if all are the game's own. */
+    /** The class of a chunk loader of this world whose writes are not seen, or null if all are the game's own. */
     public static String unseenWriter(Path worldRoot) {
         for (Store store : STORES.values()) {
             if (store.worldRoot().equals(worldRoot) && !store.writesSeen()) {
-                return store.worker().getClass().getName();
+                return store.loader().getClass().getName();
             }
         }
         return null;

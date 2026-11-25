@@ -2,10 +2,13 @@ package dropin.mc.handoff;
 
 import dropin.mc.DropIn;
 import dropin.mc.host.HostSync;
+import dropin.mc.coop.Prompts;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.ConfirmScreen;
-import net.minecraft.client.gui.screens.GenericMessageScreen;
-import net.minecraft.network.chat.Component;
+import net.minecraft.client.gui.GuiMainMenu;
+import net.minecraft.client.resources.I18n;
+import net.minecraft.util.text.ITextComponent;
+import net.minecraft.util.text.TextComponentString;
+import net.minecraft.util.text.TextComponentTranslation;
 
 /**
  * The host's side of a graceful handoff (DESIGN 4.9): quitting a co-op world that friends are connected to
@@ -47,30 +50,30 @@ public final class HostHandoff {
     }
 
     /**
-     * Head of {@code Minecraft.disconnectFromWorld}, on the client thread.
+     * Head of {@code Compat.disconnectFromWorld} (26.x {@code Minecraft.disconnectFromWorld}), on the client thread.
      *
      * @return true if the quit was taken over (the vanilla call must be cancelled)
      */
-    public static boolean intercept(Minecraft mc, Component message) {
-        if (passThrough || !mc.isSameThread()) {
+    public static boolean intercept(Minecraft mc, ITextComponent message) {
+        if (passThrough || !mc.isCallingFromMinecraftThread()) {
             return false;
         }
         HostSync sync = HostSync.current();
-        if (sync == null || mc.getSingleplayerServer() == null || HostSync.handoffDisabled() || sync.readyPeers() == 0) {
+        if (sync == null || mc.getIntegratedServer() == null || HostSync.handoffDisabled() || sync.readyPeers() == 0) {
             return false;
         }
         if (state != State.IDLE) {
             return true;
         }
         state = State.PREPARING;
-        mc.setScreen(new GenericMessageScreen(Component.translatable(K + "preparing")));
+        mc.displayGuiScreen(new Prompts.Message(new TextComponentTranslation(K + "preparing")));
         Thread thread = new Thread(() -> prepare(mc, sync, message), "dropin-coop-handoff");
         thread.setDaemon(true);
         thread.start();
         return true;
     }
 
-    private static void prepare(Minecraft mc, HostSync sync, Component message) {
+    private static void prepare(Minecraft mc, HostSync sync, ITextComponent message) {
         HostSync.Standing standing;
         try {
             standing = sync.prepareHandoff();
@@ -79,11 +82,11 @@ public final class HostHandoff {
             return;
         } catch (Exception e) {
             DropIn.LOGGER.error("Could not prepare the handoff of '{}'; quitting without it", sync.world().name(), e);
-            mc.execute(() -> quit(mc, sync, null, message));
+            mc.addScheduledTask(() -> quit(mc, sync, null, message));
             return;
         }
         lastStanding = standing;
-        mc.execute(() -> {
+        mc.addScheduledTask(() -> {
             if (standing.successorUuid() != null || standing.peers() == 0) {
                 quit(mc, sync, standing.successorUuid(), message);
                 return;
@@ -93,13 +96,13 @@ public final class HostHandoff {
             confirm = () -> quit(mc, sync, null, message);
             cancel = () -> {
                 state = State.IDLE;
-                mc.setScreen(null);
+                mc.displayGuiScreen(null);
             };
             state = State.CONFIRMING;
-            Component who = standing.bestName().isEmpty() ? Component.translatable(K + "a_friend")
-                    : Component.literal(standing.bestName());
-            mc.setScreen(new ConfirmScreen(yes -> answer(yes), Component.translatable("menu.dropin_coop.title"),
-                    Component.translatable(K + "nobody", who, standing.bestPercent())));
+            ITextComponent who = standing.bestName().isEmpty() ? new TextComponentTranslation(K + "a_friend")
+                    : new TextComponentString(standing.bestName());
+            mc.displayGuiScreen(new Prompts.Confirm(yes -> answer(yes), I18n.format("menu.dropin_coop.title"),
+                    new TextComponentTranslation(K + "nobody", who, standing.bestPercent())));
         });
     }
 
@@ -128,7 +131,7 @@ public final class HostHandoff {
      * the other session's world later (DESIGN 4.10). Client thread.
      */
     public static void quitForRival(Minecraft mc, String rivalName) {
-        if (mc.getSingleplayerServer() == null) {
+        if (mc.getIntegratedServer() == null) {
             return;
         }
         HostSync sync = HostSync.current();
@@ -140,18 +143,18 @@ public final class HostHandoff {
         state = State.IDLE;
         passThrough = true;
         try {
-            dropin.mc.compat.Compat.disconnectFromWorld(mc, Component.translatable("text.dropin_coop.host.rival_closing"));
+            dropin.mc.compat.Compat.disconnectFromWorld(mc, new TextComponentTranslation("text.dropin_coop.host.rival_closing"));
         } finally {
             passThrough = false;
         }
-        mc.setScreen(new net.minecraft.client.gui.screens.AlertScreen(
-                () -> mc.setScreen(new dropin.mc.menu.CoopWorldsScreen(new net.minecraft.client.gui.screens.TitleScreen())),
-                Component.translatable("menu.dropin_coop.title"), Component.translatable("text.dropin_coop.host.rival_closed", rivalName)));
+        mc.displayGuiScreen(new Prompts.Alert(
+                () -> mc.displayGuiScreen(new dropin.mc.menu.CoopWorldsScreen(new GuiMainMenu())),
+                I18n.format("menu.dropin_coop.title"), new TextComponentTranslation("text.dropin_coop.host.rival_closed", rivalName)));
     }
 
-    private static void quit(Minecraft mc, HostSync sync, String successorUuid, Component message) {
+    private static void quit(Minecraft mc, HostSync sync, String successorUuid, ITextComponent message) {
         state = State.IDLE;
-        if (mc.getSingleplayerServer() == null) {
+        if (mc.getIntegratedServer() == null) {
             return;
         }
         sync.quitDecided(successorUuid);

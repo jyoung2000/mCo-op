@@ -23,18 +23,17 @@ import dropin.mc.policy.WorldPolicy;
 import dropin.mc.selftest.M1Scenarios.State;
 import dropin.mc.selftest.Scenarios.Context;
 import dropin.tunnel.Agnos;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.AlertScreen;
-import net.minecraft.client.gui.screens.DisconnectedScreen;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.gui.screens.TitleScreen;
-import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.server.IntegratedServer;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import dropin.mc.coop.Prompts;
 import dropin.mc.compat.LevelBasedPermissionSet;
 import com.mojang.authlib.GameProfile;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiDisconnected;
+import net.minecraft.client.gui.GuiMainMenu;
+import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.server.integrated.IntegratedServer;
+import net.minecraft.util.ResourceLocation;
+import net.minecraft.util.text.TextComponentTranslation;
+import net.minecraftforge.fml.common.registry.ForgeRegistries;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -127,7 +126,7 @@ final class M2bScenarios {
     }
 
     static Path modsDir(Minecraft mc) {
-        return mc.gameDirectory.toPath().resolve("mods");
+        return mc.gameDir.toPath().resolve("mods");
     }
 
     /** A test mod jar of this loader, as built by {@code :<loader>:testmodJars}. */
@@ -139,8 +138,9 @@ final class M2bScenarios {
         return jar;
     }
 
+    /** 1.12.2 port: 26.x {@code BuiltInRegistries.ITEM} is Forge's item registry. */
     static boolean itemExists(String id) {
-        return BuiltInRegistries.ITEM.containsKey(ResourceLocation.parse(id));
+        return ForgeRegistries.ITEMS.containsKey(new ResourceLocation(id));
     }
 
     static boolean zLoaded() {
@@ -167,27 +167,29 @@ final class M2bScenarios {
     }
 
     private static boolean holds(Minecraft mc, String itemId) {
-        return mc.player != null && mc.player.getInventory()
-                .contains(stack -> BuiltInRegistries.ITEM.getKey(stack.getItem()).toString().equals(itemId));
+        return Scenarios.holds(mc.player, stack -> stack.getItem().getRegistryName() != null
+                && stack.getItem().getRegistryName().toString().equals(itemId));
     }
 
     private static void command(Minecraft mc, String command) {
-        IntegratedServer server = mc.getSingleplayerServer();
-        server.execute(() -> server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), command));
+        Scenarios.serverCommand(mc.getIntegratedServer(), command);
     }
 
     private static ModConsentScreen consent(Minecraft mc) {
-        return mc.screen instanceof ModConsentScreen screen ? screen : null;
+        return mc.currentScreen instanceof ModConsentScreen screen ? screen : null;
     }
 
-    /** True if an alert is up whose text is the given message (compared up to the message's first argument). */
+    /**
+     * True if an alert is up whose text is the given message (compared up to the message's first argument).
+     * 1.12.2 port: 26.x AlertScreen is {@link Prompts.Alert}; its message is read directly, not through narration.
+     */
     private static boolean alertSays(Minecraft mc, String key) {
-        Screen screen = mc.screen;
-        if (!(screen instanceof AlertScreen)) {
+        GuiScreen screen = mc.currentScreen;
+        if (!(screen instanceof Prompts.Alert alert)) {
             return false;
         }
-        String shown = screen.getNarrationMessage().getString();
-        String expected = Component.translatable(K + key, "\u0001").getString();
+        String shown = alert.message().getUnformattedText();
+        String expected = new TextComponentTranslation(K + key, "\u0001").getUnformattedText();
         int cut = expected.indexOf('\u0001');
         return shown.contains(cut < 0 ? expected : expected.substring(0, cut));
     }
@@ -226,7 +228,7 @@ final class M2bScenarios {
                     WorldPolicy.Held held = HostSync.current().held();
                     require(held != null, "the owner hosts without a policy");
                     require(held.version() == 1, "policy version " + held.version());
-                    require(held.policy().isOwner(mc.getUser().getProfileId().toString()), "the policy names another owner");
+                    require(held.policy().isOwner(mc.getSession().getProfile().getId().toString()), "the policy names another owner");
                     require(names(held.manifest().files()).equals(names(WorldPolicy.localMods())),
                             "the signed mod list is " + names(held.manifest().files()) + ", mods/ has " + names(WorldPolicy.localMods()));
                     DropIn.LOGGER.info("Self-test: hosting with policy version 1, mods {}", names(held.manifest().files()));
@@ -242,7 +244,7 @@ final class M2bScenarios {
         Minecraft mc = ctx.mc();
         return () -> {
             if (alone) {
-                require(mc.getSingleplayerServer().getPlayerList().getPlayerCount() == 1, "B got into the session");
+                require(mc.getIntegratedServer().getCurrentPlayerCount() == 1, "B got into the session");
             }
             return ctx.sharedExists(name);
         };
@@ -255,7 +257,7 @@ final class M2bScenarios {
                 .step("A shared the invite", STARTUP_TICKS + WORLD_TICKS, () -> ctx.sharedExists(WORLD_READY))
                 .action("join with invite", () -> {
                     CoopActions.Outcome outcome = CoopActions.joinWithInvite(mc, ctx.readShared(INVITE_FILE));
-                    require(outcome.ok(), "join with invite failed: " + outcome.message().getString());
+                    require(outcome.ok(), "join with invite failed: " + outcome.message().getUnformattedText());
                     state.world = outcome.world();
                 })
                 .step("A is hosting", WORLD_TICKS + PEER_TICKS, () -> ctx.sharedExists(A_HOSTING))
@@ -274,7 +276,7 @@ final class M2bScenarios {
     private static StepRunner consentShown(StepRunner runner, Minecraft mc, String name) {
         return runner.step(name, PEER_TICKS, () -> {
             failIfDisconnected(mc);
-            require(mc.level == null, "B was connected without being asked about the mods");
+            require(mc.world == null, "B was connected without being asked about the mods");
             return consent(mc) != null;
         });
     }
@@ -286,7 +288,7 @@ final class M2bScenarios {
                 .step("mods downloaded, helper started", PEER_TICKS, () -> {
                     ModConsentScreen screen = consent(mc);
                     require(screen != null, "the consent screen went away");
-                    require(screen.state() != ModConsentScreen.State.FAILED, "the download failed: " + screen.error().getString());
+                    require(screen.state() != ModConsentScreen.State.FAILED, "the download failed: " + screen.error().getUnformattedText());
                     return screen.state() == ModConsentScreen.State.CLOSING;
                 })
                 .action("a swap is planned", () -> require(Files.isRegularFile(configDir().resolve(SwapPlan.FILE)), "no swap plan was written"));
@@ -315,9 +317,9 @@ final class M2bScenarios {
         Minecraft mc = ctx.mc();
         return runner
                 .action("tell A", () -> ctx.writeShared(B_COMPLETE, "ok"))
-                .step("A quit", PEER_TICKS, () -> mc.screen instanceof DisconnectedScreen
-                        || (mc.level == null && mc.screen instanceof TitleScreen))
-                .action("title screen", () -> mc.setScreen(new TitleScreen()))
+                .step("A quit", PEER_TICKS, () -> mc.currentScreen instanceof GuiDisconnected
+                        || (mc.world == null && mc.currentScreen instanceof GuiMainMenu))
+                .action("title screen", () -> mc.displayGuiScreen(new GuiMainMenu()))
                 .step("A closed the world", WORLD_TICKS, () -> ctx.sharedExists(A_QUIT));
     }
 
@@ -326,12 +328,12 @@ final class M2bScenarios {
         Minecraft mc = ctx.mc();
         runner.action("press Play with nobody hosting", () -> pressPlay(mc, state))
                 .step("refused as host: " + key, WORLD_TICKS, () -> {
-                    require(mc.getSingleplayerServer() == null, "B opened the world as host");
+                    require(mc.getIntegratedServer() == null, "B opened the world as host");
                     return alertSays(mc, key);
                 });
         return pause(runner, "still not hosting", 60)
                 .action("the world stayed closed", () -> {
-                    require(mc.getSingleplayerServer() == null && mc.level == null, "B opened the world as host");
+                    require(mc.getIntegratedServer() == null && mc.world == null, "B opened the world as host");
                     require(HostSync.current() == null, "B started a host sync");
                 })
                 .action("tell A", () -> ctx.writeShared(B_DONE, "ok"));
@@ -364,7 +366,7 @@ final class M2bScenarios {
                 });
         tellB(runner, ctx)
                 .step("B got in after its restart", STARTUP_TICKS + STARTUP_TICKS,
-                        () -> mc.getSingleplayerServer().getPlayerList().getPlayerCount() == 2);
+                        () -> mc.getIntegratedServer().getCurrentPlayerCount() == 2);
         if (!ctx.online()) {
             runner.action("give B the item of test mod X", () -> command(mc, "give @a " + ITEM_X));
         }
@@ -458,7 +460,7 @@ final class M2bScenarios {
                 .step("back at the Co-op Worlds screen", SHORT_TICKS, () -> consent(mc) == null);
         return pause(runner, "nothing happens", 100)
                 .action("not connected, nothing downloaded, mods/ unchanged", () -> {
-                    require(mc.level == null && mc.getConnection() == null, "B is connected");
+                    require(mc.world == null && mc.getConnection() == null, "B is connected");
                     requireNothingInstalled(mc, List.of());
                 })
                 .action("tell A", () -> ctx.writeShared(B_DONE, "ok"));
@@ -486,7 +488,7 @@ final class M2bScenarios {
                 .step("A shared the invite", STARTUP_TICKS + WORLD_TICKS, () -> ctx.sharedExists(WORLD_READY))
                 .action("join with invite", () -> {
                     CoopActions.Outcome outcome = CoopActions.joinWithInvite(mc, ctx.readShared(INVITE_FILE));
-                    require(outcome.ok(), "join with invite failed: " + outcome.message().getString());
+                    require(outcome.ok(), "join with invite failed: " + outcome.message().getUnformattedText());
                     state.world = outcome.world();
                 })
                 .action("the mod list is not known before the first contact", () ->
@@ -497,10 +499,10 @@ final class M2bScenarios {
                     failIfDisconnected(mc);
                     return consent(mc) != null;
                 })
-                .action("Show list", () -> mc.setScreen(new ModsScreen(consent(mc), state.world.worldId())))
-                .step("the Mods tab is open", SHORT_TICKS, () -> mc.screen instanceof ModsScreen)
+                .action("Show list", () -> mc.displayGuiScreen(new ModsScreen(consent(mc), state.world.worldId())))
+                .step("the Mods tab is open", SHORT_TICKS, () -> mc.currentScreen instanceof ModsScreen)
                 .action("X is missing here, Z is extra here", () -> {
-                    List<ModsScreen.Row> rows = ((ModsScreen) mc.screen).rows();
+                    List<ModsScreen.Row> rows = ((ModsScreen) mc.currentScreen).rows();
                     require(rows.size() == 2, "rows: " + rows);
                     ModsScreen.Row x = rows.get(0);
                     ModsScreen.Row z = rows.get(1);
@@ -549,13 +551,13 @@ final class M2bScenarios {
         StepRunner runner = inviteB(ctx, state)
                 .step("told that the policy is not the owner's", PEER_TICKS, () -> {
                     failIfDisconnected(mc);
-                    require(mc.level == null, "B connected to a host with a forged policy");
+                    require(mc.world == null, "B connected to a host with a forged policy");
                     require(consent(mc) == null, "B was offered mods from a forged policy");
                     return alertSays(mc, "policy.rejected");
                 });
         pause(runner, "nothing happens", 60)
                 .action("not connected, the forged policy is not stored", () -> {
-                    require(mc.level == null && mc.getConnection() == null, "B is connected");
+                    require(mc.world == null && mc.getConnection() == null, "B is connected");
                     require(WorldPolicy.load(state.world, folder(mc, state)) == null, "B stored a policy");
                     requireNothingInstalled(mc, List.of());
                     ctx.writeShared("b-rejected", "ok");
@@ -571,8 +573,8 @@ final class M2bScenarios {
                     return screen.state() == ModConsentScreen.State.FAILED;
                 })
                 .action("the file never reached mods/ or the store", () -> {
-                    String shown = consent(mc).error().getString();
-                    String expected = Component.translatable(K + "mods.error.hash", JAR_X).getString();
+                    String shown = consent(mc).error().getUnformattedText();
+                    String expected = new TextComponentTranslation(K + "mods.error.hash", JAR_X).getUnformattedText();
                     require(shown.equals(expected), "the screen says: " + shown);
                     requireNothingInstalled(mc, List.of());
                     require(!itemExists(ITEM_X), "test mod X is loaded");
@@ -594,7 +596,7 @@ final class M2bScenarios {
                 .step("A shared the invite", STARTUP_TICKS + WORLD_TICKS, () -> ctx.sharedExists(WORLD_READY))
                 .action("join with invite", () -> {
                     CoopActions.Outcome outcome = CoopActions.joinWithInvite(mc, ctx.readShared(INVITE_FILE));
-                    require(outcome.ok(), "join with invite failed: " + outcome.message().getString());
+                    require(outcome.ok(), "join with invite failed: " + outcome.message().getUnformattedText());
                     state.world = outcome.world();
                 })
                 .step("A is hosting", WORLD_TICKS + PEER_TICKS, () -> ctx.sharedExists(A_HOSTING))
@@ -611,7 +613,7 @@ final class M2bScenarios {
     // ---- owner-known-to-members ---------------------------------------------------------------------
 
     private static void requireOnlyAIsOwner(Minecraft mc, State state) {
-        String me = mc.getUser().getName();
+        String me = mc.getSession().getUsername();
         List<PlayersScreen.Row> rows = PlayersScreen.rowsOf(state.world.worldId());
         require(rows.size() == 2, "Players tab: " + rows);
         for (PlayersScreen.Row row : rows) {
@@ -660,7 +662,7 @@ final class M2bScenarios {
         Minecraft mc = ctx.mc();
         State state = new State();
         StepRunner runner = tellB(hostA(ctx, state), ctx)
-                .step("B logged in", STARTUP_TICKS + PEER_TICKS, () -> mc.getSingleplayerServer().getPlayerList().getPlayerCount() == 2)
+                .step("B logged in", STARTUP_TICKS + PEER_TICKS, () -> mc.getIntegratedServer().getCurrentPlayerCount() == 2)
                 .action("the owner changes the policy from the Players tab", () -> {
                     PolicyActions.setMembersMayUseCommands(mc, state.world, false);
                     WorldPolicy.Held held = PolicyActions.setBanned(mc, state.world, BANNED_UUID, true);
@@ -673,7 +675,7 @@ final class M2bScenarios {
                 .step("B is hosting", WORLD_TICKS + PEER_TICKS, () -> ctx.sharedExists(B_HOSTING))
                 .action("press Play", () -> pressPlay(mc, state))
                 .step("landed in B's session", PEER_TICKS, () -> joinedRemote(mc))
-                .action("the owner uses an operator command", () -> mc.player.connection.sendCommand("give @s minecraft:diamond 3"))
+                .action("the owner uses an operator command", () -> Scenarios.sendCommand(mc, "give @s minecraft:diamond 3"))
                 .step("the command worked", SHORT_TICKS, () -> {
                     failIfDisconnected(mc);
                     return holds(mc, "minecraft:diamond");
@@ -707,23 +709,29 @@ final class M2bScenarios {
                 .step("B is hosting", WORLD_TICKS, () -> hosting(ctx))
                 .action("tell A", () -> ctx.writeShared(B_HOSTING, "ok"))
                 .step("the owner joined and used a command", PEER_TICKS + WORLD_TICKS, () -> ctx.sharedExists("a-commanded"))
-                .action("the host tries the same command", () -> mc.player.connection.sendCommand("give @s minecraft:emerald 3"));
+                .action("the host tries the same command", () -> Scenarios.sendCommand(mc, "give @s minecraft:emerald 3"));
         return pause(runner, "give the command time", 100)
                 .action("the host's command was refused", () -> require(!holds(mc, "minecraft:emerald"), "B, not the owner, could use /give"))
                 .action("rights on B's server: owner yes, host no", () -> {
-                    IntegratedServer server = mc.getSingleplayerServer();
+                    IntegratedServer server = mc.getIntegratedServer();
                     Policy policy = HostSync.current().held().policy();
                     GameProfile owner = new GameProfile(UUID.fromString(policy.ownerUuid()), policy.ownerName());
-                    GameProfile host = new GameProfile(mc.getUser().getProfileId(), mc.getUser().getName());
-                    require(server.getProfilePermissions(owner) == (LevelBasedPermissionSet.OWNER), "the owner has " + server.getProfilePermissions(owner));
-                    require(server.getProfilePermissions(host) == (LevelBasedPermissionSet.ALL), "the host has " + server.getProfilePermissions(host));
+                    GameProfile host = new GameProfile(mc.getSession().getProfile().getId(), mc.getSession().getUsername());
+                    // 1.12.2 port: 26.x MinecraftServer.getProfilePermissions is LevelBasedPermissionSet.of.
+                    int ownerLevel = LevelBasedPermissionSet.of(server, owner);
+                    int hostLevel = LevelBasedPermissionSet.of(server, host);
+                    require(ownerLevel == LevelBasedPermissionSet.OWNER, "the owner has " + ownerLevel);
+                    require(hostLevel == LevelBasedPermissionSet.ALL, "the host has " + hostLevel);
                 })
                 .action("a banned UUID is refused at login", () -> {
-                    IntegratedServer server = mc.getSingleplayerServer();
-                    Component refusal = server.getPlayerList().canPlayerLogin(new InetSocketAddress("127.0.0.1", 1),
+                    IntegratedServer server = mc.getIntegratedServer();
+                    // 1.12.2 port: 26.x canPlayerLogin is allowUserToConnect, which returns the refusal as a String that
+                    // the login handler sends as new TextComponentTranslation(refusal) (PlayerListBanMixin).
+                    String refusal = server.getPlayerList().allowUserToConnect(new InetSocketAddress("127.0.0.1", 1),
                             new GameProfile(UUID.fromString(BANNED_UUID), "Banned"));
                     require(refusal != null, "the banned UUID may log in");
-                    require(refusal.getString().equals(Component.translatable(K + "policy.banned").getString()), "refusal: " + refusal.getString());
+                    String shown = new TextComponentTranslation(refusal).getUnformattedText();
+                    require(shown.equals(new TextComponentTranslation(K + "policy.banned").getUnformattedText()), "refusal: " + shown);
                     require(HostSync.banMessage(server, UUID.fromString(HostSync.current().held().policy().ownerUuid())) == null, "the owner is banned");
                 })
                 .action("tell A", () -> ctx.writeShared(B_DONE, "ok"));
@@ -754,17 +762,17 @@ final class M2bScenarios {
         StepRunner runner = restarted(ctx, state)
                 .action("Y is loaded", () -> require(itemExists(ITEM_X) && itemExists(ITEM_Y), "the owner was not restarted with X and Y"))
                 .action("press Play", () -> pressPlay(mc, state))
-                .step("asked: Update this world's mod list?", WORLD_TICKS, () -> mc.screen instanceof PolicyUpdateScreen)
+                .step("asked: Update this world's mod list?", WORLD_TICKS, () -> mc.currentScreen instanceof PolicyUpdateScreen)
                 .action("the screen lists Y as added", () -> {
-                    PolicyUpdateScreen screen = (PolicyUpdateScreen) mc.screen;
+                    PolicyUpdateScreen screen = (PolicyUpdateScreen) mc.currentScreen;
                     require(screen.addedMods().equals(List.of(JAR_Y)) && screen.removedMods().isEmpty(),
                             "added " + screen.addedMods() + ", removed " + screen.removedMods());
                     require(!screen.datapacksChanged(), "the datapacks are said to have changed");
                 })
-                .action("Yes", () -> ((PolicyUpdateScreen) mc.screen).accept())
+                .action("Yes", () -> ((PolicyUpdateScreen) mc.currentScreen).accept())
                 .step("B's session ended with the mods-changed screen", PEER_TICKS, () -> ctx.sharedExists("b-changed"))
-                .step("A is out of B's session", SHORT_TICKS, () -> mc.level == null)
-                .action("title screen", () -> mc.setScreen(new TitleScreen()));
+                .step("A is out of B's session", SHORT_TICKS, () -> mc.world == null)
+                .action("title screen", () -> mc.displayGuiScreen(new GuiMainMenu()));
         pause(runner, "B's host announcement is withdrawn", 100)
                 .action("press Play", () -> pressPlay(mc, state))
                 // Since M4 (DESIGN 4.4 step 3): B's session went on after A's copy was last updated and B is gone,
@@ -784,7 +792,7 @@ final class M2bScenarios {
                     ctx.writeShared("a2-hosting", "ok");
                 })
                 .step("B got back in after updating", STARTUP_TICKS + STARTUP_TICKS,
-                        () -> mc.getSingleplayerServer().getPlayerList().getPlayerCount() == 2)
+                        () -> mc.getIntegratedServer().getCurrentPlayerCount() == 2)
                 .action("give B the item of test mod Y", () -> command(mc, "give @a " + ITEM_Y));
         return runner.step("B finished", PEER_TICKS, () -> ctx.sharedExists(B_DONE));
     }
@@ -801,7 +809,7 @@ final class M2bScenarios {
                 .step("B is hosting", WORLD_TICKS, () -> hosting(ctx))
                 .action("tell A", () -> ctx.writeShared(B_HOSTING, "ok"))
                 .step("the session ended: mods changed", STARTUP_TICKS + PEER_TICKS,
-                        () -> consent(mc) != null && mc.getSingleplayerServer() == null && mc.level == null)
+                        () -> consent(mc) != null && mc.getIntegratedServer() == null && mc.world == null)
                 .action("the screen says the mods changed and lists Y", () -> {
                     ModConsentScreen screen = consent(mc);
                     require(screen.changed(), "the screen does not say the mods changed");
@@ -813,7 +821,7 @@ final class M2bScenarios {
                 })
                 .step("A is hosting with the new mods", WORLD_TICKS + PEER_TICKS, () -> ctx.sharedExists("a2-hosting"))
                 .action("title screen, press Play without updating", () -> {
-                    mc.setScreen(new TitleScreen());
+                    mc.displayGuiScreen(new GuiMainMenu());
                     pressPlay(mc, state);
                 });
         consentShown(runner, mc, "kept out: asked for the mods instead of connecting")

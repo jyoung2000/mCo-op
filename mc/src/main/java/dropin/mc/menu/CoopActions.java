@@ -8,14 +8,14 @@ import dropin.core.world.WorldArchive;
 import dropin.mc.DropIn;
 import dropin.mc.coop.CoopWorlds;
 import dropin.mc.coop.HostSession;
-import net.minecraft.SharedConstants;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.server.IntegratedServer;
-import net.minecraft.network.chat.Component;
+import net.minecraft.client.resources.I18n;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.world.level.storage.LevelResource;
-import net.minecraft.world.level.storage.LevelStorageSource;
-import net.minecraft.world.level.storage.LevelSummary;
+import net.minecraft.server.integrated.IntegratedServer;
+import net.minecraft.util.text.ITextComponent;
+import net.minecraft.util.text.TextComponentTranslation;
+import net.minecraft.world.storage.SaveFormatOld;
+import net.minecraft.world.storage.WorldInfo;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -27,7 +27,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 /**
@@ -37,18 +36,24 @@ import java.util.stream.Stream;
 public final class CoopActions {
     private static final String K = "text.dropin_coop.";
     private static final SecureRandom RANDOM = new SecureRandom();
+    /**
+     * 1.12.2 port: the data version this game writes into level.dat ({@code WorldInfo.updateTagCompound} writes
+     * {@code DataVersion} and {@code Version.Id} 1343; {@code DataFixesManager.createFixer} is {@code new DataFixer(1343)}).
+     * {@code mc.getDataFixer().version} cannot be used: Forge wraps the fixer in a {@code CompoundDataFixer(0)}.
+     */
+    static final int GAME_DATA_VERSION = 1343;
 
     /** Set while the vanilla Create World screen was opened from "New": the next new world becomes co-op. */
     public static volatile boolean pendingNew;
 
     /** @param key the translation key of {@code message}, for the self-tests */
-    public record Outcome(boolean ok, String key, Component message, CoopWorld world) {
+    public record Outcome(boolean ok, String key, ITextComponent message, CoopWorld world) {
         static Outcome ok(CoopWorld world, String key, Object... args) {
-            return new Outcome(true, K + key, Component.translatable(K + key, args), world);
+            return new Outcome(true, K + key, new TextComponentTranslation(K + key, args), world);
         }
 
         static Outcome fail(String key, Object... args) {
-            return new Outcome(false, K + key, Component.translatable(K + key, args), null);
+            return new Outcome(false, K + key, new TextComponentTranslation(K + key, args), null);
         }
     }
 
@@ -57,10 +62,26 @@ public final class CoopActions {
 
     // ---- lookups -----------------------------------------------------------------------------
 
+    /**
+     * 1.12.2 port: 26.x {@code LevelStorageSource.getBaseDir()}. The game's save format is an
+     * {@code AnvilSaveConverter} (a {@code SaveFormatOld}) on {@code <gameDir>/saves}.
+     */
+    public static Path savesDir(Minecraft mc) {
+        if (mc.getSaveLoader() instanceof SaveFormatOld format) {
+            return format.savesDirectory.toPath();
+        }
+        return mc.gameDir.toPath().resolve("saves");
+    }
+
+    /** 1.12.2 port: 26.x {@code LevelStorageSource.getLevelPath(levelId)}. */
+    public static Path levelPath(Minecraft mc, String levelId) {
+        return savesDir(mc).resolve(levelId);
+    }
+
     /** world id -> folder name under saves/, for every folder marked as a co-op world. */
     public static Map<String, String> folders(Minecraft mc) {
         Map<String, String> result = new TreeMap<>();
-        Path saves = mc.getLevelSource().getBaseDir();
+        Path saves = savesDir(mc);
         if (!Files.isDirectory(saves)) {
             return result;
         }
@@ -77,7 +98,7 @@ public final class CoopActions {
     /** True if the save folder is a co-op world on this PC (badge in the Singleplayer list). */
     public static boolean isCoopLevel(Minecraft mc, String levelId) {
         try {
-            return CoopWorlds.forFolder(mc.getLevelSource().getLevelPath(levelId)).isPresent();
+            return CoopWorlds.forFolder(levelPath(mc, levelId)).isPresent();
         } catch (RuntimeException e) {
             return false;
         }
@@ -87,8 +108,7 @@ public final class CoopActions {
 
     /** Import from saves (DESIGN 4.4): the three checks in order, the optional backup, then the key files. */
     public static Outcome importFromSaves(Minecraft mc, String levelId, boolean backup) {
-        LevelStorageSource source = mc.getLevelSource();
-        Path folder = source.getLevelPath(levelId);
+        Path folder = levelPath(mc, levelId);
         if (!Files.isRegularFile(folder.resolve("level.dat"))) {
             return Outcome.fail("import.no_level_dat", levelId);
         }
@@ -96,19 +116,18 @@ public final class CoopActions {
         if (isOpenHere(mc, folder)) {
             return Outcome.fail("import.open", levelId);
         }
-        LevelSummary summary;
+        // 1.12.2 port: 26.x LevelSummary -> the folder's WorldInfo (level.dat, then level.dat_old), null if unreadable.
+        WorldInfo summary;
         try {
-            List<LevelSummary> summaries = source.loadLevelSummaries(
-                    new LevelStorageSource.LevelCandidates(List.of(new LevelStorageSource.LevelDirectory(folder))))
-                    .get(60, TimeUnit.SECONDS);
-            summary = summaries.isEmpty() ? null : summaries.get(0);
-        } catch (Exception e) {
+            summary = mc.getSaveLoader().getWorldInfo(levelId);
+        } catch (RuntimeException e) {
             DropIn.LOGGER.warn("Could not read world {}", levelId, e);
             summary = null;
         }
-        if (summary == null || summary.levelVersion() == null) {
+        if (summary == null) {
             return Outcome.fail("import.unreadable", levelId);
         }
+        String levelName = summary.getWorldName();
 
         Optional<String> marker = CoopWorldStore.readMarker(folder);
         boolean keyKnown = false;
@@ -119,42 +138,57 @@ public final class CoopActions {
                 keyKnown = false;
             }
         }
-        boolean open = summary.isLocked() || isOpenHere(mc, folder);
+        // 1.12.2 port: 26.x LevelSummary.isLocked() has no counterpart. session.lock is not an OS lock on this
+        // version (SaveHandler writes a time stamp into it), so another game cannot be detected; only this game's
+        // own open world counts as open.
+        // TODO(1.12.2): a world open in a second game on this PC is not detected as open.
+        boolean open = isOpenHere(mc, folder);
+        // 1.12.2 port: the world's data version is level.dat's Version.Id (0 for worlds older than 1.9).
         ImportCheck.Result check = ImportCheck.check(open, marker.isPresent(), keyKnown,
-                summary.levelVersion().minecraftVersion().getVersion(),
-                SharedConstants.getCurrentVersion().getDataVersion().getVersion());
+                summary.getVersionId(), GAME_DATA_VERSION);
         switch (check) {
             case OPEN:
-                return Outcome.fail("import.open", summary.getLevelName());
+                return Outcome.fail("import.open", levelName);
             case ALREADY_COOP:
-                return Outcome.fail("import.already_coop", summary.getLevelName());
+                return Outcome.fail("import.already_coop", levelName);
             case NEEDS_INVITE:
-                return Outcome.fail("import.needs_invite", summary.getLevelName());
+                return Outcome.fail("import.needs_invite", levelName);
             case TOO_OLD:
-                return Outcome.fail("import.too_old", summary.getLevelName());
+                return Outcome.fail("import.too_old", levelName);
             case TOO_NEW:
-                return Outcome.fail("import.too_new", summary.getLevelName());
+                return Outcome.fail("import.too_new", levelName);
             default:
                 break;
         }
 
         if (backup) {
-            try (LevelStorageSource.LevelStorageAccess access = source.createAccess(levelId)) {
-                access.makeWorldBackup();
+            try {
+                makeWorldBackup(mc, levelId, folder);
             } catch (IOException | RuntimeException e) {
                 DropIn.LOGGER.warn("Backup of {} failed", levelId, e);
-                return Outcome.fail("import.backup_failed", summary.getLevelName());
+                return Outcome.fail("import.backup_failed", levelName);
             }
         }
         try {
-            CoopWorld world = CoopWorlds.store().importWorld(folder, summary.getLevelName(),
-                    mc.getUser().getProfileId().toString(), mc.getUser().getName(), now(), RANDOM);
+            CoopWorld world = CoopWorlds.store().importWorld(folder, levelName,
+                    mc.getSession().getProfile().getId().toString(), mc.getSession().getUsername(), now(), RANDOM);
             DropIn.LOGGER.info("Imported '{}' as co-op world {}", world.name(), world.worldId());
             return Outcome.ok(world, "import.done", world.name());
         } catch (IOException | RuntimeException e) {
             DropIn.LOGGER.error("Import of {} failed", levelId, e);
-            return Outcome.fail("import.failed", summary.getLevelName());
+            return Outcome.fail("import.failed", levelName);
         }
+    }
+
+    /**
+     * 1.12.2 port: 1.12.2 has no {@code LevelStorageAccess.makeWorldBackup()}. Same result as 26.x: the closed world
+     * as {@code <gameDir>/backups/<yyyy-MM-dd_HH-mm-ss>_<levelId>.zip} (without session.lock).
+     */
+    private static void makeWorldBackup(Minecraft mc, String levelId, Path folder) throws IOException {
+        String stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"));
+        Path zip = mc.gameDir.toPath().resolve("backups").resolve(stamp + "_" + levelId + ".zip");
+        int files = WorldArchive.exportZip(folder, zip);
+        DropIn.LOGGER.info("Backup of {}: {} ({} files)", levelId, zip, files);
     }
 
     /** Import of files dropped on a screen: each folder or .zip is brought into saves/ first, then imported. */
@@ -170,7 +204,7 @@ public final class CoopActions {
     }
 
     private static Outcome importDropped(Minecraft mc, Path file) {
-        Path saves = mc.getLevelSource().getBaseDir();
+        Path saves = savesDir(mc);
         String shown = file.getFileName().toString();
         Path folder;
         try {
@@ -214,13 +248,19 @@ public final class CoopActions {
         return importFromSaves(mc, folder.getFileName().toString(), false);
     }
 
+    /** 1.12.2 port: 26.x {@code server.getWorldPath(LevelResource.ROOT)} is {@code saves/<server.getFolderName()>}. */
+    private static Path worldFolder(Minecraft mc, MinecraftServer server) {
+        return levelPath(mc, server.getFolderName());
+    }
+
     private static boolean isOpenHere(Minecraft mc, Path folder) {
-        IntegratedServer server = mc.getSingleplayerServer();
+        IntegratedServer server = mc.getIntegratedServer();
         if (server == null) {
             return false;
         }
         try {
-            return Files.isSameFile(server.getWorldPath(LevelResource.ROOT), folder);
+            Path open = worldFolder(mc, server);
+            return Files.exists(open) && Files.isSameFile(open, folder);
         } catch (IOException e) {
             return false;
         }
@@ -237,17 +277,17 @@ public final class CoopActions {
             return;
         }
         pendingNew = false;
-        registerOpenWorld(Minecraft.getInstance(), server);
+        registerOpenWorld(Minecraft.getMinecraft(), server);
     }
 
     /** "Make co-op" in the pause menu: import in place of the world that is open. */
     public static boolean canMakeCoop(Minecraft mc) {
-        IntegratedServer server = mc.getSingleplayerServer();
-        return server != null && !server.isPublished() && !CoopWorlds.isCoopServer(server);
+        IntegratedServer server = mc.getIntegratedServer();
+        return server != null && mc.isIntegratedServerRunning() && !server.getPublic() && !CoopWorlds.isCoopServer(server);
     }
 
     public static Outcome makeCoop(Minecraft mc) {
-        IntegratedServer server = mc.getSingleplayerServer();
+        IntegratedServer server = mc.getIntegratedServer();
         if (server == null || !canMakeCoop(mc)) {
             return Outcome.fail("import.failed", "");
         }
@@ -255,10 +295,13 @@ public final class CoopActions {
     }
 
     private static Outcome registerOpenWorld(Minecraft mc, MinecraftServer server) {
-        Path folder = server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize();
-        String name = server.getWorldData().getLevelName();
-        String uuid = mc.getUser().getProfileId().toString();
-        String player = mc.getUser().getName();
+        Path folder = worldFolder(mc, server).toAbsolutePath().normalize();
+        // 1.12.2 port: 26.x WorldData.getLevelName(). Before the worlds are loaded (a new world) the server only
+        // knows the name it was started with.
+        String name = server.worlds.length > 0 && server.worlds[0] != null
+                ? server.worlds[0].getWorldInfo().getWorldName() : server.getWorldName();
+        String uuid = mc.getSession().getProfile().getId().toString();
+        String player = mc.getSession().getUsername();
         try {
             CoopWorld world = CoopWorlds.store().importWorld(folder, name, uuid, player, now(), RANDOM);
             CoopWorlds.markCoop(server);
@@ -279,7 +322,7 @@ public final class CoopActions {
     public static CoopWorld previewInvite(String text) {
         try {
             Invite invite = Invite.decode(text.trim());
-            java.util.HexFormat hex = java.util.HexFormat.of();
+            HexFormat hex = HexFormat.of();
             String worldId = dropin.core.crypto.WorldKeys.fromSeed(invite.seed()).worldId();
             return new CoopWorld(worldId, hex.formatHex(invite.seed()), worldId.substring(0, 6),
                     hex.formatHex(invite.ownerFingerprint()), "", List.of());
@@ -293,14 +336,14 @@ public final class CoopActions {
      * co-op folder, so it opens anywhere as an ordinary world and can be imported again. Not the client thread.
      */
     public static Path exportWorld(Minecraft mc, CoopWorld world, Path folder) throws IOException {
-        if (mc.getSingleplayerServer() != null) {
+        if (mc.getIntegratedServer() != null) {
             throw new IOException("a world is open");
         }
         String name = world.name().replaceAll("[^A-Za-z0-9 _.-]", "_").trim();
         String stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"));
         Path zip = dropin.mc.savepoint.SavePointActions.backupsDir(folder)
                 .resolve((name.isEmpty() ? "world" : name) + "-world-" + stamp + ".zip");
-        int files = dropin.core.world.WorldArchive.exportZip(folder, zip);
+        int files = WorldArchive.exportZip(folder, zip);
         DropIn.LOGGER.info("Exported co-op world '{}' to {}: {} files", world.name(), zip, files);
         return zip;
     }
@@ -314,7 +357,7 @@ public final class CoopActions {
         }
         try {
             String worldId = dropin.core.crypto.WorldKeys.fromSeed(invite.seed()).worldId();
-            String name = Component.translatable(K + "invite.default_name", worldId.substring(0, 6)).getString();
+            String name = I18n.format(K + "invite.default_name", worldId.substring(0, 6));
             CoopWorld world = CoopWorlds.store().joinWithInvite(invite, name);
             return Outcome.ok(world, "invite.joined", world.name());
         } catch (IOException | RuntimeException e) {
@@ -327,7 +370,7 @@ public final class CoopActions {
     public static Outcome remove(Minecraft mc, CoopWorld world) {
         try {
             String folder = folders(mc).get(world.worldId());
-            CoopWorlds.store().remove(world.worldId(), folder == null ? null : mc.getLevelSource().getLevelPath(folder));
+            CoopWorlds.store().remove(world.worldId(), folder == null ? null : levelPath(mc, folder));
             return Outcome.ok(world, "remove.done", world.name());
         } catch (IOException | RuntimeException e) {
             DropIn.LOGGER.error("Could not remove co-op world {}", world.worldId(), e);
@@ -340,7 +383,7 @@ public final class CoopActions {
         if (!CoopWorlds.store().isOwner(world.worldId())) {
             return Outcome.fail("owner.not_owner", world.name());
         }
-        Path target = mc.gameDirectory.toPath().resolve("dropin-owner-key-" + world.worldId().substring(0, 8) + ".key");
+        Path target = mc.gameDir.toPath().resolve("dropin-owner-key-" + world.worldId().substring(0, 8) + ".key");
         try {
             CoopWorlds.store().exportOwnerKey(world.worldId(), target);
             return Outcome.ok(world, "owner.exported", target.toAbsolutePath().toString());

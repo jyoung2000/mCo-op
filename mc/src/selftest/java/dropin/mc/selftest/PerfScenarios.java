@@ -5,16 +5,13 @@ import dropin.mc.host.HostSync;
 import dropin.mc.selftest.M1Scenarios.State;
 import dropin.mc.selftest.Scenarios.Context;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.server.IntegratedServer;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerChunkCache;
-import net.minecraft.world.Difficulty;
-import net.minecraft.world.level.GameType;
-import net.minecraft.world.level.LevelSettings;
-import net.minecraft.world.level.WorldDataConfiguration;
-import net.minecraft.world.level.levelgen.WorldOptions;
-import net.minecraft.world.level.levelgen.presets.WorldPresets;
+import net.minecraft.server.integrated.IntegratedServer;
+import net.minecraft.world.EnumDifficulty;
+import net.minecraft.world.GameType;
+import net.minecraft.world.WorldSettings;
+import net.minecraft.world.WorldType;
+import net.minecraft.world.gen.ChunkProviderServer;
 
 import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
@@ -52,6 +49,13 @@ final class PerfScenarios {
     private static final int SETTLE_TICKS = 400;
     /** Chunks of the force-loaded area: x -8..23, z -8..7. */
     private static final int AREA_CHUNKS = 512;
+    /**
+     * The layer the activity replaces. 1.12.2 port: the world ends at y 255 (1.21.1 used y 300, also above all
+     * terrain).
+     */
+    private static final int ACTIVITY_Y = 255;
+    /** Missing chunks of the area loaded per client tick while waiting for the area (1.12.2 port, see areaLoaded). */
+    private static final int LOADS_PER_POLL = 8;
     private static final Map<String, String> SWITCHES = Map.of("dropin.dev.checkpointSeconds", "10");
 
     private PerfScenarios() {
@@ -76,7 +80,7 @@ final class PerfScenarios {
 
         void poll(MinecraftServer server) {
             long now = System.nanoTime();
-            int tick = server.getTickCount();
+            int tick = server.getTickCounter();
             if (lastTick < 0) {
                 lastTick = tick;
                 startNanos = now;
@@ -86,7 +90,8 @@ final class PerfScenarios {
             }
             if (tick != lastTick) {
                 // Tick n is stored at n % 100 when it ends; tick `tick` may still be running.
-                long[] times = server.getTickTimesNanos();
+                // 1.12.2 port: MinecraftServer.tickTimeArray, written at the end of tick(), after tickCounter++.
+                long[] times = server.tickTimeArray;
                 for (int t = Math.max(lastTick, tick - 100); t < tick; t++) {
                     tickNanos.add(times[t % 100]);
                 }
@@ -115,9 +120,9 @@ final class PerfScenarios {
         }
     }
 
+    /** 1.12.2 port: the server's own command sender has no "suppressed output" switch; its feedback goes to the log. */
     private static void command(MinecraftServer server, String command) {
-        server.execute(() -> server.getCommands().performPrefixedCommand(
-                server.createCommandSourceStack().withSuppressedOutput(), command));
+        server.addScheduledTask(() -> M3Scenarios.runCommand(server, command));
     }
 
     /** Eight chunks of the area get a layer of blocks replaced: the same load in every phase. */
@@ -128,7 +133,7 @@ final class PerfScenarios {
             int x = (-8 + chunk % 32) * 16;
             int z = (-8 + chunk / 32) * 16;
             String block = (k / AREA_CHUNKS) % 2 == 0 ? "minecraft:stone" : "minecraft:glass";
-            command(server, "fill " + x + " 300 " + z + " " + (x + 15) + " 300 " + (z + 15) + " " + block);
+            command(server, "fill " + x + " " + ACTIVITY_Y + " " + z + " " + (x + 15) + " " + ACTIVITY_Y + " " + (z + 15) + " " + block);
         }
     }
 
@@ -151,7 +156,7 @@ final class PerfScenarios {
                     }
                 })
                 .step("measure: " + name, maxTicks, () -> {
-                    IntegratedServer server = mc.getSingleplayerServer();
+                    IntegratedServer server = mc.getIntegratedServer();
                     sampler[0].poll(server);
                     if (count[0] % 20 == 0) {
                         activity(server, count[0] / 20);
@@ -183,20 +188,32 @@ final class PerfScenarios {
         sentBefore = bytes;
     }
 
-    private static boolean areaLoaded(Minecraft mc) {
-        IntegratedServer server = mc.getSingleplayerServer();
+    /**
+     * Whether every chunk of the area is loaded on the server. 1.12.2 port: a forced chunk (a Forge ticket, see
+     * M3Scenarios.forceLoad) is kept loaded but not loaded by forcing it, so each call also loads up to
+     * {@link #LOADS_PER_POLL} missing chunks on the server thread, as the 1.21.1 forceload did in the background.
+     */
+    private static boolean areaLoaded(Minecraft mc) throws Exception {
+        IntegratedServer server = mc.getIntegratedServer();
         if (server == null) {
             return false;
         }
-        ServerChunkCache chunks = server.overworld().getChunkSource();
-        for (int cx = -8; cx <= 23; cx++) {
-            for (int cz = -8; cz <= 7; cz++) {
-                if (!chunks.hasChunk(cx, cz)) {
-                    return false;
+        return M3Scenarios.onServer(server, () -> {
+            ChunkProviderServer chunks = server.getWorld(0).getChunkProvider();
+            int loads = 0;
+            boolean all = true;
+            for (int cx = -8; cx <= 23; cx++) {
+                for (int cz = -8; cz <= 7; cz++) {
+                    if (!chunks.chunkExists(cx, cz)) {
+                        all = false;
+                        if (loads++ < LOADS_PER_POLL) {
+                            chunks.provideChunk(cx, cz);
+                        }
+                    }
                 }
             }
-        }
-        return true;
+            return all;
+        });
     }
 
     private static StepRunner perfA(Context ctx) {
@@ -204,29 +221,34 @@ final class PerfScenarios {
         State state = new State();
         StepRunner runner = dev(base(ctx), SWITCHES)
                 .action("create a normal-terrain world", () -> {
-                    LevelSettings settings = new LevelSettings(WORLD_ID, GameType.CREATIVE,
-                            false, Difficulty.PEACEFUL, true, new net.minecraft.world.level.GameRules(),
-                            WorldDataConfiguration.DEFAULT);
-                    mc.createWorldOpenFlows().createFreshLevel(WORLD_ID, settings, new WorldOptions(Scenarios.SEED, true, false),
-                            registries -> registries.lookupOrThrow(Registries.WORLD_PRESET)
-                                    .getOrThrow(WorldPresets.NORMAL).value().createWorldDimensions(),
-                            mc.screen);
+                    // 1.12.2 port: a new world takes its difficulty from the options (IntegratedServer.loadAllWorlds);
+                    // creative, structures on, no bonus chest, cheats on, as the 1.21.1 LevelSettings/WorldOptions.
+                    mc.gameSettings.difficulty = EnumDifficulty.PEACEFUL;
+                    mc.launchIntegratedServer(WORLD_ID, WORLD_ID,
+                            new WorldSettings(Scenarios.SEED, GameType.CREATIVE, true, false, WorldType.DEFAULT).enableCommands());
                 })
-                .step("world loaded", 2 * WORLD_TICKS, () -> inWorld(mc) && mc.getSingleplayerServer() != null)
+                .step("world loaded", 2 * WORLD_TICKS, () -> inWorld(mc) && mc.getIntegratedServer() != null)
                 .action("force-load 512 chunks", () -> {
-                    command(mc.getSingleplayerServer(), "forceload add -128 -128 127 127");
-                    command(mc.getSingleplayerServer(), "forceload add 128 -128 383 127");
+                    // 1.21.1 forceload add -128 -128 127 127 and 128 -128 383 127. 1.12.2 has no forceload command:
+                    // Forge tickets keep the chunks (also when the world is opened again); areaLoaded loads them.
+                    IntegratedServer server = mc.getIntegratedServer();
+                    M3Scenarios.onServer(server, () -> {
+                        M3Scenarios.forceLoadNow(server.getWorld(0), -128, -128, 383, 127, false);
+                        return null;
+                    });
                 })
                 .step("the chunks are generated", 4 * WORLD_TICKS, () -> areaLoaded(mc));
         runner = pause(runner, "settle", SETTLE_TICKS);
         runner = measure(runner, mc, "1 alone, not hosting", WINDOW_TICKS, WINDOW_TICKS + SHORT_TICKS, null)
                 .action("what one full save costs without the mod", () -> {
-                    IntegratedServer server = mc.getSingleplayerServer();
-                    server.execute(() -> {
+                    IntegratedServer server = mc.getIntegratedServer();
+                    server.addScheduledTask(() -> {
                         long from = System.nanoTime();
-                        server.saveEverything(true, false, false);
+                        // 1.12.2 port: what MinecraftServer.tick's autosave does (every 900 ticks, 45 s; 26.x every 5 min).
+                        server.getPlayerList().saveAllPlayerData();
+                        server.saveAllWorlds(true);
                         DropIn.LOGGER.info("Self-test perf: [1 alone, not hosting] one game save (what the autosave does "
-                                + "every 5 minutes) held the server thread {} ms", (System.nanoTime() - from) / 1_000_000);
+                                + "every 45 seconds) held the server thread {} ms", (System.nanoTime() - from) / 1_000_000);
                     });
                 });
         runner = pause(runner, "the save ran", 100);
@@ -248,7 +270,7 @@ final class PerfScenarios {
         runner = pause(runner, "settle", SETTLE_TICKS);
         runner = measure(runner, mc, "2 hosting, nobody joined", WINDOW_TICKS, WINDOW_TICKS + SHORT_TICKS, null)
                 .action("tell B", () -> ctx.writeShared(A_HOSTING, "ok"))
-                .step("B dropped in", 2 * PEER_TICKS, () -> mc.getSingleplayerServer().getPlayerList().getPlayerCount() == 2);
+                .step("B dropped in", 2 * PEER_TICKS, () -> mc.getIntegratedServer().getPlayerList().getCurrentPlayerCount() == 2);
         runner = measure(runner, mc, "3 hosting, B downloading the world", 0, 4 * PEER_TICKS, () -> ctx.sharedExists("b-complete"));
         runner = measure(runner, mc, "4 hosting, B has its copy", WINDOW_TICKS, WINDOW_TICKS + SHORT_TICKS, null)
                 .action("tell B", () -> ctx.writeShared("a-done", "ok"));

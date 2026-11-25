@@ -12,7 +12,6 @@ import dropin.core.world.CoopWorldStore;
 import dropin.mc.DropIn;
 import dropin.tunnel.Agnos;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.world.level.storage.LevelResource;
 
 import java.io.IOException;
 import java.net.URI;
@@ -52,8 +51,16 @@ public final class CoopWorlds {
 
     /** True if the world this server runs is a co-op world on this PC. Cached per server. */
     public static boolean isCoopServer(MinecraftServer server) {
-        return COOP_SERVERS.computeIfAbsent(server,
-                s -> forFolder(s.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize()).isPresent());
+        return COOP_SERVERS.computeIfAbsent(server, s -> forFolder(worldFolder(s)).isPresent());
+    }
+
+    /**
+     * The folder of the world a server runs, absolute (26.x {@code getWorldPath(LevelResource.ROOT)}). 1.12.2 port:
+     * {@code <saves>/<folder name>}, from the server's save format; valid before the worlds are loaded.
+     */
+    public static Path worldFolder(MinecraftServer server) {
+        return server.getActiveAnvilConverter().getFile(server.getFolderName(), "level.dat").toPath()
+                .toAbsolutePath().normalize().getParent();
     }
 
     /**

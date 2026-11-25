@@ -47,7 +47,10 @@ public final class ChunkContent {
         }
     }
 
-    /** The NBT of a chunk without its volatile root fields. Throws a RuntimeException if it is not such NBT. */
+    /**
+     * The NBT of a chunk without its volatile fields. Throws a RuntimeException if it is not such NBT. 1.18 and
+     * later keep the fields at the root; 1.17 and older (1.12.2) keep them in the root's {@code Level} compound.
+     */
     private static byte[] stripped(byte[] nbt) {
         if (nbt.length < 4 || nbt[0] != 10) {
             throw new IllegalArgumentException("not a compound");
@@ -55,18 +58,36 @@ public final class ChunkContent {
         int at = 3 + u16(nbt, 1);
         ByteArrayOutputStream out = new ByteArrayOutputStream(nbt.length);
         out.write(nbt, 0, at);
+        int end = strip(nbt, at, out, true);
+        if (end != nbt.length) {
+            throw new IllegalArgumentException("bytes after the root compound");
+        }
+        return out.toByteArray();
+    }
+
+    /**
+     * Copies the entries of the compound payload at {@code at} to {@code out}, without the volatile fields, and
+     * its end tag; at the root it does the same inside a {@code Level} compound. Returns the offset after the end tag.
+     */
+    private static int strip(byte[] nbt, int at, ByteArrayOutputStream out, boolean root) {
         while (true) {
+            if (at >= nbt.length) {
+                throw new IllegalArgumentException("truncated");
+            }
             int type = nbt[at];
             if (type == 0) {
                 out.write(0);
-                if (at + 1 != nbt.length) {
-                    throw new IllegalArgumentException("bytes after the root compound");
-                }
-                return out.toByteArray();
+                return at + 1;
             }
             int nameLength = u16(nbt, at + 1);
+            int payload = at + 3 + nameLength;
             String name = new String(nbt, at + 3, nameLength, StandardCharsets.UTF_8);
-            int end = skip(nbt, at + 3 + nameLength, type, 0);
+            if (root && type == 10 && name.equals("Level")) {
+                out.write(nbt, at, payload - at);
+                at = strip(nbt, payload, out, false);
+                continue;
+            }
+            int end = skip(nbt, payload, type, 0);
             if (!VOLATILE.contains(name)) {
                 out.write(nbt, at, end - at);
             }

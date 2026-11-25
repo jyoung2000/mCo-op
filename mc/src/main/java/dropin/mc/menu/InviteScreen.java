@@ -1,26 +1,21 @@
 package dropin.mc.menu;
 
 import dropin.core.world.CoopWorld;
-import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.network.chat.CommonComponents;
-import net.minecraft.network.chat.Component;
+import dropin.mc.menu.ui.DScreen;
+import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.resources.I18n;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /** Invite (DESIGN 4.4): shows this world's invite code and copies it. */
-public class InviteScreen extends Screen {
+public class InviteScreen extends DScreen {
     private static final String K = "text.dropin_coop.";
-    private final Screen parent;
     private final CoopWorld world;
     private final String code;
-    private Button copyButton;
 
-    public InviteScreen(Screen parent, CoopWorld world) {
-        super(Component.translatable(K + "invite.title", world.name()));
-        this.parent = parent;
+    public InviteScreen(GuiScreen parent, CoopWorld world) {
+        super(parent, I18n.format(K + "invite.title", world.name()));
         this.world = world;
         this.code = world.invite().encode();
     }
@@ -35,12 +30,11 @@ public class InviteScreen extends Screen {
 
     @Override
     protected void init() {
-        copyButton = this.addRenderableWidget(Button.builder(Component.translatable(K + "invite.copy"), button -> {
-            this.minecraft.keyboardHandler.setClipboard(code);
-            button.setMessage(Component.translatable(K + "invite.copied"));
-        }).bounds(this.width / 2 - 100, this.height / 2 + 30, 200, 20).build());
-        this.addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, button -> onClose())
-                .bounds(this.width / 2 - 100, this.height / 2 + 54, 200, 20).build());
+        button(this.width / 2 - 100, this.height / 2 + 30, 200, I18n.format(K + "invite.copy"), button -> {
+            setClipboardString(code);
+            button.setLabel(I18n.format(K + "invite.copied"));
+        });
+        button(this.width / 2 - 100, this.height / 2 + 54, 200, I18n.format("gui.done"), button -> onClose());
     }
 
     /** The code broken at its group separators so every line fits the screen. */
@@ -49,7 +43,7 @@ public class InviteScreen extends Screen {
         StringBuilder line = new StringBuilder();
         for (String group : code.split("-")) {
             String next = line.length() == 0 ? group : line + "-" + group;
-            if (line.length() > 0 && this.font.width(next) > this.width - 20) {
+            if (line.length() > 0 && this.fontRenderer.getStringWidth(next) > this.width - 20) {
                 lines.add(line + "-");
                 line = new StringBuilder(group);
             } else {
@@ -61,18 +55,16 @@ public class InviteScreen extends Screen {
     }
 
     @Override
-    public void onClose() {
-        this.minecraft.setScreen(parent);
+    protected int titleY() {
+        return 20;
     }
 
     @Override
-    public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
-        super.render(graphics, mouseX, mouseY, a);
-        graphics.drawCenteredString(this.font, this.title, this.width / 2, 20, -1);
-        graphics.drawCenteredString(this.font, Component.translatable(K + "invite.explain"), this.width / 2, this.height / 2 - 40, -6250336);
+    protected void drawContents(int mouseX, int mouseY, float partialTicks) {
+        drawCenteredString(this.fontRenderer, I18n.format(K + "invite.explain"), this.width / 2, this.height / 2 - 40, 0xFFA0A0A0);
         int y = this.height / 2 - 20;
         for (String line : lines()) {
-            graphics.drawCenteredString(this.font, line, this.width / 2, y, -1);
+            drawCenteredString(this.fontRenderer, line, this.width / 2, y, 0xFFFFFF);
             y += 11;
         }
     }

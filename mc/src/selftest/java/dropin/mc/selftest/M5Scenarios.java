@@ -7,24 +7,25 @@ import dropin.core.manifest.RecordKey;
 import dropin.core.world.CoopWorldStore;
 import dropin.mc.DropIn;
 import dropin.mc.coop.CoopLauncher;
+import dropin.mc.coop.Prompts;
+import dropin.mc.host.ChunkBytes;
 import dropin.mc.host.HostSync;
 import dropin.mc.member.RecordApplier;
 import dropin.mc.member.SyncClient;
 import dropin.mc.merge.ColdMerge;
 import dropin.mc.selftest.M1Scenarios.State;
 import dropin.mc.selftest.Scenarios.Context;
+import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.ConfirmScreen;
-import net.minecraft.client.gui.screens.DisconnectedScreen;
-import net.minecraft.client.gui.screens.TitleScreen;
-import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.server.IntegratedServer;
-import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
+import net.minecraft.client.gui.GuiDisconnected;
+import net.minecraft.client.gui.GuiMainMenu;
+import net.minecraft.init.Blocks;
+import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.nbt.NBTTagList;
+import net.minecraft.server.integrated.IntegratedServer;
+import net.minecraft.util.math.BlockPos;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -42,10 +43,11 @@ import static dropin.mc.selftest.M2Scenarios.hostA;
 import static dropin.mc.selftest.M2Scenarios.joinB;
 import static dropin.mc.selftest.M2Scenarios.quitAndReportRoot;
 import static dropin.mc.selftest.M2Scenarios.verifyRoot;
+import static dropin.mc.selftest.M3Scenarios.blockAt;
+import static dropin.mc.selftest.M3Scenarios.loadChunk;
 import static dropin.mc.selftest.M3Scenarios.players;
 import static dropin.mc.selftest.Scenarios.PEER_TICKS;
 import static dropin.mc.selftest.Scenarios.SHORT_TICKS;
-import static dropin.mc.selftest.Scenarios.WORLD_ID;
 import static dropin.mc.selftest.Scenarios.WORLD_TICKS;
 import static dropin.mc.selftest.Scenarios.failIfDisconnected;
 
@@ -90,19 +92,26 @@ final class M5Scenarios {
     // ---- building blocks --------------------------------------------------------------------------
 
     private static void command(Minecraft mc, String command) {
-        IntegratedServer server = mc.getSingleplayerServer();
-        server.execute(() -> server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), command));
+        IntegratedServer server = mc.getIntegratedServer();
+        server.addScheduledTask(() -> M3Scenarios.runCommand(server, command));
+    }
+
+    /**
+     * 1.21.1 {@code forceload add <x> <z>}; 1.12.2 has no forceload command (see {@link M3Scenarios#loadChunk}).
+     * No chunk-loading ticket: a ticket would change {@code forcedchunks.dat} on both sides of the fork.
+     */
+    private static void forceLoadAt(Minecraft mc, int x, int z) {
+        loadChunk(mc.getIntegratedServer(), x, z);
     }
 
     private static boolean block(Minecraft mc, BlockPos pos, Block block) {
-        IntegratedServer server = mc.getSingleplayerServer();
-        return server != null && server.overworld().getBlockState(pos).is(block);
+        return Boolean.TRUE.equals(blockAt(mc, pos, block));
     }
 
     /** Hosting; a stale-copy warning on the way (the other side's last session is newer) is answered "Play anyway". */
     private static StepRunner.Step hostingAnyway(Context ctx) {
         return () -> {
-            if (CoopLauncher.staleWarning() != null && ctx.mc().screen instanceof ConfirmScreen) {
+            if (CoopLauncher.staleWarning() != null && ctx.mc().currentScreen instanceof Prompts.Confirm) {
                 CoopLauncher.answerStale(true);
                 return false;
             }
@@ -124,18 +133,29 @@ final class M5Scenarios {
         }
     }
 
-    private static boolean contains(byte[] bytes, String text) {
-        byte[] wanted = text.getBytes(StandardCharsets.UTF_8);
-        outer:
-        for (int i = 0; i + wanted.length <= bytes.length; i++) {
-            for (int j = 0; j < wanted.length; j++) {
-                if (bytes[i + j] != wanted[j]) {
-                    continue outer;
-                }
+    /**
+     * The block at {@code pos} in a chunk record's bytes (uncompressed chunk NBT, see ChunkBytes), or null if its
+     * section is not stored. 1.12.2 port: a 1.12.2 chunk stores numeric block ids per section ({@code Blocks},
+     * {@code Add}), not block names, so 1.21.1's search for the text "minecraft:emerald_block" in the bytes becomes
+     * a lookup of the block at B's position.
+     */
+    private static Block blockInRecord(byte[] bytes, BlockPos pos) throws IOException {
+        NBTTagCompound level = ChunkBytes.parse(bytes).getCompoundTag("Level");
+        NBTTagList sections = level.getTagList("Sections", 10);
+        int index = (pos.getY() & 15) << 8 | (pos.getZ() & 15) << 4 | (pos.getX() & 15);
+        for (int i = 0; i < sections.tagCount(); i++) {
+            NBTTagCompound section = sections.getCompoundTagAt(i);
+            if ((section.getByte("Y") & 255) != pos.getY() >> 4) {
+                continue;
             }
-            return true;
+            int id = section.getByteArray("Blocks")[index] & 255;
+            if (section.hasKey("Add", 7)) {
+                byte add = section.getByteArray("Add")[index >> 1];
+                id |= ((index & 1) == 0 ? add & 15 : (add >> 4) & 15) << 8;
+            }
+            return Block.getBlockById(id);
         }
-        return false;
+        return null;
     }
 
     // ---- A: the main world --------------------------------------------------------------------------
@@ -143,13 +163,17 @@ final class M5Scenarios {
     private static StepRunner a(Context ctx, Mode mode) {
         Minecraft mc = ctx.mc();
         State state = new State();
-        Path world = mc.getLevelSource().getLevelPath(WORLD_ID);
+        Path world = M3Scenarios.worldFolder(mc);
         StepRunner together = hostA(ctx, state, Map.of(), 0)
                 .step("B has a full copy and left", 4 * PEER_TICKS, () -> ctx.sharedExists("b-left") && players(mc) == 1);
         StepRunner alone = quitToTitle(together, ctx)
                 .action("press Play", () -> pressPlay(mc, state))
                 .step("hosting alone", WORLD_TICKS, () -> hosting(ctx))
-                .action("A's edit", () -> command(mc, A_COMMAND))
+                .action("A's edit", () -> {
+                    // 1.12.2 port: setblock needs the chunk loaded (M3Scenarios.loadChunk).
+                    forceLoadAt(mc, 0, 0);
+                    command(mc, A_COMMAND);
+                })
                 .step("A's block placed", SHORT_TICKS, () -> block(mc, A_POS, Blocks.DIAMOND_BLOCK));
         StepRunner meeting = quitToTitle(alone, ctx)
                 .action("tell B", () -> ctx.writeShared("a-done", "ok"))
@@ -188,7 +212,7 @@ final class M5Scenarios {
                         require(report.chunksApplied() >= 1, "no chunk of B's session was applied");
                         require(report.chunksKept() == 0, report.chunksKept() + " chunks were kept from the main world, expected none");
                         ownFilesFromTheBranch(report);
-                        command(mc, "forceload add 500 500");
+                        forceLoadAt(mc, 500, 500);
                     })
                     .step("both edits are in the world", SHORT_TICKS,
                             () -> block(mc, B_FAR, Blocks.EMERALD_BLOCK) && block(mc, A_POS, Blocks.DIAMOND_BLOCK));
@@ -201,10 +225,12 @@ final class M5Scenarios {
                                 "the conflict backup is at " + report.conflicts() + ", expected under " + conflicts);
                         Path chunk = ColdMerge.backupPath(report.conflicts(), RecordKey.chunk("minecraft:overworld", "region", 0, 0));
                         require(Files.isRegularFile(chunk), "B's version of the chunk is not at " + chunk);
-                        require(contains(Files.readAllBytes(chunk), "minecraft:emerald_block"), chunk + " does not have B's block");
-                        require(report.message().getString().contains(" 1 kept"), "the chat report is '" + report.message().getString() + "'");
+                        Block saved = blockInRecord(Files.readAllBytes(chunk), B_NEAR);
+                        require(saved == Blocks.EMERALD_BLOCK, chunk + " does not have B's block: " + saved + " at " + B_NEAR);
+                        String chat = report.message().getUnformattedText();
+                        require(chat.contains(" 1 kept"), "the chat report is '" + chat + "'");
                         ownFilesFromTheBranch(report);
-                        // 1.21.1 keeps a player's own files in playerdata/, advancements/ and stats/
+                        // 1.21.1 and 1.12.2 keep a player's own files in playerdata/, advancements/ and stats/
                         for (String folder : List.of("players", "playerdata", "advancements", "stats")) {
                             Path playerFiles = report.conflicts().resolve("files").resolve(folder);
                             require(!Files.exists(playerFiles), "B's own player files were backed up instead of merged: " + playerFiles);
@@ -212,7 +238,12 @@ final class M5Scenarios {
                         DropIn.LOGGER.info("Self-test: B's version of the chunk is in {}", chunk);
                     })
                     .step("A's version of the chunk is in the world", SHORT_TICKS, () -> {
-                        require(!block(mc, B_NEAR, Blocks.EMERALD_BLOCK), "B's block is in the main world");
+                        // 1.12.2 port: a block of a chunk that is not loaded yet reads as unknown (null): wait for it.
+                        Boolean emerald = blockAt(mc, B_NEAR, Blocks.EMERALD_BLOCK);
+                        if (emerald == null) {
+                            return false;
+                        }
+                        require(!emerald, "B's block is in the main world");
                         return block(mc, A_POS, Blocks.DIAMOND_BLOCK);
                     });
             case TOO_OLD -> reopened
@@ -249,7 +280,7 @@ final class M5Scenarios {
         require(pendingBranches(world).isEmpty(), "the merged branch is still pending");
         DropIn.LOGGER.info("Self-test: merge checkpoint {}: {} chunks and {} files applied, {} chunks and {} files kept; chat: {}",
                 report.entry().seq(), report.chunksApplied(), report.filesApplied(), report.chunksKept(), report.filesKept(),
-                report.message().getString());
+                report.message().getUnformattedText());
         return report;
     }
 
@@ -263,9 +294,9 @@ final class M5Scenarios {
         StepRunner copied = joinB(ctx, state, Map.of())
                 .step("copy complete", 2 * PEER_TICKS, copyComplete(mc, state))
                 .action("leave", () -> dropin.mc.compat.Compat.disconnectFromWorld(mc, dropin.mc.compat.Compat.DEFAULT_QUIT_MESSAGE))
-                .step("left", SHORT_TICKS, () -> mc.level == null)
+                .step("left", SHORT_TICKS, () -> mc.world == null)
                 .action("tell A", () -> {
-                    mc.setScreen(new TitleScreen());
+                    mc.displayGuiScreen(new GuiMainMenu());
                     ctx.writeShared("b-left", "ok");
                 })
                 .step("A played a session without B and quit", 3 * WORLD_TICKS, () -> ctx.sharedExists("a-done"))
@@ -273,13 +304,11 @@ final class M5Scenarios {
                     SyncClient.stopAndWait(state.world.worldId(), 15_000);
                     pressPlay(mc, state);
                 })
-                .step("the warning is shown", SHORT_TICKS, () -> CoopLauncher.staleWarning() != null && mc.screen instanceof ConfirmScreen)
+                .step("the warning is shown", SHORT_TICKS, () -> CoopLauncher.staleWarning() != null && mc.currentScreen instanceof Prompts.Confirm)
                 .action("Play anyway", () -> CoopLauncher.answerStale(true))
                 .step("B hosts its older copy", WORLD_TICKS, () -> hosting(ctx))
                 .action("B's edit", () -> {
-                    if (mode != Mode.CONFLICT) {
-                        command(mc, "forceload add 500 500");
-                    }
+                    forceLoadAt(mc, mode == Mode.CONFLICT ? 0 : 500, mode == Mode.CONFLICT ? 0 : 500);
                     command(mc, mode == Mode.CONFLICT ? B_NEAR_COMMAND : B_FAR_COMMAND);
                 })
                 .step("B's block placed", SHORT_TICKS, () -> block(mc, pos, Blocks.EMERALD_BLOCK));
@@ -323,7 +352,7 @@ final class M5Scenarios {
                     Path folder = folder(mc, state);
                     if (mode == Mode.TOO_OLD) {
                         require(split.startsWith("separate:"), "B's session became '" + split + "', expected a separate world");
-                        Path separate = mc.getLevelSource().getLevelPath(split.substring("separate:".length()));
+                        Path separate = dropin.mc.menu.CoopActions.levelPath(mc, split.substring("separate:".length()));
                         require(!separate.equals(folder) && Files.isRegularFile(separate.resolve("level.dat")), separate + " is not a world");
                         require(!Files.exists(separate.resolve(CoopWorldStore.MARKER_DIR)), "the separate world is still a co-op world");
                         String far = RecordApplier.scan(separate).get(FAR_CHUNK);
@@ -336,9 +365,9 @@ final class M5Scenarios {
                     }
                     ctx.writeShared("b-split", split);
                 })
-                .step("A quit", 2 * PEER_TICKS, () -> mc.screen instanceof DisconnectedScreen
-                        || (mc.level == null && mc.screen instanceof TitleScreen))
-                .action("title screen", () -> mc.setScreen(new TitleScreen()))
+                .step("A quit", 2 * PEER_TICKS, () -> mc.currentScreen instanceof GuiDisconnected
+                        || (mc.world == null && mc.currentScreen instanceof GuiMainMenu))
+                .action("title screen", () -> mc.displayGuiScreen(new GuiMainMenu()))
                 .step("A opened the world again", 4 * WORLD_TICKS, () -> ctx.sharedExists("a-merged"))
                 .action("press Play", () -> pressPlay(mc, state))
                 .step("landed in A's session again", PEER_TICKS, () -> joinedRemote(mc))

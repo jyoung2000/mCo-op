@@ -1,11 +1,7 @@
 package dropin.mc.menu;
 
-import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.network.chat.CommonComponents;
-import net.minecraft.network.chat.Component;
-import net.minecraft.util.FormattedCharSequence;
+import dropin.mc.menu.ui.DScreen;
+import net.minecraft.client.resources.I18n;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -15,7 +11,7 @@ import java.util.List;
  * "Update this world's mod list?". Yes signs a new policy version; No means the owner cannot host until
  * the folder matches again.
  */
-public class PolicyUpdateScreen extends Screen {
+public class PolicyUpdateScreen extends DScreen {
     private static final String K = "text.dropin_coop.";
     private static final int SHOWN = 8;
 
@@ -29,7 +25,7 @@ public class PolicyUpdateScreen extends Screen {
 
     public PolicyUpdateScreen(List<String> added, List<String> removed, boolean datapacksChanged, boolean gameChanged,
                               Runnable onYes, Runnable onNo) {
-        super(Component.translatable(K + "policy.update.title"));
+        super(null, I18n.format(K + "policy.update.title"));
         this.added = List.copyOf(added);
         this.removed = List.copyOf(removed);
         this.datapacksChanged = datapacksChanged;
@@ -51,11 +47,14 @@ public class PolicyUpdateScreen extends Screen {
     }
 
     @Override
+    protected int titleY() {
+        return 14;
+    }
+
+    @Override
     protected void init() {
-        this.addRenderableWidget(Button.builder(CommonComponents.GUI_YES, button -> accept())
-                .bounds(this.width / 2 - 154, this.height - 30, 150, 20).build());
-        this.addRenderableWidget(Button.builder(CommonComponents.GUI_NO, button -> decline())
-                .bounds(this.width / 2 + 4, this.height - 30, 150, 20).build());
+        button(this.width / 2 - 154, this.height - 30, 150, I18n.format("gui.yes"), b -> accept());
+        button(this.width / 2 + 4, this.height - 30, 150, I18n.format("gui.no"), b -> decline());
     }
 
     /** "Yes": sign a new policy version and go on. */
@@ -84,31 +83,29 @@ public class PolicyUpdateScreen extends Screen {
     }
 
     @Override
-    public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
-        super.render(graphics, mouseX, mouseY, a);
-        graphics.drawCenteredString(this.font, this.title, this.width / 2, 14, -1);
-        List<Component> lines = new ArrayList<>();
+    protected void drawContents(int mouseX, int mouseY, float partialTicks) {
+        List<String> lines = new ArrayList<>();
         if (!added.isEmpty()) {
-            lines.add(Component.translatable(K + "policy.update.added", shortList(added)));
+            lines.add(I18n.format(K + "policy.update.added", shortList(added)));
         }
         if (!removed.isEmpty()) {
-            lines.add(Component.translatable(K + "policy.update.removed", shortList(removed)));
+            lines.add(I18n.format(K + "policy.update.removed", shortList(removed)));
         }
         if (datapacksChanged) {
-            lines.add(Component.translatable(K + "policy.update.datapacks"));
+            lines.add(I18n.format(K + "policy.update.datapacks"));
         }
         if (gameChanged) {
-            lines.add(Component.translatable(K + "policy.update.game"));
+            lines.add(I18n.format(K + "policy.update.game"));
         }
-        lines.add(Component.empty());
-        lines.add(Component.translatable(K + "policy.update.friends"));
+        lines.add("");
+        lines.add(I18n.format(K + "policy.update.friends"));
         if (!removed.isEmpty()) {
-            lines.add(Component.translatable(K + "policy.update.warning"));
+            lines.add(I18n.format(K + "policy.update.warning"));
         }
         int y = 40;
-        for (Component line : lines) {
-            for (FormattedCharSequence part : this.font.split(line, Math.min(340, this.width - 20))) {
-                graphics.drawCenteredString(this.font, part, this.width / 2, y, -1);
+        for (String line : lines) {
+            for (String part : this.fontRenderer.listFormattedStringToWidth(line, Math.min(340, this.width - 20))) {
+                drawCenteredString(this.fontRenderer, part, this.width / 2, y, 0xFFFFFF);
                 y += 11;
             }
             y += 3;

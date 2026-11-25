@@ -18,6 +18,9 @@ public final class RecordKey {
     public static final long MAX_MOD_FILE = 64L * 1024 * 1024;
     private static final Pattern RESERVED = Pattern.compile("CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³]|CONIN\\$|CONOUT\\$");
     private static final Pattern DIMENSION =Pattern.compile("[a-z0-9_.-]+:[a-z0-9_.-]+(/[a-z0-9_.-]+)*");
+    /** 1.12.2 (Forge): a mod's dimension N, kept in {@code DIM<N>} (WorldProvider.getSaveFolder). */
+    private static final Pattern FORGE_DIM = Pattern.compile("forge:dim(-?[1-9][0-9]*)");
+    private static final Pattern FORGE_DIM_FOLDER = Pattern.compile("DIM(-?[1-9][0-9]*)");
 
     /** @param dim dimension id, for example {@code minecraft:overworld} */
     public record Chunk(String dim, String kind, int cx, int cz) {
@@ -78,8 +81,32 @@ public final class RecordKey {
             case "minecraft:overworld" -> "";
             case "minecraft:the_nether" -> "DIM-1";
             case "minecraft:the_end" -> "DIM1";
-            default -> "dimensions/" + dim.replaceFirst(":", "/");
+            default -> {
+                Integer forge = forgeDimension(FORGE_DIM.matcher(dim));
+                yield forge != null ? "DIM" + forge : "dimensions/" + dim.replaceFirst(":", "/");
+            }
         };
+    }
+
+    /**
+     * 1.12.2 (Forge) only: dimension N other than -1, 0 and 1 is {@code forge:dim<N>} and its folder is
+     * {@code DIM<N>}, Forge's {@code WorldProvider.getSaveFolder()}. Later versions never make such a folder.
+     */
+    private static Integer forgeDimension(java.util.regex.Matcher matcher) {
+        if (!matcher.matches()) {
+            return null;
+        }
+        try {
+            int n = Integer.parseInt(matcher.group(1));
+            return n == -1 || n == 1 ? null : n;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** The folder name of a 1.12.2 dimension: DIM-1, DIM1 or DIM&lt;N&gt; of a mod's dimension (exact case). */
+    private static boolean legacyDimensionFolder(String segment) {
+        return segment.equals("DIM-1") || segment.equals("DIM1") || forgeDimension(FORGE_DIM_FOLDER.matcher(segment)) != null;
     }
 
     /**
@@ -96,6 +123,10 @@ public final class RecordKey {
                 return "minecraft:the_end";
             default:
                 break;
+        }
+        Integer forge = forgeDimension(FORGE_DIM_FOLDER.matcher(relative));
+        if (forge != null) {
+            return "forge:dim" + forge;
         }
         String[] segments = relative.split("/", -1);
         if (segments.length < 3 || !segments[0].equals("dimensions")) {
@@ -158,14 +189,15 @@ public final class RecordKey {
     }
 
     /**
-     * The path as the game would spell it: lower case, except the Nether's and the End's folders, which the game
-     * names {@code DIM-1} and {@code DIM1}. A path that differs from this only in case reaches the same file on a
-     * case-insensitive file system.
+     * The path as the game would spell it: lower case, except the dimension folders, which the game names
+     * {@code DIM-1} and {@code DIM1} (and, on 1.12.2, {@code DIM<N>} for a mod's dimension). A path that differs
+     * from this only in case reaches the same file on a case-insensitive file system.
      */
     private static String canonicalCase(String path) {
         String lower = path.toLowerCase(Locale.ROOT);
-        if (lower.startsWith("dim-1/") || lower.startsWith("dim1/")) {
-            return lower.substring(0, lower.indexOf('/')).toUpperCase(Locale.ROOT) + lower.substring(lower.indexOf('/'));
+        int slash = lower.indexOf('/');
+        if (slash > 0 && legacyDimensionFolder(lower.substring(0, slash).toUpperCase(Locale.ROOT))) {
+            return lower.substring(0, slash).toUpperCase(Locale.ROOT) + lower.substring(slash);
         }
         return lower;
     }
@@ -212,10 +244,12 @@ public final class RecordKey {
             }
             return false;
         }
-        if (segments[0].equalsIgnoreCase("DIM-1") || segments[0].equalsIgnoreCase("DIM1")) {
+        if (legacyDimensionFolder(segments[0].toUpperCase(Locale.ROOT))) {
             // 1.21.1 and older: the Nether's and the End's saved data, DIM-1/data/** and DIM1/data/**; never their
-            // region-type folders
-            return segments.length > 2 && segments[1].equals("data");
+            // region-type folders. 1.12.2 also: a mod's dimension DIM<N>/data/**, and Forge's forcedchunks.dat,
+            // which ForgeChunkManager keeps in every dimension's folder.
+            return segments.length > 2 && segments[1].equals("data")
+                    || segments.length == 2 && segments[1].equals("forcedchunks.dat");
         }
         if (gameFile(segments)) {
             return true;
@@ -234,7 +268,8 @@ public final class RecordKey {
             // playerdata, advancements, stats, DIM-1 and DIM1: the world layout of 1.21.1 and older
             case "data", "players", "datapacks", "resourcepacks", "dimensions",
                  "playerdata", "advancements", "stats", "DIM-1", "DIM1" -> true;
-            default -> false;
+            // 1.12.2: a mod's dimension folder DIM<N>
+            default -> legacyDimensionFolder(segments[0]);
         };
     }
 

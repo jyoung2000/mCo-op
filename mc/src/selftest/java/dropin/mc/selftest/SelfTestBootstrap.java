@@ -49,7 +49,7 @@ public final class SelfTestBootstrap {
                 if (runner == null) {
                     writePid();
                     try {
-                        runner = Scenarios.build(spec, Scenarios.Context.fromSwitches(Minecraft.getInstance()));
+                        runner = Scenarios.build(spec, Scenarios.Context.fromSwitches(Minecraft.getMinecraft()));
                     } catch (Throwable t) {
                         finish(false, "could not set up scenario: " + t, List.of());
                         return;
@@ -69,7 +69,8 @@ public final class SelfTestBootstrap {
             writeResult(passed, failure, steps);
             DropIn.LOGGER.info("Self-test {}:{} {}{}", spec.scenario(), spec.role(), passed ? "PASSED" : "FAILED",
                     failure == null ? "" : " - " + failure);
-            Minecraft.getInstance().stop();
+            // 1.12.2 port: 26.x Minecraft.stop() is Minecraft.shutdown() (ends the game loop).
+            Minecraft.getMinecraft().shutdown();
         }
 
         private synchronized void writeResult(boolean passed, String failure, List<StepRunner.StepRecord> steps) {
@@ -94,8 +95,8 @@ public final class SelfTestBootstrap {
         }
 
         private static Path gameDir() {
-            Minecraft mc = Minecraft.getInstance();
-            return mc != null ? mc.gameDirectory.toPath() : Path.of("").toAbsolutePath();
+            Minecraft mc = Minecraft.getMinecraft();
+            return mc != null ? mc.gameDir.toPath() : Path.of("").toAbsolutePath();
         }
 
         /** If the client thread hangs, still leave a result and get out of the orchestrator's way. */

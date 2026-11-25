@@ -14,12 +14,10 @@ import dropin.mc.coop.CoopWorlds;
 import dropin.mc.coop.StatusPing;
 import dropin.mc.member.SyncClient;
 import dropin.mc.menu.CoopActions;
+import dropin.mc.menu.ui.DScreen;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.network.chat.CommonComponents;
-import net.minecraft.network.chat.Component;
+import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.resources.I18n;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -31,7 +29,7 @@ import java.util.Optional;
  * screen is shown. Otherwise the members take over in the order of {@link Election}: the first at once, each
  * next one 45 s later, unless a new host has appeared by then, which everyone else joins by itself.
  */
-public final class HostLostScreen extends Screen {
+public final class HostLostScreen extends DScreen {
     private static final String K = "text.dropin_coop.failover.";
     private static final long POLL_MS = 1_000;
     private static final long PING_TIMEOUT_MS = 5_000;
@@ -40,14 +38,14 @@ public final class HostLostScreen extends Screen {
     private final String oldAddress;
     private final String oldHostUuid;
     private final List<Election.Peer> peers;
-    private final Screen vanilla;
-    private volatile Component message = Component.translatable(K + "lost");
+    private final GuiScreen vanilla;
+    /** 1.12.2 port: the translation key of the line shown (26.x kept a Component). */
+    private volatile String message = K + "lost";
     private volatile boolean done;
     private boolean started;
-    private Button cancel;
 
-    HostLostScreen(CoopWorld world, String oldAddress, String oldHostUuid, List<Election.Peer> peers, Screen vanilla) {
-        super(Component.translatable("menu.dropin_coop.title"));
+    HostLostScreen(CoopWorld world, String oldAddress, String oldHostUuid, List<Election.Peer> peers, GuiScreen vanilla) {
+        super(vanilla, I18n.format("menu.dropin_coop.title"));
         this.world = world;
         this.oldAddress = oldAddress;
         this.oldHostUuid = oldHostUuid;
@@ -57,55 +55,48 @@ public final class HostLostScreen extends Screen {
 
     @Override
     protected void init() {
-        this.cancel = this.addRenderableWidget(Button.builder(CommonComponents.GUI_CANCEL, button -> {
+        // 1.12.2 port: init runs on every resize, so the button is simply built at its place (26.x repositionElements).
+        button(this.width / 2 - 100, this.height / 2 + 24, 200, I18n.format("gui.cancel"), b -> {
             done = true;
-            this.minecraft.setScreen(vanilla);
-        }).bounds(this.width / 2 - 100, this.height / 2 + 24, 200, 20).build());
+            this.mc.displayGuiScreen(vanilla);
+        });
         if (!started) {
             started = true;
-            Minecraft mc = this.minecraft;
+            Minecraft mc = this.mc;
             Thread thread = new Thread(() -> run(mc), "dropin-coop-host-lost");
             thread.setDaemon(true);
             thread.start();
         }
     }
 
+    /** 26.x {@code shouldCloseOnEsc()} was false: Escape does nothing. */
     @Override
-    protected void repositionElements() {
-        super.repositionElements();
-        if (this.cancel != null) {
-            this.cancel.setPosition(this.width / 2 - 100, this.height / 2 + 24);
-        }
+    public void onClose() {
     }
 
+    /** 26.x {@code Screen.removed()}: another screen replaced this one. */
     @Override
-    public boolean shouldCloseOnEsc() {
-        return false;
-    }
-
-    @Override
-    public void removed() {
+    public void onGuiClosed() {
         done = true;
-        super.removed();
+        super.onGuiClosed();
     }
 
     @Override
-    public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
-        super.render(graphics, mouseX, mouseY, a);
-        graphics.drawCenteredString(this.font, message, this.width / 2, this.height / 2 - 12, -1);
+    protected void drawContents(int mouseX, int mouseY, float partialTicks) {
+        drawCenteredString(this.fontRenderer, I18n.format(message), this.width / 2, this.height / 2 - 12, 0xFFFFFF);
     }
 
-    private void show(Minecraft mc, Screen screen) {
-        mc.execute(() -> {
-            if (mc.screen == this) {
-                mc.setScreen(screen);
+    private void show(Minecraft mc, GuiScreen screen) {
+        mc.addScheduledTask(() -> {
+            if (mc.currentScreen == this) {
+                mc.displayGuiScreen(screen);
             }
         });
     }
 
     private void run(Minecraft mc) {
         long lostAt = System.currentTimeMillis();
-        String me = mc.getUser().getProfileId().toString();
+        String me = mc.getSession().getProfile().getId().toString();
         try {
             // DESIGN 4.9: each client confirms that the old address no longer answers.
             if (StatusPing.answers(oldAddress, PING_TIMEOUT_MS)) {
@@ -142,7 +133,7 @@ public final class HostLostScreen extends Screen {
             List<String> order = Election.order(peers, oldHostUuid);
             long turn = Election.turnAfterMs(order, me);
             String known = CoopActions.folders(mc).get(world.worldId());
-            Path folder = known == null ? null : mc.getLevelSource().getBaseDir().resolve(known);
+            Path folder = known == null ? null : CoopActions.levelPath(mc, known);
             if (folder == null || SyncClient.incomplete(folder)) {
                 turn = -1;
             } else if (turn >= 0) {
@@ -197,7 +188,7 @@ public final class HostLostScreen extends Screen {
 
     /** @return false if it could not be tried now (the screen keeps waiting) */
     private boolean takeOver(Minecraft mc, Path folder, List<String> order, long lostAt) throws InterruptedException {
-        message = Component.translatable(K + "taking_over");
+        message = K + "taking_over";
         try {
             // The copy is about to be opened by the game: the sync must have closed its files.
             if (!SyncClient.stopAndWait(world.worldId(), 60_000)) {
@@ -219,7 +210,7 @@ public final class HostLostScreen extends Screen {
                 case HOSTING -> CrashFailover.resolved(CrashFailover.Role.ELECTED, order, after, last.seq(), root);
                 case JOINED -> CrashFailover.resolved(CrashFailover.Role.FOLLOWER, order, after, 0, "");
                 case UNREACHABLE -> {
-                    message = Component.translatable(K + "lost");
+                    message = K + "lost";
                     return false;
                 }
                 default -> {

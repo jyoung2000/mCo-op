@@ -8,18 +8,21 @@ import dropin.mc.DropIn;
 import dropin.mc.member.SyncClient;
 import dropin.mc.menu.CoopStatus;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.AlertScreen;
-import net.minecraft.client.gui.screens.ConnectScreen;
-import net.minecraft.client.gui.screens.GenericMessageScreen;
-import net.minecraft.client.gui.screens.TitleScreen;
-import net.minecraft.client.gui.screens.worldselection.WorldOpenFlows;
-import net.minecraft.client.multiplayer.ServerData;
-import net.minecraft.client.multiplayer.resolver.ServerAddress;
-import net.minecraft.network.chat.Component;
+import net.minecraft.client.gui.GuiMainMenu;
+import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.resources.I18n;
+import net.minecraft.util.text.ITextComponent;
+import net.minecraft.util.text.TextComponentTranslation;
+import net.minecraft.world.WorldSettings;
+import net.minecraft.world.storage.WorldInfo;
 
+import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.util.HexFormat;
 import java.util.Optional;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.function.Consumer;
 
 /**
  * The launch flow of DESIGN 4.4: opening a co-op world first asks the rendezvous who is hosting.
@@ -27,35 +30,92 @@ import java.util.Optional;
  */
 public final class CoopLauncher {
     private static final long PING_TIMEOUT_MS = 5_000;
-    /** Set on the client thread while this class itself calls {@code openWorld}. */
+    /** Set on the client thread while this class itself opens the world. */
     private static boolean passThrough;
+    /**
+     * 1.12.2 port: worlds this class opens wait here for the end of the next client tick. 26.x's
+     * {@code openWorld} could be queued with {@code execute}; 1.12.2's {@code launchIntegratedServer} blocks
+     * until the integrated server runs, and scheduled tasks run while the game holds the lock of its task
+     * queue, so any thread that schedules a task meanwhile (the server thread included) would hang the game.
+     */
+    private static final Queue<Runnable> NEXT_TICK = new ConcurrentLinkedQueue<>();
 
     private CoopLauncher() {
     }
 
     /**
-     * Called at the head of {@code WorldOpenFlows.openWorld}.
+     * Called at the head of {@code Minecraft.launchIntegratedServer(folderName, worldName, settings)}, which the
+     * world list ({@code FMLClientHandler.tryLoadExistingWorld}), world creation and DropIn's own screens open a
+     * world with (1.12.2 port: 26.x {@code WorldOpenFlows.openWorld(levelId, onCancel)}). Client thread.
      *
      * @return true if the open was taken over (the vanilla call must be cancelled)
      */
-    public static boolean intercept(WorldOpenFlows flows, String levelId, Runnable onCancel) {
+    public static boolean intercept(Minecraft mc, String levelId, String worldName, WorldSettings settings) {
         if (passThrough) {
             return false;
         }
-        Minecraft mc = Minecraft.getInstance();
-        Optional<CoopWorld> world = CoopWorlds.forFolder(mc.getLevelSource().getLevelPath(levelId));
-        if (world.isEmpty()) {
+        Optional<CoopWorld> world = CoopWorlds.forFolder(folder(mc, levelId));
+        if (!world.isPresent()) {
             return false;
         }
-        mc.setScreen(new GenericMessageScreen(Component.translatable("text.dropin_coop.looking")));
-        Thread thread = new Thread(() -> launch(mc, flows, world.get(), levelId, onCancel, false), "dropin-coop-launch");
+        // 1.12.2 port: 26.x was given an onCancel; here Cancel goes back to the screen the world was opened from.
+        GuiScreen back = mc.currentScreen;
+        Runnable onCancel = () -> mc.displayGuiScreen(back != null ? back : new GuiMainMenu());
+        Opener opener = new Opener(levelId, worldName, settings);
+        mc.displayGuiScreen(new Prompts.Message(new TextComponentTranslation("text.dropin_coop.looking")));
+        Thread thread = new Thread(() -> launch(mc, opener, world.get(), onCancel, false), "dropin-coop-launch");
         thread.setDaemon(true);
         thread.start();
         return true;
     }
 
+    /** End of every client tick, outside the task queue's lock: opens the worlds this class queued. Client thread. */
+    public static void onClientTick() {
+        Runnable task;
+        while ((task = NEXT_TICK.poll()) != null) {
+            task.run();
+        }
+    }
+
+    /** 1.12.2 port: 26.x {@code LevelStorageSource.getLevelPath(levelId)}, absolute. */
+    private static Path folder(Minecraft mc, String levelId) {
+        return dropin.mc.menu.CoopActions.levelPath(mc, levelId).toAbsolutePath().normalize();
+    }
+
+    /** How a world is opened once the launch flow allows it (1.12.2 port of 26.x's {@code WorldOpenFlows} and level id). */
+    private record Opener(String levelId, String worldName, WorldSettings settings) {
+        /** A world DropIn opens by itself: its display name comes from level.dat (the game saves the name it is given). */
+        static Opener of(Minecraft mc, String levelId) {
+            WorldInfo info = mc.getSaveLoader().getWorldInfo(levelId);
+            String name = info == null || info.getWorldName() == null || info.getWorldName().isEmpty() ? levelId : info.getWorldName();
+            return new Opener(levelId, name, null);
+        }
+
+        /** Opens the world at the end of the next client tick, past the launch flow. Any thread. */
+        void open(Minecraft mc) {
+            NEXT_TICK.add(() -> {
+                passThrough = true;
+                try {
+                    mc.launchIntegratedServer(levelId, worldName, settings);
+                } finally {
+                    passThrough = false;
+                }
+            });
+        }
+    }
+
+    /** Runs the launch flow again from the start (the owner just signed a new policy). Any thread. */
+    private static void relaunch(Minecraft mc, Opener opener, CoopWorld world, Runnable onCancel) {
+        mc.addScheduledTask(() -> {
+            mc.displayGuiScreen(new Prompts.Message(new TextComponentTranslation("text.dropin_coop.looking")));
+            Thread thread = new Thread(() -> launch(mc, opener, world, onCancel, false), "dropin-coop-launch");
+            thread.setDaemon(true);
+            thread.start();
+        });
+    }
+
     private static volatile RendezvousRecord staleWarning;
-    private static volatile it.unimi.dsi.fastutil.booleans.BooleanConsumer staleAnswer;
+    private static volatile Consumer<Boolean> staleAnswer;
 
     /** The record the "your copy is behind" warning on screen is about, or null if none is shown. */
     public static RendezvousRecord staleWarning() {
@@ -64,7 +124,7 @@ public final class CoopLauncher {
 
     /** Answers the "your copy is behind" warning, as its buttons do. Client thread. */
     public static void answerStale(boolean playAnyway) {
-        it.unimi.dsi.fastutil.booleans.BooleanConsumer answer = staleAnswer;
+        Consumer<Boolean> answer = staleAnswer;
         if (answer != null) {
             answer.accept(playAnyway);
         }
@@ -76,10 +136,10 @@ public final class CoopLauncher {
      *
      * @return the record of the session this copy is behind, or null if it is not behind (or nothing is known)
      */
-    private static RendezvousRecord behind(Rendezvous rendezvous, CoopWorld world, java.nio.file.Path folder, Env env) {
+    private static RendezvousRecord behind(Rendezvous rendezvous, CoopWorld world, Path folder, Env env) {
         try {
             Optional<RendezvousRecord> found = rendezvous.lookup();
-            if (found.isEmpty() || found.get().head().isEmpty() || found.get().isState(RendezvousRecord.STARTING)) {
+            if (!found.isPresent() || found.get().head().isEmpty() || found.get().isState(RendezvousRecord.STARTING)) {
                 return null;
             }
             RendezvousRecord record = found.get();
@@ -97,24 +157,27 @@ public final class CoopLauncher {
     }
 
     /** "3 hours ago", from a time in epoch seconds. */
-    public static Component ago(long epochSeconds) {
+    public static ITextComponent ago(long epochSeconds) {
         long minutes = Math.max(0, System.currentTimeMillis() / 1000 - epochSeconds) / 60;
         if (minutes < 1) {
-            return Component.translatable("text.dropin_coop.ago.now");
+            return new TextComponentTranslation("text.dropin_coop.ago.now");
         } else if (minutes < 120) {
-            return Component.translatable("text.dropin_coop.ago.minutes", minutes);
+            return new TextComponentTranslation("text.dropin_coop.ago.minutes", minutes);
         } else if (minutes < 48 * 60) {
-            return Component.translatable("text.dropin_coop.ago.hours", minutes / 60);
+            return new TextComponentTranslation("text.dropin_coop.ago.hours", minutes / 60);
         }
-        return Component.translatable("text.dropin_coop.ago.days", minutes / (24 * 60));
+        return new TextComponentTranslation("text.dropin_coop.ago.days", minutes / (24 * 60));
     }
 
-    private static void launch(Minecraft mc, WorldOpenFlows flows, CoopWorld world, String levelId, Runnable onCancel,
-                               boolean staleAccepted) {
-        String uuid = mc.getUser().getProfileId().toString();
-        String name = mc.getUser().getName();
+    private static String playerUuid(Minecraft mc) {
+        return mc.getSession().getProfile().getId().toString();
+    }
+
+    private static void launch(Minecraft mc, Opener opener, CoopWorld world, Runnable onCancel, boolean staleAccepted) {
+        String uuid = playerUuid(mc);
+        String name = mc.getSession().getUsername();
         Rendezvous rendezvous = CoopWorlds.rendezvous(world);
-        java.nio.file.Path folder = mc.getLevelSource().getLevelPath(levelId);
+        Path folder = folder(mc, opener.levelId());
         if (SyncClient.incomplete(folder)) {
             // DESIGN 4.7: an unfinished download is not a world yet. It can only be continued from a live host.
             CoopStatus.Status status = CoopStatus.lookup(world);
@@ -125,14 +188,13 @@ public final class CoopLauncher {
             } else {
                 int percent = SyncClient.savedState(folder).percent();
                 DropIn.LOGGER.info("Co-op world '{}': nobody is online and the copy is {}% downloaded", world.name(), percent);
-                mc.execute(() -> mc.setScreen(new AlertScreen(onCancel, Component.translatable("menu.dropin_coop.title"),
-                        Component.translatable("text.dropin_coop.sync.incomplete_nobody", percent))));
+                mc.addScheduledTask(() -> mc.displayGuiScreen(new Prompts.Alert(onCancel, I18n.format("menu.dropin_coop.title"),
+                        new TextComponentTranslation("text.dropin_coop.sync.incomplete_nobody", percent))));
             }
             return;
         }
         // DESIGN 4.14: the owner's mods and datapacks must be what the signed policy says before anyone plays.
-        if (!dropin.mc.policy.HostGate.ownerReady(mc, world, folder,
-                () -> mc.execute(() -> flows.openWorld(levelId, onCancel)), onCancel)) {
+        if (!dropin.mc.policy.HostGate.ownerReady(mc, world, folder, () -> relaunch(mc, opener, world, onCancel), onCancel)) {
             return;
         }
         Env env = new Env();
@@ -141,8 +203,8 @@ public final class CoopLauncher {
             // Before anything is claimed or opened: Cancel must leave this copy exactly as it is.
             DropIn.LOGGER.info("Co-op world '{}': this copy is behind the last session ({}, checkpoint {}) and nobody is online",
                     world.name(), newer.name(), newer.seq());
-            mc.execute(() -> {
-                it.unimi.dsi.fastutil.booleans.BooleanConsumer answer = playAnyway -> {
+            mc.addScheduledTask(() -> {
+                Consumer<Boolean> answer = playAnyway -> {
                     staleWarning = null;
                     staleAnswer = null;
                     if (!playAnyway) {
@@ -151,16 +213,16 @@ public final class CoopLauncher {
                         return;
                     }
                     DropIn.LOGGER.info("Co-op world '{}': playing on the older copy; the changes are merged later", world.name());
-                    mc.setScreen(new GenericMessageScreen(Component.translatable("text.dropin_coop.looking")));
-                    Thread thread = new Thread(() -> launch(mc, flows, world, levelId, onCancel, true), "dropin-coop-launch");
+                    mc.displayGuiScreen(new Prompts.Message(new TextComponentTranslation("text.dropin_coop.looking")));
+                    Thread thread = new Thread(() -> launch(mc, opener, world, onCancel, true), "dropin-coop-launch");
                     thread.setDaemon(true);
                     thread.start();
                 };
                 staleWarning = newer;
                 staleAnswer = answer;
-                mc.setScreen(new net.minecraft.client.gui.screens.ConfirmScreen(answer, Component.translatable("menu.dropin_coop.title"),
-                        Component.translatable("text.dropin_coop.stale.message", newer.name(), ago(newer.ts())),
-                        Component.translatable("text.dropin_coop.stale.play_anyway"), net.minecraft.network.chat.CommonComponents.GUI_CANCEL));
+                mc.displayGuiScreen(new Prompts.Confirm(answer, I18n.format("menu.dropin_coop.title"),
+                        new TextComponentTranslation("text.dropin_coop.stale.message", newer.name(), ago(newer.ts())),
+                        I18n.format("text.dropin_coop.stale.play_anyway"), I18n.format("gui.cancel")));
             });
             return;
         }
@@ -186,41 +248,36 @@ public final class CoopLauncher {
                     world.name(), host.announced());
             remember(world, uuid, name);
             // DESIGN 4.13: a member only hosts a copy that matches the owner's policy.
-            net.minecraft.client.gui.screens.Screen problem = dropin.mc.policy.HostGate.memberProblem(mc, world, folder, onCancel);
+            GuiScreen problem = dropin.mc.policy.HostGate.memberProblem(mc, world, folder, onCancel);
             if (problem != null) {
                 DropIn.LOGGER.info("Co-op world '{}': this PC may not host it ({})", world.name(), problem.getClass().getSimpleName());
                 if (host.announced()) {
-                    try {
-                        rendezvous.publish(RendezvousRecord.of(RendezvousRecord.IDLE, uuid, name, host.sess(), System.currentTimeMillis() / 1000));
-                    } catch (Exception e) {
-                        DropIn.LOGGER.warn("Could not withdraw the host announcement of '{}': {}", world.name(), e.toString());
-                    }
+                    withdraw(rendezvous, world, uuid, name, host.sess());
                 }
-                mc.execute(() -> mc.setScreen(problem));
+                mc.addScheduledTask(() -> mc.displayGuiScreen(problem));
                 return;
             }
             // The copy is about to be opened by the game: a sync from an earlier session must have let go of it.
             if (!syncReleased(mc, world, onCancel)) {
                 if (host.announced()) {
-                    try {
-                        rendezvous.publish(RendezvousRecord.of(RendezvousRecord.IDLE, uuid, name, host.sess(), System.currentTimeMillis() / 1000));
-                    } catch (Exception e) {
-                        DropIn.LOGGER.warn("Could not withdraw the host announcement of '{}': {}", world.name(), e.toString());
-                    }
+                    withdraw(rendezvous, world, uuid, name, host.sess());
                 }
                 return;
             }
             // DESIGN 4.10: offline sessions that wait to be merged go in now, while the world is still closed.
             dropin.mc.merge.ColdMerge.run(mc, world, folder, uuid, name, host.sess());
-            mc.execute(() -> {
+            mc.addScheduledTask(() -> {
                 HostSession.start(mc, world, rendezvous, host.sess(), uuid, name);
-                passThrough = true;
-                try {
-                    flows.openWorld(levelId, onCancel);
-                } finally {
-                    passThrough = false;
-                }
+                opener.open(mc);
             });
+        }
+    }
+
+    private static void withdraw(Rendezvous rendezvous, CoopWorld world, String uuid, String name, String sess) {
+        try {
+            rendezvous.publish(RendezvousRecord.of(RendezvousRecord.IDLE, uuid, name, sess, System.currentTimeMillis() / 1000));
+        } catch (Exception e) {
+            DropIn.LOGGER.warn("Could not withdraw the host announcement of '{}': {}", world.name(), e.toString());
         }
     }
 
@@ -230,37 +287,33 @@ public final class CoopLauncher {
      *
      * @return false if this PC may not host the world (a screen says why)
      */
-    public static boolean hostAfterHandoff(Minecraft mc, CoopWorld world, java.nio.file.Path folder) {
-        String uuid = mc.getUser().getProfileId().toString();
-        String name = mc.getUser().getName();
-        Runnable onCancel = () -> mc.setScreen(new TitleScreen());
+    public static boolean hostAfterHandoff(Minecraft mc, CoopWorld world, Path folder) {
+        String uuid = playerUuid(mc);
+        String name = mc.getSession().getUsername();
+        Runnable onCancel = () -> mc.displayGuiScreen(new GuiMainMenu());
         remember(world, uuid, name);
-        net.minecraft.client.gui.screens.Screen problem = dropin.mc.policy.HostGate.memberProblem(mc, world, folder, onCancel);
+        GuiScreen problem = dropin.mc.policy.HostGate.memberProblem(mc, world, folder, onCancel);
         if (problem != null) {
             DropIn.LOGGER.info("Co-op world '{}': this PC may not take over as host ({})", world.name(), problem.getClass().getSimpleName());
-            mc.execute(() -> mc.setScreen(problem));
+            mc.addScheduledTask(() -> mc.displayGuiScreen(problem));
             return false;
         }
         openAsHost(mc, world, folder, new Env().newSession(), onCancel);
         return true;
     }
 
-    private static void openAsHost(Minecraft mc, CoopWorld world, java.nio.file.Path folder, String sess, Runnable onCancel) {
-        String uuid = mc.getUser().getProfileId().toString();
-        String name = mc.getUser().getName();
+    private static void openAsHost(Minecraft mc, CoopWorld world, Path folder, String sess, Runnable onCancel) {
+        String uuid = playerUuid(mc);
+        String name = mc.getSession().getUsername();
         String levelId = folder.getFileName().toString();
         if (!syncReleased(mc, world, onCancel)) {
             return;
         }
         dropin.mc.merge.ColdMerge.run(mc, world, folder, uuid, name, sess);
-        mc.execute(() -> {
+        Opener opener = Opener.of(mc, levelId);
+        mc.addScheduledTask(() -> {
             HostSession.start(mc, world, CoopWorlds.rendezvous(world), sess, uuid, name);
-            passThrough = true;
-            try {
-                mc.createWorldOpenFlows().openWorld(levelId, onCancel);
-            } finally {
-                passThrough = false;
-            }
+            opener.open(mc);
         });
     }
 
@@ -281,14 +334,14 @@ public final class CoopLauncher {
      * (so two members whose turns overlap do not both host), then opens the local copy, which is at its last
      * applied checkpoint, and hosts it. Not on the client thread.
      */
-    public static Takeover hostAfterCrash(Minecraft mc, CoopWorld world, java.nio.file.Path folder) throws InterruptedException {
-        String uuid = mc.getUser().getProfileId().toString();
-        String name = mc.getUser().getName();
-        Runnable onCancel = () -> mc.setScreen(new TitleScreen());
-        net.minecraft.client.gui.screens.Screen problem = dropin.mc.policy.HostGate.memberProblem(mc, world, folder, onCancel);
+    public static Takeover hostAfterCrash(Minecraft mc, CoopWorld world, Path folder) throws InterruptedException {
+        String uuid = playerUuid(mc);
+        String name = mc.getSession().getUsername();
+        Runnable onCancel = () -> mc.displayGuiScreen(new GuiMainMenu());
+        GuiScreen problem = dropin.mc.policy.HostGate.memberProblem(mc, world, folder, onCancel);
         if (problem != null) {
             DropIn.LOGGER.info("Co-op world '{}': this PC may not take over as host ({})", world.name(), problem.getClass().getSimpleName());
-            mc.execute(() -> mc.setScreen(problem));
+            mc.addScheduledTask(() -> mc.displayGuiScreen(problem));
             return Takeover.REFUSED;
         }
         Env env = new Env();
@@ -309,7 +362,6 @@ public final class CoopLauncher {
         return Takeover.HOSTING;
     }
 
-    /** As {@link #remember}, and notes who hosts the session this game is about to join (for the status line and failover). */
     /**
      * A member sync of this copy must have let go of it (no thread left that could write it) before the game
      * opens it. If it did not within a minute, a screen says so and this returns false: the world is not opened.
@@ -319,11 +371,12 @@ public final class CoopLauncher {
         if (SyncClient.stopAndWait(world.worldId(), 60_000)) {
             return true;
         }
-        mc.execute(() -> mc.setScreen(new AlertScreen(onCancel, Component.translatable("menu.dropin_coop.title"),
-                Component.translatable("text.dropin_coop.sync_busy"))));
+        mc.addScheduledTask(() -> mc.displayGuiScreen(new Prompts.Alert(onCancel, I18n.format("menu.dropin_coop.title"),
+                new TextComponentTranslation("text.dropin_coop.sync_busy"))));
         return false;
     }
 
+    /** As {@link #remember}, and notes who hosts the session this game is about to join (for the status line and failover). */
     public static void rememberHost(CoopWorld world, String uuid, String name) {
         remember(world, uuid, name);
         dropin.mc.handoff.CrashFailover.host(world.worldId(), uuid, name);
@@ -334,7 +387,7 @@ public final class CoopLauncher {
      * step meanwhile (DESIGN 4.4, 4.7).
      */
     public static void join(Minecraft mc, CoopWorld world, String address) {
-        dropin.mc.mods.JoinGate.join(mc, world, address, new TitleScreen());
+        dropin.mc.mods.JoinGate.join(mc, world, address, new GuiMainMenu());
     }
 
     public static void remember(CoopWorld world, String uuid, String name) {

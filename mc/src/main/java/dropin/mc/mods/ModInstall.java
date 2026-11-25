@@ -10,7 +10,8 @@ import dropin.mc.DropIn;
 import dropin.mc.menu.CoopStatus;
 import dropin.mc.policy.WorldPolicy;
 import net.minecraft.client.Minecraft;
-import net.minecraft.network.chat.Component;
+import net.minecraft.util.text.ITextComponent;
+import net.minecraft.util.text.TextComponentTranslation;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -30,14 +31,14 @@ public final class ModInstall {
 
     /** A failure the consent screen shows as it is. */
     public static final class InstallException extends IOException {
-        private final Component shown;
+        private final ITextComponent shown;
 
-        InstallException(Component shown) {
-            super(shown.getString());
+        InstallException(ITextComponent shown) {
+            super(shown.getUnformattedText());
             this.shown = shown;
         }
 
-        public Component shown() {
+        public ITextComponent shown() {
             return shown;
         }
     }
@@ -59,7 +60,7 @@ public final class ModInstall {
      * @param progress told what is being downloaded
      */
     public static void downloadAndPlan(Minecraft mc, CoopWorld world, WorldPolicy.Held held, String address,
-                                       Consumer<Component> progress) throws IOException, InterruptedException {
+                                       Consumer<ITextComponent> progress) throws IOException, InterruptedException {
         ModManifest manifest = held.manifest();
         manifest.validate(WorldPolicy.limits());
         ModStore store = WorldPolicy.store();
@@ -74,7 +75,7 @@ public final class ModInstall {
                 if (store.has(entry.sha512())) {
                     continue;
                 }
-                progress.accept(Component.translatable(K + "mods.consent.downloading", entry.path(), index, diff.toDownload().size()));
+                progress.accept(new TextComponentTranslation(K + "mods.consent.downloading", entry.path(), index, diff.toDownload().size()));
                 // The same file under another name is already on this PC.
                 ModManifest.Entry twin = local.stream().filter(have -> have.sha512().equals(entry.sha512())).findFirst().orElse(null);
                 if (twin != null) {
@@ -93,10 +94,10 @@ public final class ModInstall {
                 } catch (PolicyLink.FetchException e) {
                     DropIn.LOGGER.warn("Mod file {} could not be fetched from the host: {}", entry.path(), e.getMessage());
                     throw new InstallException(switch (e.kind()) {
-                        case PATH -> Component.translatable(K + "mods.error.path", entry.path());
-                        case ABSENT -> Component.translatable(K + "mods.error.absent", entry.path());
-                        case HASH -> Component.translatable(K + "mods.error.hash", entry.path());
-                        case LOST -> Component.translatable(K + "mods.error.failed", String.valueOf(e.getMessage()));
+                        case PATH -> new TextComponentTranslation(K + "mods.error.path", entry.path());
+                        case ABSENT -> new TextComponentTranslation(K + "mods.error.absent", entry.path());
+                        case HASH -> new TextComponentTranslation(K + "mods.error.hash", entry.path());
+                        case LOST -> new TextComponentTranslation(K + "mods.error.failed", String.valueOf(e.getMessage()));
                     });
                 }
             }
@@ -107,7 +108,7 @@ public final class ModInstall {
         }
         for (ModManifest.Entry entry : diff.toDownload()) {
             if (!store.has(entry.sha512())) {
-                throw new InstallException(Component.translatable(K + "mods.error.hash", entry.path()));
+                throw new InstallException(new TextComponentTranslation(K + "mods.error.hash", entry.path()));
             }
         }
         Path planFile = WorldPolicy.configDir().resolve(SwapPlan.FILE);
@@ -135,7 +136,7 @@ public final class ModInstall {
         if (host == null) {
             CoopStatus.Status status = CoopStatus.lookup(world);
             if (status.kind() != CoopStatus.Kind.PLAYING) {
-                throw new InstallException(Component.translatable(K + "mods.error.nobody"));
+                throw new InstallException(new TextComponentTranslation(K + "mods.error.nobody"));
             }
             host = status.address();
         }
@@ -144,11 +145,11 @@ public final class ModInstall {
             // The host only serves files once the handshake is done; its policy answer is the sign of that.
             if (!link.await(LINK_TIMEOUT_MS)) {
                 link.close();
-                throw new InstallException(Component.translatable(K + "mods.error.failed", "the host did not answer"));
+                throw new InstallException(new TextComponentTranslation(K + "mods.error.failed", "the host did not answer"));
             }
             return link;
         } catch (IOException e) {
-            throw new InstallException(Component.translatable(K + "mods.error.failed", String.valueOf(e.getMessage())));
+            throw new InstallException(new TextComponentTranslation(K + "mods.error.failed", String.valueOf(e.getMessage())));
         }
     }
 }

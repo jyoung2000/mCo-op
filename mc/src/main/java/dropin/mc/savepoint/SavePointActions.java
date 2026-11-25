@@ -12,11 +12,12 @@ import dropin.mc.coop.HostSession;
 import dropin.mc.handoff.HostHandoff;
 import dropin.mc.host.HostSync;
 import dropin.mc.member.RecordApplier;
+import dropin.mc.menu.ui.DScreen;
+import dropin.mc.merge.ColdMerge;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.GenericMessageScreen;
-import net.minecraft.client.gui.screens.TitleScreen;
-import net.minecraft.client.server.IntegratedServer;
-import net.minecraft.network.chat.Component;
+import net.minecraft.client.gui.GuiMainMenu;
+import net.minecraft.client.resources.I18n;
+import net.minecraft.server.integrated.IntegratedServer;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -47,7 +48,7 @@ public final class SavePointActions {
 
     /** True if the game has a world open on this PC (the save point files of a hosted world go through the command). */
     public static boolean isOpen(Minecraft mc) {
-        return mc.getSingleplayerServer() != null;
+        return mc.getIntegratedServer() != null;
     }
 
     /** From the hosted world: a checkpoint, then every record the store does not have yet. Not the server thread. */
@@ -119,17 +120,18 @@ public final class SavePointActions {
         Path folder = sync.folder();
         CoopWorld world = sync.world();
         Point point = store(folder).find(name).orElseThrow(() -> new IOException("no save point named " + name));
-        mc.execute(() -> {
-            IntegratedServer server = mc.getSingleplayerServer();
+        mc.addScheduledTask(() -> {
+            IntegratedServer server = mc.getIntegratedServer();
             if (server == null) {
                 return;
             }
             HostHandoff.quitToReturn(mc, sync);
-            mc.setScreen(new GenericMessageScreen(Component.translatable(K + "restoring")));
+            mc.displayGuiScreen(new MessageScreen(I18n.format(K + "restoring")));
             Thread thread = new Thread(() -> {
                 try {
                     long deadline = System.currentTimeMillis() + CLOSE_TIMEOUT_MS;
-                    while (!server.isShutdown() || HostSession.current() != null) {
+                    // 1.12.2 port: isServerStopped() is set once stopServer has run (26.x isShutdown()).
+                    while (!server.isServerStopped() || HostSession.current() != null) {
                         if (System.currentTimeMillis() > deadline) {
                             throw new IOException("the world did not close");
                         }
@@ -139,12 +141,30 @@ public final class SavePointActions {
                     CoopLauncher.hostAfterHandoff(mc, world, folder);
                 } catch (Exception e) {
                     DropIn.LOGGER.error("Restoring save point '{}' of '{}' failed", point.name(), world.name(), e);
-                    mc.execute(() -> mc.setScreen(new TitleScreen()));
+                    mc.addScheduledTask(() -> mc.displayGuiScreen(new GuiMainMenu()));
                 }
             }, "dropin-coop-restore");
             thread.setDaemon(true);
             thread.start();
         });
+    }
+
+    /**
+     * 1.12.2 port: a screen with only a message (26.x {@code GenericMessageScreen}); Escape does nothing, the restore
+     * replaces it.
+     */
+    private static final class MessageScreen extends DScreen {
+        MessageScreen(String message) {
+            super(null, message);
+        }
+
+        @Override
+        protected void init() {
+        }
+
+        @Override
+        public void onClose() {
+        }
     }
 
     private static String fileName(String text) {
@@ -190,10 +210,10 @@ public final class SavePointActions {
         SavePoints points = store(folder);
         String base = fileName(world.name()) + "-" + point.name();
         String name = base;
-        for (int n = 2; Files.exists(mc.getLevelSource().getLevelPath(name)); n++) {
+        for (int n = 2; Files.exists(ColdMerge.levelPath(mc, name)); n++) {
             name = base + "-" + n;
         }
-        Path target = mc.getLevelSource().getLevelPath(name);
+        Path target = ColdMerge.levelPath(mc, name);
         Files.createDirectories(target);
         Manifest manifest = points.manifest(point);
         try (RecordApplier files = new RecordApplier(target)) {
