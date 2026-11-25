@@ -98,9 +98,9 @@ public final class MemberHandoff {
     /** Leaves the old host's session (if the game is still in it) and shows {@code screen}. Client thread. */
     private static void leave(Minecraft mc, Screen screen) {
         if (mc.level != null && mc.getSingleplayerServer() == null) {
-            mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE);
+            dropin.mc.compat.Compat.disconnectFromWorld(mc, dropin.mc.compat.Compat.DEFAULT_QUIT_MESSAGE);
         }
-        mc.gui.setScreen(screen);
+        mc.setScreen(screen);
     }
 
     private static void takeOver(Minecraft mc, CoopWorld world, LedgerEntry finalEntry) {
@@ -114,7 +114,7 @@ public final class MemberHandoff {
             if (!manifest.root().equals(finalEntry.root())) {
                 DropIn.LOGGER.error("The local copy of '{}' (root {}) is not the final checkpoint {} (root {}): not taking over",
                         world.name(), manifest.root(), finalEntry.seq(), finalEntry.root());
-                mc.execute(() -> mc.gui.setScreen(new HostChangingScreen(world, finalEntry.host())));
+                mc.execute(() -> mc.setScreen(new HostChangingScreen(world, finalEntry.host())));
                 lastRole = Role.FOLLOWER;
                 return;
             }
@@ -124,7 +124,7 @@ public final class MemberHandoff {
             CoopLauncher.hostAfterHandoff(mc, world, folder);
         } catch (Exception e) {
             DropIn.LOGGER.error("Could not take over '{}' as host", world.name(), e);
-            mc.execute(() -> mc.gui.setScreen(new HostChangingScreen(world, finalEntry.host())));
+            mc.execute(() -> mc.setScreen(new HostChangingScreen(world, finalEntry.host())));
         }
     }
 }

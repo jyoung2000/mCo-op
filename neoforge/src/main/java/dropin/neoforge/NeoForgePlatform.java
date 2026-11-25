@@ -17,7 +17,7 @@ public class NeoForgePlatform implements Agnos.Platform {
 
     @Override
     public boolean isClient() {
-        return FMLEnvironment.getDist() == Dist.CLIENT;
+        return FMLEnvironment.dist == Dist.CLIENT;
     }
 
     @Override
@@ -27,11 +27,11 @@ public class NeoForgePlatform implements Agnos.Platform {
 
     @Override
     public Path jarPath() {
-        return FMLLoader.getCurrent().getLoadingModList().getModFileById(E4mcClient.MOD_ID).getFile().getFilePath();
+        return FMLLoader.getLoadingModList().getModFileById(E4mcClient.MOD_ID).getFile().getFilePath();
     }
 
     @Override
     public boolean isDevelopmentEnvironment() {
-        return !FMLEnvironment.isProduction();
+        return !FMLEnvironment.production;
     }
 }

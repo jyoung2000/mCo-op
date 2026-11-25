@@ -52,7 +52,7 @@ public final class HostChangingScreen extends GenericMessageScreen {
         super.init();
         this.cancel = this.addRenderableWidget(Button.builder(CommonComponents.GUI_CANCEL, button -> {
             done = true;
-            this.minecraft.gui.setScreen(new TitleScreen());
+            this.minecraft.setScreen(new TitleScreen());
         }).bounds(this.width / 2 - 100, this.height / 2 + 24, 200, 20).build());
         if (!started) {
             started = true;

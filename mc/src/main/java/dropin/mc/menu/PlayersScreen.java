@@ -7,14 +7,12 @@ import dropin.mc.coop.CoopWorlds;
 import dropin.mc.policy.PolicyActions;
 import dropin.mc.policy.WorldPolicy;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.PlayerFaceExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.world.item.component.ResolvableProfile;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -128,7 +126,7 @@ public class PlayersScreen extends Screen {
 
     @Override
     public void onClose() {
-        this.minecraft.gui.setScreen(parent);
+        this.minecraft.setScreen(parent);
     }
 
     private Component line(Row row) {
@@ -158,24 +156,24 @@ public class PlayersScreen extends Screen {
     }
 
     @Override
-    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
-        super.extractRenderState(graphics, mouseX, mouseY, a);
-        graphics.centeredText(this.font, this.title, this.width / 2, 14, -1);
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
+        super.render(graphics, mouseX, mouseY, a);
+        graphics.drawCenteredString(this.font, this.title, this.width / 2, 14, -1);
         int left = Math.max(10, this.width / 2 - 150);
         int y = 36;
         if (rows.isEmpty()) {
-            graphics.centeredText(this.font, Component.translatable(K + "players.none"), this.width / 2, y, -6250336);
+            graphics.drawCenteredString(this.font, Component.translatable(K + "players.none"), this.width / 2, y, -6250336);
         }
         for (Row row : rows) {
             if (y > this.height - 74) {
                 break;
             }
             try {
-                PlayerFaceExtractor.extractRenderState(graphics, ResolvableProfile.createUnresolved(UUID.fromString(row.uuid())), left, y, 16);
+                Faces.draw(graphics, UUID.fromString(row.uuid()), left, y, 16);
             } catch (IllegalArgumentException e) {
                 // an unreadable uuid only loses the head
             }
-            graphics.text(this.font, line(row), left + 22, y + 4, -1);
+            graphics.drawString(this.font, line(row), left + 22, y + 4, -1);
             y += 20;
         }
     }

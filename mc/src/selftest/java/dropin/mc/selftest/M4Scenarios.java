@@ -186,15 +186,15 @@ final class M4Scenarios {
                     String text = SessionLine.text(info).getString();
                     require(text.contains("DevA") && text.contains("100"), "the status line reads '" + text + "'");
                     DropIn.LOGGER.info("Self-test: {} sees the order B, C; status line: {}", who.toUpperCase(), text);
-                    mc.gui.setScreen(new PauseScreen(true));
+                    mc.setScreen(new PauseScreen(true));
                 })
                 .step("the pause menu is drawn with the line", SHORT_TICKS, () -> {
                     failIfDisconnected(mc);
-                    require(mc.gui.screen() instanceof PauseScreen, "the screen is " + mc.gui.screen());
+                    require(mc.screen instanceof PauseScreen, "the screen is " + mc.screen);
                     return ++drawn[0] > 20;
                 })
                 .action("tell A", () -> {
-                    mc.gui.setScreen(null);
+                    mc.setScreen(null);
                     ctx.writeShared(who + "-ready", "ok");
                 });
     }
@@ -336,7 +336,7 @@ final class M4Scenarios {
                 })
                 .step("A closed its world and says why", WORLD_TICKS, () -> mc.getSingleplayerServer() == null && mc.level == null
                         && "Rival".equals(dropin.mc.handoff.HostHandoff.lastRivalClosed())
-                        && mc.gui.screen() instanceof net.minecraft.client.gui.screens.AlertScreen)
+                        && mc.screen instanceof net.minecraft.client.gui.screens.AlertScreen)
                 .action("no handoff, and the record is still the other session's", () -> {
                     require(HostSync.lastHandedTo() == null || HostSync.lastHandedTo().isEmpty(),
                             "A handed the world to " + HostSync.lastHandedTo());
@@ -356,10 +356,10 @@ final class M4Scenarios {
         int[] stayed = {0};
         return joinB(ctx, state, Map.of())
                 .step("copy complete", 2 * PEER_TICKS, copyComplete(mc, state))
-                .action("leave", () -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE))
+                .action("leave", () -> dropin.mc.compat.Compat.disconnectFromWorld(mc, dropin.mc.compat.Compat.DEFAULT_QUIT_MESSAGE))
                 .step("left", SHORT_TICKS, () -> mc.level == null)
                 .action("tell A", () -> {
-                    mc.gui.setScreen(new TitleScreen());
+                    mc.setScreen(new TitleScreen());
                     ctx.writeShared("b-left", "ok");
                 })
                 .step("A played a session without B and quit", 3 * WORLD_TICKS, () -> ctx.sharedExists("a-done"))
@@ -370,7 +370,7 @@ final class M4Scenarios {
                     require(before.size() > 3, "the copy has only " + before.size() + " files");
                     pressPlay(mc, state);
                 })
-                .step("the warning is shown", SHORT_TICKS, () -> CoopLauncher.staleWarning() != null && mc.gui.screen() instanceof ConfirmScreen)
+                .step("the warning is shown", SHORT_TICKS, () -> CoopLauncher.staleWarning() != null && mc.screen instanceof ConfirmScreen)
                 .action("it is about A's last session; Cancel", () -> {
                     RendezvousRecord record = CoopLauncher.staleWarning();
                     long seq = Long.parseLong(ctx.readShared("a-done"));
@@ -387,7 +387,7 @@ final class M4Scenarios {
                 .step("nothing was opened", SHORT_TICKS, () -> {
                     require(mc.getSingleplayerServer() == null && mc.level == null && HostSession.current() == null,
                             "the world was opened after Cancel");
-                    require(CoopLauncher.staleWarning() == null && !(mc.gui.screen() instanceof ConfirmScreen), "the warning is still shown");
+                    require(CoopLauncher.staleWarning() == null && !(mc.screen instanceof ConfirmScreen), "the warning is still shown");
                     return ++stayed[0] > 100;
                 })
                 .action("the copy is untouched", () -> {
@@ -400,7 +400,7 @@ final class M4Scenarios {
                     DropIn.LOGGER.info("Self-test: Cancel left all {} files of B's copy as they were", after.size());
                     pressPlay(mc, state);
                 })
-                .step("the warning is shown again", SHORT_TICKS, () -> CoopLauncher.staleWarning() != null && mc.gui.screen() instanceof ConfirmScreen)
+                .step("the warning is shown again", SHORT_TICKS, () -> CoopLauncher.staleWarning() != null && mc.screen instanceof ConfirmScreen)
                 .action("Play anyway", () -> CoopLauncher.answerStale(true))
                 .step("B hosts its older copy", WORLD_TICKS, () -> hosting(ctx))
                 .action("load the block's chunk", () -> command(mc, "forceload add 0 0"))

@@ -204,7 +204,7 @@ final class SavePointScenarios {
                         && mc.getSingleplayerServer().overworld().getBlockState(Scenarios.PROBE_POS).is(Blocks.GOLD_BLOCK))
                 .action("save and quit", () -> {
                     DropIn.LOGGER.info("Self-test: single-player world {} opened with the probe block", solo[0]);
-                    mc.disconnectFromWorld(net.minecraft.client.multiplayer.ClientLevel.DEFAULT_QUIT_MESSAGE);
+                    dropin.mc.compat.Compat.disconnectFromWorld(mc, dropin.mc.compat.Compat.DEFAULT_QUIT_MESSAGE);
                 })
                 .step("world closed", WORLD_TICKS, () -> mc.getSingleplayerServer() == null && mc.level == null);
     }

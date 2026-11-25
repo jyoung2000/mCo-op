@@ -92,7 +92,7 @@ public final class WorldPolicy {
     }
 
     public static String minecraftVersion() {
-        return SharedConstants.getCurrentVersion().name();
+        return SharedConstants.getCurrentVersion().getName();
     }
 
     /** {@code config/dropin/coop.json}: modMaxFileMB, modMaxTotalMB, modMaxFiles. */
@@ -316,9 +316,9 @@ public final class WorldPolicy {
             return enabled;
         }
         CompoundTag root = NbtIo.readCompressed(levelDat, NbtAccounter.unlimitedHeap());
-        ListTag list = root.getCompoundOrEmpty("Data").getCompoundOrEmpty("DataPacks").getListOrEmpty("Enabled");
+        ListTag list = dropin.mc.compat.Nbt.listOrEmpty(root.getCompound("Data").getCompound("DataPacks"), "Enabled");
         for (int i = 0; i < list.size(); i++) {
-            String name = list.getStringOr(i, "");
+            String name = dropin.mc.compat.Nbt.stringOr(list, i, "");
             if (name.startsWith("file/")) {
                 enabled.add(name);
             }

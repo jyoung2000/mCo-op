@@ -15,7 +15,7 @@ import dropin.mc.coop.StatusPing;
 import dropin.mc.member.SyncClient;
 import dropin.mc.menu.CoopActions;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
@@ -59,7 +59,7 @@ public final class HostLostScreen extends Screen {
     protected void init() {
         this.cancel = this.addRenderableWidget(Button.builder(CommonComponents.GUI_CANCEL, button -> {
             done = true;
-            this.minecraft.gui.setScreen(vanilla);
+            this.minecraft.setScreen(vanilla);
         }).bounds(this.width / 2 - 100, this.height / 2 + 24, 200, 20).build());
         if (!started) {
             started = true;
@@ -90,15 +90,15 @@ public final class HostLostScreen extends Screen {
     }
 
     @Override
-    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
-        super.extractRenderState(graphics, mouseX, mouseY, a);
-        graphics.centeredText(this.font, message, this.width / 2, this.height / 2 - 12, -1);
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
+        super.render(graphics, mouseX, mouseY, a);
+        graphics.drawCenteredString(this.font, message, this.width / 2, this.height / 2 - 12, -1);
     }
 
     private void show(Minecraft mc, Screen screen) {
         mc.execute(() -> {
-            if (mc.gui.screen() == this) {
-                mc.gui.setScreen(screen);
+            if (mc.screen == this) {
+                mc.setScreen(screen);
             }
         });
     }

@@ -15,7 +15,6 @@ import io.netty.channel.ChannelOption;
 import net.minecraft.client.multiplayer.resolver.ResolvedServerAddress;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.client.multiplayer.resolver.ServerNameResolver;
-import net.minecraft.server.network.EventLoopGroupHolder;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -54,8 +53,9 @@ public final class SyncConnector {
                 future = bootstrap.channel(DialtoneChannel.class).group(DialtoneAmbientSession.INSTANCE.group)
                         .connect(new DialtoneAddress(smuggled.ticket));
             } else {
-                EventLoopGroupHolder holder = EventLoopGroupHolder.remote(false);
-                future = bootstrap.channel(holder.channelCls()).group(holder.eventLoopGroup())
+                // 1.21.1 port: the game's own client worker group and channel class (Connection.connect, NIO).
+                future = bootstrap.channel(io.netty.channel.socket.nio.NioSocketChannel.class)
+                        .group(net.minecraft.network.Connection.NETWORK_WORKER_GROUP.get())
                         .option(ChannelOption.TCP_NODELAY, true)
                         .connect(socket.getAddress(), socket.getPort());
             }

@@ -70,7 +70,7 @@ public final class HostGate {
             }
             DropIn.LOGGER.info("The owner's mods or datapacks of '{}' differ from policy version {}: added {}, removed {}",
                     world.name(), policy.version(), added, removed);
-            mc.execute(() -> mc.gui.setScreen(new PolicyUpdateScreen(added, removed, !packsSame, !gameSame, () -> {
+            mc.execute(() -> mc.setScreen(new PolicyUpdateScreen(added, removed, !packsSame, !gameSame, () -> {
                 try {
                     PolicyActions.signUpdate(mc, world, folder, held, manifest);
                     retry.run();
@@ -128,6 +128,6 @@ public final class HostGate {
     }
 
     private static void alert(Minecraft mc, Runnable onCancel, Component message) {
-        mc.execute(() -> mc.gui.setScreen(new AlertScreen(onCancel, CoopWorldsScreen.TITLE, message)));
+        mc.execute(() -> mc.setScreen(new AlertScreen(onCancel, CoopWorldsScreen.TITLE, message)));
     }
 }

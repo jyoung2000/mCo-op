@@ -59,7 +59,7 @@ public final class ChunkStores {
         // A worker of an earlier session of this world that was never reported closed (a replaced class's close()
         // is not seen either) must not be asked for chunks again.
         STORES.values().removeIf(old -> old.dir().equals(folder));
-        STORES.put(worker, new Store(worker, info.dimension().identifier().toString(), kind, folder, root));
+        STORES.put(worker, new Store(worker, info.dimension().location().toString(), kind, folder, root));
         if (CoopWorldStore.readMarker(root).isPresent()) {
             TRACKED.add(root);
         }
@@ -74,7 +74,7 @@ public final class ChunkStores {
         Store store = STORES.get(worker);
         if (store != null && TRACKED.contains(store.worldRoot())) {
             DIRTY.computeIfAbsent(store.worldRoot(), root -> ConcurrentHashMap.newKeySet())
-                    .add(RecordKey.chunk(store.dim(), store.kind(), pos.x(), pos.z()));
+                    .add(RecordKey.chunk(store.dim(), store.kind(), pos.x, pos.z));
         }
     }
 

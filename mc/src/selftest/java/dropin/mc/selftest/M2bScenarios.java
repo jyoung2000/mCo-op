@@ -32,9 +32,9 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.Identifier;
-import net.minecraft.server.permissions.LevelBasedPermissionSet;
-import net.minecraft.server.players.NameAndId;
+import net.minecraft.resources.ResourceLocation;
+import dropin.mc.compat.LevelBasedPermissionSet;
+import com.mojang.authlib.GameProfile;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -140,7 +140,7 @@ final class M2bScenarios {
     }
 
     static boolean itemExists(String id) {
-        return BuiltInRegistries.ITEM.containsKey(Identifier.parse(id));
+        return BuiltInRegistries.ITEM.containsKey(ResourceLocation.parse(id));
     }
 
     static boolean zLoaded() {
@@ -177,12 +177,12 @@ final class M2bScenarios {
     }
 
     private static ModConsentScreen consent(Minecraft mc) {
-        return mc.gui.screen() instanceof ModConsentScreen screen ? screen : null;
+        return mc.screen instanceof ModConsentScreen screen ? screen : null;
     }
 
     /** True if an alert is up whose text is the given message (compared up to the message's first argument). */
     private static boolean alertSays(Minecraft mc, String key) {
-        Screen screen = mc.gui.screen();
+        Screen screen = mc.screen;
         if (!(screen instanceof AlertScreen)) {
             return false;
         }
@@ -315,9 +315,9 @@ final class M2bScenarios {
         Minecraft mc = ctx.mc();
         return runner
                 .action("tell A", () -> ctx.writeShared(B_COMPLETE, "ok"))
-                .step("A quit", PEER_TICKS, () -> mc.gui.screen() instanceof DisconnectedScreen
-                        || (mc.level == null && mc.gui.screen() instanceof TitleScreen))
-                .action("title screen", () -> mc.gui.setScreen(new TitleScreen()))
+                .step("A quit", PEER_TICKS, () -> mc.screen instanceof DisconnectedScreen
+                        || (mc.level == null && mc.screen instanceof TitleScreen))
+                .action("title screen", () -> mc.setScreen(new TitleScreen()))
                 .step("A closed the world", WORLD_TICKS, () -> ctx.sharedExists(A_QUIT));
     }
 
@@ -497,10 +497,10 @@ final class M2bScenarios {
                     failIfDisconnected(mc);
                     return consent(mc) != null;
                 })
-                .action("Show list", () -> mc.gui.setScreen(new ModsScreen(consent(mc), state.world.worldId())))
-                .step("the Mods tab is open", SHORT_TICKS, () -> mc.gui.screen() instanceof ModsScreen)
+                .action("Show list", () -> mc.setScreen(new ModsScreen(consent(mc), state.world.worldId())))
+                .step("the Mods tab is open", SHORT_TICKS, () -> mc.screen instanceof ModsScreen)
                 .action("X is missing here, Z is extra here", () -> {
-                    List<ModsScreen.Row> rows = ((ModsScreen) mc.gui.screen()).rows();
+                    List<ModsScreen.Row> rows = ((ModsScreen) mc.screen).rows();
                     require(rows.size() == 2, "rows: " + rows);
                     ModsScreen.Row x = rows.get(0);
                     ModsScreen.Row z = rows.get(1);
@@ -713,15 +713,15 @@ final class M2bScenarios {
                 .action("rights on B's server: owner yes, host no", () -> {
                     IntegratedServer server = mc.getSingleplayerServer();
                     Policy policy = HostSync.current().held().policy();
-                    NameAndId owner = new NameAndId(UUID.fromString(policy.ownerUuid()), policy.ownerName());
-                    NameAndId host = new NameAndId(mc.getUser().getProfileId(), mc.getUser().getName());
-                    require(server.getProfilePermissions(owner).equals(LevelBasedPermissionSet.OWNER), "the owner has " + server.getProfilePermissions(owner));
-                    require(server.getProfilePermissions(host).equals(LevelBasedPermissionSet.ALL), "the host has " + server.getProfilePermissions(host));
+                    GameProfile owner = new GameProfile(UUID.fromString(policy.ownerUuid()), policy.ownerName());
+                    GameProfile host = new GameProfile(mc.getUser().getProfileId(), mc.getUser().getName());
+                    require(server.getProfilePermissions(owner) == (LevelBasedPermissionSet.OWNER), "the owner has " + server.getProfilePermissions(owner));
+                    require(server.getProfilePermissions(host) == (LevelBasedPermissionSet.ALL), "the host has " + server.getProfilePermissions(host));
                 })
                 .action("a banned UUID is refused at login", () -> {
                     IntegratedServer server = mc.getSingleplayerServer();
                     Component refusal = server.getPlayerList().canPlayerLogin(new InetSocketAddress("127.0.0.1", 1),
-                            new NameAndId(UUID.fromString(BANNED_UUID), "Banned"));
+                            new GameProfile(UUID.fromString(BANNED_UUID), "Banned"));
                     require(refusal != null, "the banned UUID may log in");
                     require(refusal.getString().equals(Component.translatable(K + "policy.banned").getString()), "refusal: " + refusal.getString());
                     require(HostSync.banMessage(server, UUID.fromString(HostSync.current().held().policy().ownerUuid())) == null, "the owner is banned");
@@ -754,17 +754,17 @@ final class M2bScenarios {
         StepRunner runner = restarted(ctx, state)
                 .action("Y is loaded", () -> require(itemExists(ITEM_X) && itemExists(ITEM_Y), "the owner was not restarted with X and Y"))
                 .action("press Play", () -> pressPlay(mc, state))
-                .step("asked: Update this world's mod list?", WORLD_TICKS, () -> mc.gui.screen() instanceof PolicyUpdateScreen)
+                .step("asked: Update this world's mod list?", WORLD_TICKS, () -> mc.screen instanceof PolicyUpdateScreen)
                 .action("the screen lists Y as added", () -> {
-                    PolicyUpdateScreen screen = (PolicyUpdateScreen) mc.gui.screen();
+                    PolicyUpdateScreen screen = (PolicyUpdateScreen) mc.screen;
                     require(screen.addedMods().equals(List.of(JAR_Y)) && screen.removedMods().isEmpty(),
                             "added " + screen.addedMods() + ", removed " + screen.removedMods());
                     require(!screen.datapacksChanged(), "the datapacks are said to have changed");
                 })
-                .action("Yes", () -> ((PolicyUpdateScreen) mc.gui.screen()).accept())
+                .action("Yes", () -> ((PolicyUpdateScreen) mc.screen).accept())
                 .step("B's session ended with the mods-changed screen", PEER_TICKS, () -> ctx.sharedExists("b-changed"))
                 .step("A is out of B's session", SHORT_TICKS, () -> mc.level == null)
-                .action("title screen", () -> mc.gui.setScreen(new TitleScreen()));
+                .action("title screen", () -> mc.setScreen(new TitleScreen()));
         pause(runner, "B's host announcement is withdrawn", 100)
                 .action("press Play", () -> pressPlay(mc, state))
                 // Since M4 (DESIGN 4.4 step 3): B's session went on after A's copy was last updated and B is gone,
@@ -813,7 +813,7 @@ final class M2bScenarios {
                 })
                 .step("A is hosting with the new mods", WORLD_TICKS + PEER_TICKS, () -> ctx.sharedExists("a2-hosting"))
                 .action("title screen, press Play without updating", () -> {
-                    mc.gui.setScreen(new TitleScreen());
+                    mc.setScreen(new TitleScreen());
                     pressPlay(mc, state);
                 });
         consentShown(runner, mc, "kept out: asked for the mods instead of connecting")

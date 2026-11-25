@@ -63,7 +63,7 @@ public final class HostHandoff {
             return true;
         }
         state = State.PREPARING;
-        mc.gui.setScreen(new GenericMessageScreen(Component.translatable(K + "preparing")));
+        mc.setScreen(new GenericMessageScreen(Component.translatable(K + "preparing")));
         Thread thread = new Thread(() -> prepare(mc, sync, message), "dropin-coop-handoff");
         thread.setDaemon(true);
         thread.start();
@@ -93,12 +93,12 @@ public final class HostHandoff {
             confirm = () -> quit(mc, sync, null, message);
             cancel = () -> {
                 state = State.IDLE;
-                mc.gui.setScreen(null);
+                mc.setScreen(null);
             };
             state = State.CONFIRMING;
             Component who = standing.bestName().isEmpty() ? Component.translatable(K + "a_friend")
                     : Component.literal(standing.bestName());
-            mc.gui.setScreen(new ConfirmScreen(yes -> answer(yes), Component.translatable("menu.dropin_coop.title"),
+            mc.setScreen(new ConfirmScreen(yes -> answer(yes), Component.translatable("menu.dropin_coop.title"),
                     Component.translatable(K + "nobody", who, standing.bestPercent())));
         });
     }
@@ -108,7 +108,7 @@ public final class HostHandoff {
         sync.returning();
         passThrough = true;
         try {
-            mc.disconnectFromWorld(net.minecraft.client.multiplayer.ClientLevel.DEFAULT_QUIT_MESSAGE);
+            dropin.mc.compat.Compat.disconnectFromWorld(mc, dropin.mc.compat.Compat.DEFAULT_QUIT_MESSAGE);
         } finally {
             passThrough = false;
         }
@@ -140,12 +140,12 @@ public final class HostHandoff {
         state = State.IDLE;
         passThrough = true;
         try {
-            mc.disconnectFromWorld(Component.translatable("text.dropin_coop.host.rival_closing"));
+            dropin.mc.compat.Compat.disconnectFromWorld(mc, Component.translatable("text.dropin_coop.host.rival_closing"));
         } finally {
             passThrough = false;
         }
-        mc.gui.setScreen(new net.minecraft.client.gui.screens.AlertScreen(
-                () -> mc.gui.setScreen(new dropin.mc.menu.CoopWorldsScreen(new net.minecraft.client.gui.screens.TitleScreen())),
+        mc.setScreen(new net.minecraft.client.gui.screens.AlertScreen(
+                () -> mc.setScreen(new dropin.mc.menu.CoopWorldsScreen(new net.minecraft.client.gui.screens.TitleScreen())),
                 Component.translatable("menu.dropin_coop.title"), Component.translatable("text.dropin_coop.host.rival_closed", rivalName)));
     }
 
@@ -157,7 +157,7 @@ public final class HostHandoff {
         sync.quitDecided(successorUuid);
         passThrough = true;
         try {
-            mc.disconnectFromWorld(message);
+            dropin.mc.compat.Compat.disconnectFromWorld(mc, message);
         } finally {
             passThrough = false;
         }

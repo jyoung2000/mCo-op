@@ -3,7 +3,7 @@ package dropin.mixin.mc;
 import dropin.mc.menu.CoopActions;
 import dropin.mc.menu.InviteScreen;
 import dropin.mc.menu.SessionLine;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.AlertScreen;
 import net.minecraft.client.gui.screens.PauseScreen;
@@ -34,8 +34,8 @@ public abstract class PauseScreenMixin extends Screen {
     private long dropin$lineAt;
 
     /** MILESTONES M4: in a co-op session the pause menu says who hosts, how complete the copy is, the path and the checkpoint age. */
-    @Inject(method = "extractRenderState", at = @At("TAIL"))
-    private void dropin$sessionLine(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a, CallbackInfo ci) {
+    @Inject(method = "render", at = @At("TAIL"))
+    private void dropin$sessionLine(GuiGraphics graphics, int mouseX, int mouseY, float a, CallbackInfo ci) {
         if (!this.showPauseMenu) {
             return;
         }
@@ -46,7 +46,7 @@ public abstract class PauseScreenMixin extends Screen {
             this.dropin$line = info == null ? null : SessionLine.text(info);
         }
         if (this.dropin$line != null) {
-            graphics.centeredText(this.font, this.dropin$line, this.width / 2, 24, -1);
+            graphics.drawCenteredString(this.font, this.dropin$line, this.width / 2, 24, -1);
         }
     }
 
@@ -59,9 +59,9 @@ public abstract class PauseScreenMixin extends Screen {
         this.addRenderableWidget(Button.builder(label, button -> {
             CoopActions.Outcome outcome = CoopActions.makeCoop(this.minecraft);
             if (outcome.ok()) {
-                this.minecraft.gui.setScreen(new InviteScreen(null, outcome.world()));
+                this.minecraft.setScreen(new InviteScreen(null, outcome.world()));
             } else {
-                this.minecraft.gui.setScreen(new AlertScreen(() -> this.minecraft.gui.setScreen(null), label, outcome.message()));
+                this.minecraft.setScreen(new AlertScreen(() -> this.minecraft.setScreen(null), label, outcome.message()));
             }
         }).bounds(this.width / 2 - 102, this.height - 26, 204, 20).build());
     }

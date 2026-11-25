@@ -1,11 +1,12 @@
 plugins {
     id 'multiloader-loader'
-    id 'net.fabricmc.fabric-loom'
+    id 'net.fabricmc.fabric-loom-remap'
 }
 dependencies {
     minecraft("com.mojang:minecraft:${minecraft_version}")
-    implementation("net.fabricmc:fabric-loader:${fabric_loader_version}")
-    implementation("net.fabricmc.fabric-api:fabric-api:${fabric_version}")
+    mappings(loom.officialMojangMappings())
+    modImplementation("net.fabricmc:fabric-loader:${fabric_loader_version}")
+    modImplementation("net.fabricmc.fabric-api:fabric-api:${fabric_version}")
     runtimeOnly(files(configurations.bundled))
 }
 
@@ -57,4 +58,15 @@ sourceSets.configureEach {
             }
         }
     }
+}
+
+// The remapped (intermediary) jar: the Fabric part of the merged mod jar (1.21.1 is obfuscated, see root build.gradle).
+configurations {
+    remappedContents {
+        canBeResolved = false
+        canBeConsumed = true
+    }
+}
+artifacts {
+    remappedContents(tasks.named('remapJar'))
 }

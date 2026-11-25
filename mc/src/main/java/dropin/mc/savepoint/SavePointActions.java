@@ -125,7 +125,7 @@ public final class SavePointActions {
                 return;
             }
             HostHandoff.quitToReturn(mc, sync);
-            mc.gui.setScreen(new GenericMessageScreen(Component.translatable(K + "restoring")));
+            mc.setScreen(new GenericMessageScreen(Component.translatable(K + "restoring")));
             Thread thread = new Thread(() -> {
                 try {
                     long deadline = System.currentTimeMillis() + CLOSE_TIMEOUT_MS;
@@ -139,7 +139,7 @@ public final class SavePointActions {
                     CoopLauncher.hostAfterHandoff(mc, world, folder);
                 } catch (Exception e) {
                     DropIn.LOGGER.error("Restoring save point '{}' of '{}' failed", point.name(), world.name(), e);
-                    mc.execute(() -> mc.gui.setScreen(new TitleScreen()));
+                    mc.execute(() -> mc.setScreen(new TitleScreen()));
                 }
             }, "dropin-coop-restore");
             thread.setDaemon(true);

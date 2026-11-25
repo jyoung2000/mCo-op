@@ -27,7 +27,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.server.permissions.LevelBasedPermissionSet;
+import dropin.mc.compat.LevelBasedPermissionSet;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.storage.LevelResource;
 
@@ -242,7 +242,7 @@ public final class HostSync implements SyncServerSession.Host {
             unsynced = new Unsynced(server, world);
             String reason = e.getMessage() == null ? e.toString() : e.getMessage();
             net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
-            mc.execute(() -> mc.gui.hud.getChat().addClientSystemMessage(net.minecraft.network.chat.Component
+            mc.execute(() -> mc.gui.getChat().addMessage(net.minecraft.network.chat.Component
                     .translatable("text.dropin_coop.sync.start_failed", reason).withStyle(net.minecraft.ChatFormatting.RED)));
         }
     }
@@ -1050,7 +1050,7 @@ public final class HostSync implements SyncServerSession.Host {
     }
 
     /** What the policy says about a player's command rights on this server, or null to leave it to the game. */
-    public static LevelBasedPermissionSet permissions(MinecraftServer server, java.util.UUID id) {
+    public static Integer permissions(MinecraftServer server, java.util.UUID id) {
         HostSync sync = current;
         WorldPolicy.Held policy = sync == null || sync.server != server ? null : sync.held;
         if (policy == null) {

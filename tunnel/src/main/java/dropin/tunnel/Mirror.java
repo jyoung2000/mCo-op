@@ -107,7 +107,7 @@ public class Mirror {
                          InvocationTargetException | ClassCastException ignored) {}
             }
         } else {
-            return new ClickEvent.RunCommand(command);
+            return new ClickEvent(ClickEvent.Action.RUN_COMMAND, command);
         }
         throw new RuntimeException("Could not locate any way to make a ClickEvent!");
     }
@@ -123,7 +123,7 @@ public class Mirror {
                          InvocationTargetException | ClassCastException ignored) {}
             }
         } else {
-            return new ClickEvent.CopyToClipboard(text);
+            return new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, text);
         }
         throw new RuntimeException("Could not locate any way to make a ClickEvent!");
     }
@@ -139,7 +139,7 @@ public class Mirror {
                          InvocationTargetException | ClassCastException ignored) {}
             }
         } else {
-            return new HoverEvent.ShowText(text);
+            return new HoverEvent(HoverEvent.Action.SHOW_TEXT, text);
         }
         throw new RuntimeException("Could not locate any way to make a ClickEvent!");
     }
@@ -283,6 +283,6 @@ public class Mirror {
     }
 
     public static void addMessage(Component message) {
-        Minecraft.getInstance().execute(() -> Minecraft.getInstance().gui.hud.getChat().addClientSystemMessage(message));
+        Minecraft.getInstance().execute(() -> Minecraft.getInstance().gui.getChat().addMessage(message));
     }
 }

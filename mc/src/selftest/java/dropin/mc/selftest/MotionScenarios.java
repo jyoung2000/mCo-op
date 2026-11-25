@@ -11,11 +11,11 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntitySpawnReason;
-import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.MobSpawnType;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.animal.cow.Cow;
-import net.minecraft.world.entity.vehicle.minecart.Minecart;
+import net.minecraft.world.entity.animal.Cow;
+import net.minecraft.world.entity.vehicle.Minecart;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
@@ -347,14 +347,14 @@ final class MotionScenarios {
 
         // 1. A minecart: pushed once, driven by powered rails, braked at the end.
         runner = phase(runner, ctx, CART, 10.0, 0, (server, level, host) -> {
-            Minecart cart = EntityTypes.MINECART.spawn(level, new BlockPos(1, Y, 4), EntitySpawnReason.COMMAND);
+            Minecart cart = EntityType.MINECART.spawn(level, new BlockPos(1, Y, 4), MobSpawnType.COMMAND);
             cart.setDeltaMovement(0.3, 0.0, 0.0);
             return cart;
         });
 
         // 2. Path finding: a cow walks to the player who holds wheat.
         runner = phase(runner, ctx, LED, 3.0, 0, (server, level, host) -> {
-            Cow spawned = EntityTypes.COW.spawn(level, new BlockPos(11, Y, -5), EntitySpawnReason.COMMAND);
+            Cow spawned = EntityType.COW.spawn(level, new BlockPos(11, Y, -5), MobSpawnType.COMMAND);
             spawned.setBaby(false);
             spawned.setPersistenceRequired();
             host.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.WHEAT));
@@ -366,7 +366,7 @@ final class MotionScenarios {
         runner = phase(runner, ctx, FLEE, 2.0, 100, (server, level, host) -> {
             host.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
             Cow hit = (Cow) level.getEntity(cow[0]);
-            require(hit.hurtServer(level, level.damageSources().playerAttack(host), 1.0f), "the hit did no damage");
+            require(hit.hurt(level.damageSources().playerAttack(host), 1.0f), "the hit did no damage");
             return hit;
         });
 

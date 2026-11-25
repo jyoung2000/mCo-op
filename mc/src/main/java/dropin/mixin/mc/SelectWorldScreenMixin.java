@@ -28,14 +28,9 @@ public abstract class SelectWorldScreenMixin extends Screen {
     private void dropin$addCoopButton(CallbackInfo ci) {
         int width = Math.min(96, this.font.width(CoopWorldsScreen.TITLE) + 12);
         dropin$coopButton = this.addRenderableWidget(Button.builder(CoopWorldsScreen.TITLE,
-                button -> this.minecraft.gui.setScreen(new CoopWorldsScreen(this)))
+                button -> this.minecraft.setScreen(new CoopWorldsScreen(this)))
                 .bounds(this.width - width - 4, 2, width, 18).build());
     }
 
-    @Inject(method = "repositionElements", at = @At("TAIL"))
-    private void dropin$moveCoopButton(CallbackInfo ci) {
-        if (dropin$coopButton != null) {
-            dropin$coopButton.setX(this.width - dropin$coopButton.getWidth() - 4);
-        }
-    }
+    // 1.21.1 port: a resize rebuilds the widgets (Screen.repositionElements -> init), which places the button anew.
 }

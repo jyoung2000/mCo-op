@@ -2,7 +2,6 @@ package dropin.mc.coop;
 
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.multiplayer.ServerStatusPinger;
-import net.minecraft.server.network.EventLoopGroupHolder;
 
 /**
  * A blocking Minecraft status ping, for background threads. The address is resolved the way the game
@@ -40,7 +39,7 @@ public final class StatusPing {
                 net.minecraft.client.multiplayer.resolver.ServerAddress.parseString(address);
         java.net.InetAddress ip;
         try {
-            ip = java.net.InetAddress.ofLiteral(parsed.getHost());
+            ip = com.google.common.net.InetAddresses.forString(parsed.getHost());
         } catch (IllegalArgumentException notAnIp) {
             return true;
         }
@@ -63,7 +62,7 @@ public final class StatusPing {
         try {
             pinger.pingServer(data, () -> {
             }, () -> {
-            }, EventLoopGroupHolder.remote(false));
+            });
             long started = System.currentTimeMillis();
             long deadline = started + timeoutMillis;
             // Seen on this project's test machine: now and then a status connection is made and never answered,
@@ -75,7 +74,7 @@ public final class StatusPing {
                 ServerData answered = data.players != null ? data : second != null && second.players != null ? second : null;
                 if (answered != null) {
                     java.util.List<Player> list = new java.util.ArrayList<>();
-                    answered.players.sample().forEach(player -> list.add(new Player(player.id().toString(), player.name())));
+                    answered.players.sample().forEach(player -> list.add(new Player(player.getId().toString(), player.getName())));
                     if (answered == second) {
                         dropin.mc.DropIn.LOGGER.info("The first status ping of {} got no answer; the second did", address);
                     }
@@ -85,7 +84,7 @@ public final class StatusPing {
                     second = new ServerData("dropin", address, ServerData.Type.OTHER);
                     pinger.pingServer(second, () -> {
                     }, () -> {
-                    }, EventLoopGroupHolder.remote(false));
+                    });
                 }
                 Thread.sleep(50);
             }

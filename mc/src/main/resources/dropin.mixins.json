@@ -1,13 +1,14 @@
 {
   "required": true,
   "package": "dropin.mixin",
-  "compatibilityLevel": "JAVA_25",
+  "compatibilityLevel": "JAVA_21",
   "minVersion": "0.8",
   "mixins": [
     "mc.IOWorkerMixin",
     "mc.MinecraftServerStopMixin",
     "mc.PlayerListBanMixin",
     "mc.PlayerListOwnDataMixin",
+    "mc.RegionFileStorageAccess",
     "tunnel.BanListCommandsMixin",
     "tunnel.BanPlayerCommandsMixin",
     "tunnel.ConnectionMixin",
@@ -25,7 +26,7 @@
   "client": [
     "mc.ClientCommonPacketListenerImplMixin",
     "mc.CommandsMixin",
-    "mc.IntegratedServerFocusMixin",
+    "mc.IntegratedServerGameModeMixin",
     "mc.IntegratedServerNewCoopMixin",
     "mc.IntegratedServerPermissionsMixin",
     "mc.MinecraftDisconnectMixin",

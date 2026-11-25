@@ -205,12 +205,12 @@ final class PerfScenarios {
         StepRunner runner = dev(base(ctx), SWITCHES)
                 .action("create a normal-terrain world", () -> {
                     LevelSettings settings = new LevelSettings(WORLD_ID, GameType.CREATIVE,
-                            new LevelSettings.DifficultySettings(Difficulty.PEACEFUL, false, false), true,
+                            false, Difficulty.PEACEFUL, true, new net.minecraft.world.level.GameRules(),
                             WorldDataConfiguration.DEFAULT);
                     mc.createWorldOpenFlows().createFreshLevel(WORLD_ID, settings, new WorldOptions(Scenarios.SEED, true, false),
                             registries -> registries.lookupOrThrow(Registries.WORLD_PRESET)
                                     .getOrThrow(WorldPresets.NORMAL).value().createWorldDimensions(),
-                            mc.gui.screen());
+                            mc.screen);
                 })
                 .step("world loaded", 2 * WORLD_TICKS, () -> inWorld(mc) && mc.getSingleplayerServer() != null)
                 .action("force-load 512 chunks", () -> {

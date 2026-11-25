@@ -16,7 +16,6 @@ import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.network.EventLoopGroupHolder;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.LevelSettings;
@@ -174,13 +173,13 @@ final class Scenarios {
                 .step("main menu", STARTUP_TICKS, () -> atMainMenu(mc))
                 .action("create world", () -> {
                     LevelSettings settings = new LevelSettings(WORLD_ID, GameType.CREATIVE,
-                            new LevelSettings.DifficultySettings(Difficulty.PEACEFUL, false, false), true,
+                            false, Difficulty.PEACEFUL, true, new net.minecraft.world.level.GameRules(),
                             WorldDataConfiguration.DEFAULT);
                     WorldOptions options = new WorldOptions(SEED, false, false);
                     mc.createWorldOpenFlows().createFreshLevel(WORLD_ID, settings, options,
                             registries -> registries.lookupOrThrow(Registries.WORLD_PRESET)
                                     .getOrThrow(WorldPresets.FLAT).value().createWorldDimensions(),
-                            mc.gui.screen());
+                            mc.screen);
                 })
                 .step("world loaded", WORLD_TICKS, () -> inWorld(mc) && mc.getSingleplayerServer() != null)
                 .action("force-load probe chunk", () -> {
@@ -190,7 +189,7 @@ final class Scenarios {
                 })
                 .action("publish to LAN", () -> {
                     IntegratedServer server = mc.getSingleplayerServer();
-                    if (!server.publishServer(MinecraftServer.MultiplayerScope.LAN, true, ctx.port())) {
+                    if (!server.publishServer(null, true, ctx.port())) {
                         throw new IllegalStateException("publishServer returned false for port " + ctx.port());
                     }
                 });
@@ -257,7 +256,7 @@ final class Scenarios {
         return new StepRunner()
                 .step("main menu", STARTUP_TICKS, () -> atMainMenu(mc))
                 .step("host port open", STARTUP_TICKS, new PortProbe(ctx.port())::tick)
-                .action("send status ping", () -> pinger.pingServer(data, () -> {}, () -> {}, EventLoopGroupHolder.remote(false)))
+                .action("send status ping", () -> pinger.pingServer(data, () -> {}, () -> {}))
                 .step("status response", SHORT_TICKS, () -> {
                     pinger.tick();
                     return data.players != null;
@@ -276,15 +275,15 @@ final class Scenarios {
     // ---- helpers --------------------------------------------------------------------------------
 
     static boolean atMainMenu(Minecraft mc) {
-        return mc.gui.overlay() == null && mc.gui.screen() != null && mc.level == null;
+        return mc.getOverlay() == null && mc.screen != null && mc.level == null;
     }
 
     static boolean inWorld(Minecraft mc) {
-        return mc.player != null && mc.level != null && mc.gui.overlay() == null;
+        return mc.player != null && mc.level != null && mc.getOverlay() == null;
     }
 
     static void failIfDisconnected(Minecraft mc) {
-        Screen screen = mc.gui.screen();
+        Screen screen = mc.screen;
         if (screen instanceof DisconnectedScreen) {
             throw new IllegalStateException("disconnected: " + screen.getTitle().getString());
         }

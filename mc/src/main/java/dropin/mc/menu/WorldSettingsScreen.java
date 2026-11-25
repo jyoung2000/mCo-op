@@ -3,7 +3,7 @@ package dropin.mc.menu;
 import dropin.core.world.CoopWorld;
 import dropin.mc.policy.WorldPolicy;
 import dropin.mc.savepoint.SavePointActions;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
@@ -35,9 +35,9 @@ public class WorldSettingsScreen extends Screen {
     protected void init() {
         int x = this.width / 2 - 100;
         int y = Math.max(30, this.height / 2 - 96);
-        button(K + "settings.players", x, y, true, () -> this.minecraft.gui.setScreen(new PlayersScreen(this, world.worldId())));
+        button(K + "settings.players", x, y, true, () -> this.minecraft.setScreen(new PlayersScreen(this, world.worldId())));
         button(K + "settings.savepoints", x, y + 24, folder != null,
-                () -> this.minecraft.gui.setScreen(new SavePointsScreen(this, world, folder)));
+                () -> this.minecraft.setScreen(new SavePointsScreen(this, world, folder)));
         button(K + "settings.backups", x, y + 48, folder != null, () -> open(SavePointActions.backupsDir(folder)));
         button(K + "settings.mods_folder", x, y + 72, true, () -> open(WorldPolicy.modsDir()));
         button(K + "settings.datapacks", x, y + 96, folder != null, () -> open(folder.resolve("datapacks")));
@@ -79,7 +79,7 @@ public class WorldSettingsScreen extends Screen {
     private void open(Path dir) {
         try {
             java.nio.file.Files.createDirectories(dir);
-            com.mojang.blaze3d.Blaze3D.openPath(dir);
+            net.minecraft.Util.getPlatform().openPath(dir);
         } catch (java.io.IOException | RuntimeException e) {
             notice = Component.literal(String.valueOf(e.getMessage()));
         }
@@ -87,13 +87,13 @@ public class WorldSettingsScreen extends Screen {
 
     @Override
     public void onClose() {
-        this.minecraft.gui.setScreen(parent);
+        this.minecraft.setScreen(parent);
     }
 
     @Override
-    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
-        super.extractRenderState(graphics, mouseX, mouseY, a);
-        graphics.centeredText(this.font, Component.translatable(K + "settings.title", world.name()), this.width / 2, 14, -1);
-        graphics.centeredText(this.font, notice, this.width / 2, this.height - 40, -9216);
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
+        super.render(graphics, mouseX, mouseY, a);
+        graphics.drawCenteredString(this.font, Component.translatable(K + "settings.title", world.name()), this.width / 2, 14, -1);
+        graphics.drawCenteredString(this.font, notice, this.width / 2, this.height - 40, -9216);
     }
 }

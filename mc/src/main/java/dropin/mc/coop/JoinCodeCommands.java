@@ -109,7 +109,7 @@ public final class JoinCodeCommands {
     private static MutableComponent code(CoopWorld world) {
         String code = world.invite().encode();
         return Component.literal(code).withStyle(style -> style.withColor(ChatFormatting.GREEN).withUnderlined(true)
-                .withClickEvent(new ClickEvent.CopyToClipboard(code))
-                .withHoverEvent(new HoverEvent.ShowText(Component.translatable(K + "click_to_copy"))));
+                .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, code))
+                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.translatable(K + "click_to_copy"))));
     }
 }

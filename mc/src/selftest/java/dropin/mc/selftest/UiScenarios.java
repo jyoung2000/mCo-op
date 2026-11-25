@@ -12,7 +12,6 @@ import dropin.mc.menu.InviteScreen;
 import dropin.mc.menu.JoinInviteScreen;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.TitleScreen;
-import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,7 +23,7 @@ import dropin.mc.selftest.M1Scenarios.State;
 import dropin.mc.selftest.Scenarios.Context;
 import net.minecraft.client.Minecraft;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.server.permissions.LevelBasedPermissionSet;
+import dropin.mc.compat.LevelBasedPermissionSet;
 
 import java.util.List;
 import java.util.Map;
@@ -65,23 +64,24 @@ final class UiScenarios {
     /** True if a chat line has this text and carries the code as a click-to-copy part. */
     @SuppressWarnings("unchecked")
     private static boolean chatHas(Minecraft mc, String text, String code) {
-        List<net.minecraft.client.multiplayer.chat.GuiMessage> messages;
+        List<net.minecraft.client.GuiMessage> messages;
         try {
             java.lang.reflect.Field field = net.minecraft.client.gui.components.ChatComponent.class.getDeclaredField("allMessages");
             field.setAccessible(true);
-            messages = List.copyOf((List<net.minecraft.client.multiplayer.chat.GuiMessage>) field.get(mc.gui.hud.getChat()));
+            messages = List.copyOf((List<net.minecraft.client.GuiMessage>) field.get(mc.gui.getChat()));
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException("cannot read the chat", e);
         }
-        for (net.minecraft.client.multiplayer.chat.GuiMessage message : messages) {
+        for (net.minecraft.client.GuiMessage message : messages) {
             Component content = message.content();
             if (!content.getString().contains(text) || !content.getString().contains(code)) {
                 continue;
             }
             boolean[] copies = {false};
             content.<Object>visit((style, part) -> {
-                if (style.getClickEvent() instanceof net.minecraft.network.chat.ClickEvent.CopyToClipboard copy
-                        && copy.value().equals(code) && part.equals(code)) {
+                net.minecraft.network.chat.ClickEvent copy = style.getClickEvent();
+                if (copy != null && copy.getAction() == net.minecraft.network.chat.ClickEvent.Action.COPY_TO_CLIPBOARD
+                        && copy.getValue().equals(code) && part.equals(code)) {
                     copies[0] = true;
                 }
                 return java.util.Optional.empty();
@@ -163,13 +163,13 @@ final class UiScenarios {
                 .action("B is a plain member", () -> {
                     String me = mc.getUser().getProfileId().toString();
                     for (ServerPlayer player : mc.getSingleplayerServer().getPlayerList().getPlayers()) {
-                        if (!player.getGameProfile().id().toString().equals(me)) {
-                            b[0] = player.getGameProfile().id().toString();
+                        if (!player.getGameProfile().getId().toString().equals(me)) {
+                            b[0] = player.getGameProfile().getId().toString();
                         }
                     }
                     require(b[0] != null, "B is not on the server");
-                    LevelBasedPermissionSet before = HostSync.permissions(mc.getSingleplayerServer(), UUID.fromString(b[0]));
-                    require(before != LevelBasedPermissionSet.ADMIN && before != LevelBasedPermissionSet.OWNER, "B already has admin rights");
+                    Integer before = HostSync.permissions(mc.getSingleplayerServer(), UUID.fromString(b[0]));
+                    require(!java.util.Objects.equals(before, LevelBasedPermissionSet.ADMIN) && !java.util.Objects.equals(before, LevelBasedPermissionSet.OWNER), "B already has admin rights");
                     require(HostSync.permissions(mc.getSingleplayerServer(), UUID.fromString(me)) == LevelBasedPermissionSet.OWNER,
                             "the owner does not have owner rights");
                 })
@@ -233,7 +233,7 @@ final class UiScenarios {
      * The pig the host spawned for this run, on this client's screen. By its id: the self-test world is kept
      * between runs, so pigs of earlier runs may still be around, and each client would pick a different one.
      */
-    private static net.minecraft.world.entity.animal.pig.Pig pig(Minecraft mc) {
+    private static net.minecraft.world.entity.animal.Pig pig(Minecraft mc) {
         try {
             if (pigId == null && shared.sharedExists("pig-id")) {
                 pigId = shared.readShared("pig-id").trim();
@@ -243,7 +243,7 @@ final class UiScenarios {
         }
         if (mc.level != null && pigId != null) {
             for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
-                if (entity instanceof net.minecraft.world.entity.animal.pig.Pig pig && pig.getUUID().toString().equals(pigId)) {
+                if (entity instanceof net.minecraft.world.entity.animal.Pig pig && pig.getUUID().toString().equals(pigId)) {
                     return pig;
                 }
             }
@@ -255,13 +255,13 @@ final class UiScenarios {
     private static void spawnPig(net.minecraft.server.MinecraftServer server, Context ctx, double x, double y, double z) {
         java.util.List<net.minecraft.world.entity.Entity> old = new java.util.ArrayList<>();
         for (var entity : server.overworld().getAllEntities()) {
-            if (entity instanceof net.minecraft.world.entity.animal.pig.Pig) {
+            if (entity instanceof net.minecraft.world.entity.animal.Pig) {
                 old.add(entity);
             }
         }
         old.forEach(net.minecraft.world.entity.Entity::discard);
-        var pig = net.minecraft.world.entity.EntityTypes.PIG.spawn(server.overworld(),
-                net.minecraft.core.BlockPos.containing(x, y, z), net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        var pig = net.minecraft.world.entity.EntityType.PIG.spawn(server.overworld(),
+                net.minecraft.core.BlockPos.containing(x, y, z), net.minecraft.world.entity.MobSpawnType.COMMAND);
         pig.setNoAi(true);
         try {
             ctx.writeShared("pig-id", pig.getUUID().toString());
@@ -321,7 +321,7 @@ final class UiScenarios {
                     server.execute(() -> {
                         ServerPlayer a = server.getPlayerList().getPlayer(mc.getUser().getProfileId());
                         ServerPlayer other = server.getPlayerList().getPlayer(UUID.fromString(b[0]));
-                        server.overworld().getGameRules().set(net.minecraft.world.level.gamerules.GameRules.PVP, true, server);
+                        server.setPvpAllowed(true);
                         a.setGameMode(net.minecraft.world.level.GameType.SURVIVAL);
                         other.setGameMode(net.minecraft.world.level.GameType.SURVIVAL);
                         other.teleportTo(a.getX() + 2.0, a.getY(), a.getZ());
@@ -369,7 +369,7 @@ final class UiScenarios {
                     var server = mc.getSingleplayerServer();
                     ticks[0] = 0;
                     server.execute(() -> {
-                        server.overworld().getGameRules().set(net.minecraft.world.level.gamerules.GameRules.PVP, false, server);
+                        server.setPvpAllowed(false);
                         ServerPlayer a = server.getPlayerList().getPlayer(mc.getUser().getProfileId());
                         ServerPlayer other = server.getPlayerList().getPlayer(UUID.fromString(b[0]));
                         a.setHealth(20.0f);
@@ -418,7 +418,7 @@ final class UiScenarios {
                         ServerPlayer other = server.getPlayerList().getPlayer(UUID.fromString(b[0]));
                         StringBuilder pigs = new StringBuilder();
                         for (var entity : server.overworld().getAllEntities()) {
-                            if (entity instanceof net.minecraft.world.entity.animal.pig.Pig pig) {
+                            if (entity instanceof net.minecraft.world.entity.animal.Pig pig) {
                                 pigs.append(pig.position()).append(' ');
                             }
                         }
@@ -519,7 +519,7 @@ final class UiScenarios {
                             entities++;
                         }
                         DropIn.LOGGER.info("Self-test: B has no pig: B at {}, on ground {}, {} entities, health {}, screen {}",
-                                mc.player.position(), mc.player.onGround(), entities, mc.player.getHealth(), mc.gui.screen());
+                                mc.player.position(), mc.player.onGround(), entities, mc.player.getHealth(), mc.screen);
                     }
                     if (pig(mc) != null && !ctx.sharedExists("b-pig")) {
                         DropIn.LOGGER.info("Self-test: B first sees the pig, with {} health", pig(mc).getHealth());
@@ -628,7 +628,7 @@ final class UiScenarios {
                     server.execute(() -> {
                         ServerPlayer other = server.getPlayerList().getPlayer(UUID.fromString(b[0]));
                         other.setHealth(7.0f);
-                        other.addEffect(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.SPEED, 1200));
+                        other.addEffect(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.MOVEMENT_SPEED, 1200));
                         stamp(ctx, "t-status", "");
                     });
                 })
@@ -647,7 +647,7 @@ final class UiScenarios {
                         ServerPlayer other = server.getPlayerList().getPlayer(UUID.fromString(b[0]));
                         double x = other.getX() + 1.5;
                         for (var entity : server.overworld().getAllEntities()) {
-                            if (entity instanceof net.minecraft.world.entity.animal.pig.Pig pig) {
+                            if (entity instanceof net.minecraft.world.entity.animal.Pig pig) {
                                 pig.teleportTo(x, other.getY(), other.getZ());
                                 pigHealth[0] = pig.getHealth();
                             }
@@ -662,7 +662,7 @@ final class UiScenarios {
                         return false;
                     }
                     for (var entity : mc.getSingleplayerServer().overworld().getAllEntities()) {
-                        if (entity instanceof net.minecraft.world.entity.animal.pig.Pig pig && pig.getHealth() < pigHealth[0]) {
+                        if (entity instanceof net.minecraft.world.entity.animal.Pig pig && pig.getHealth() < pigHealth[0]) {
                             long delay = System.currentTimeMillis() - Long.parseLong(ctx.readShared("t-bhit").trim());
                             DropIn.LOGGER.info("Self-test: realtime hit: B's hit took the pig from {} to {} health, on A's screen within {} ms",
                                     pigHealth[0], pig.getHealth(), delay);
@@ -705,7 +705,7 @@ final class UiScenarios {
                 .step("health and effect arrived", PEER_TICKS, () -> {
                     failIfDisconnected(mc);
                     if (!ctx.sharedExists("t-status") || mc.player.getHealth() != 7.0f
-                            || !mc.player.hasEffect(net.minecraft.world.effect.MobEffects.SPEED)) {
+                            || !mc.player.hasEffect(net.minecraft.world.effect.MobEffects.MOVEMENT_SPEED)) {
                         return false;
                     }
                     stamp(ctx, "o-status", "");
@@ -743,7 +743,7 @@ final class UiScenarios {
     }
 
     private static Button button(Minecraft mc, String key) {
-        return M1Scenarios.buttonContaining(mc.gui.screen(), Component.translatable("text.dropin_coop." + key).getString());
+        return M1Scenarios.buttonContaining(mc.screen, Component.translatable("text.dropin_coop." + key).getString());
     }
 
     /** One client, no world open: the import picker, Export world, and the Join screen, driven by their buttons. */
@@ -751,9 +751,8 @@ final class UiScenarios {
         Minecraft mc = ctx.mc();
         CoopWorld[] world = {null};
         String[] invited = {null};
-        KeyEvent enter = new KeyEvent(257, 0, 0);
         return M1Scenarios.quitToTitle(M1Scenarios.createWorld(M1Scenarios.base(ctx), ctx), ctx)
-                .action("open Co-op Worlds", () -> mc.gui.setScreen(new CoopWorldsScreen(new TitleScreen())))
+                .action("open Co-op Worlds", () -> mc.setScreen(new CoopWorldsScreen(new TitleScreen())))
                 .action("the top buttons are Create, Join, Import, left to right", () -> {
                     Button create = button(mc, "button.create");
                     Button join = button(mc, "button.join");
@@ -761,29 +760,29 @@ final class UiScenarios {
                     require(create != null && join != null && imports != null, "a top button is missing");
                     require(create.getX() < join.getX() && join.getX() < imports.getX() && create.getY() == join.getY()
                             && join.getY() == imports.getY(), "the top buttons are not in the order Create, Join, Import");
-                    imports.onPress(enter);
+                    imports.onPress();
                 })
                 // ---- Import: the picker lists the ordinary world; choosing it and pressing Import makes it co-op.
-                .step("the picker lists the world", SHORT_TICKS, () -> mc.gui.screen() instanceof ImportScreen
-                        && M1Scenarios.buttonContaining(mc.gui.screen(), Scenarios.WORLD_ID) != null)
+                .step("the picker lists the world", SHORT_TICKS, () -> mc.screen instanceof ImportScreen
+                        && M1Scenarios.buttonContaining(mc.screen, Scenarios.WORLD_ID) != null)
                 .action("choose it", () -> {
                     require(!button(mc, "button.import").active, "Import is active before a world is chosen");
-                    M1Scenarios.buttonContaining(mc.gui.screen(), Scenarios.WORLD_ID).onPress(enter);
+                    M1Scenarios.buttonContaining(mc.screen, Scenarios.WORLD_ID).onPress();
                 })
                 .action("press Import", () -> {
                     require(button(mc, "button.import").active, "Import is not active after choosing a world");
-                    button(mc, "button.import").onPress(enter);
+                    button(mc, "button.import").onPress();
                 })
-                .step("the invite of the new co-op world is shown", SHORT_TICKS, () -> mc.gui.screen() instanceof InviteScreen)
+                .step("the invite of the new co-op world is shown", SHORT_TICKS, () -> mc.screen instanceof InviteScreen)
                 .action("it is a co-op world of this player", () -> {
-                    world[0] = ((InviteScreen) mc.gui.screen()).world();
+                    world[0] = ((InviteScreen) mc.screen).world();
                     Path folder = mc.getLevelSource().getLevelPath(Scenarios.WORLD_ID);
                     require(CoopWorldStore.readMarker(folder).orElse("").equals(world[0].worldId()), "the world folder is not marked");
                     require(CoopWorlds.store().isOwner(world[0].worldId()), "the importer is not the owner");
-                    mc.gui.setScreen(new ImportScreen(new CoopWorldsScreen(new TitleScreen())));
+                    mc.setScreen(new ImportScreen(new CoopWorldsScreen(new TitleScreen())));
                 })
-                .step("the picker no longer offers it", SHORT_TICKS, () -> ++ticks(ctx)[0] > 60 && mc.gui.screen() instanceof ImportScreen
-                        && M1Scenarios.buttonContaining(mc.gui.screen(), Scenarios.WORLD_ID) == null)
+                .step("the picker no longer offers it", SHORT_TICKS, () -> ++ticks(ctx)[0] > 60 && mc.screen instanceof ImportScreen
+                        && M1Scenarios.buttonContaining(mc.screen, Scenarios.WORLD_ID) == null)
                 // ---- Export world: an ordinary world in a zip, which the import takes back.
                 .action("export the world", () -> {
                     Path folder = mc.getLevelSource().getLevelPath(Scenarios.WORLD_ID);
@@ -798,30 +797,30 @@ final class UiScenarios {
                 // ---- Join: paste an invite, see that nobody is online, join: the world is saved to the list.
                 .action("open Join", () -> {
                     CoopWorldsScreen list = new CoopWorldsScreen(new TitleScreen());
-                    mc.gui.setScreen(list);
-                    button(mc, "button.join").onPress(enter);
+                    mc.setScreen(list);
+                    button(mc, "button.join").onPress();
                 })
                 .action("type something that is no invite", () -> {
-                    require(mc.gui.screen() instanceof JoinInviteScreen, "Join did not open its screen");
-                    ((JoinInviteScreen) mc.gui.screen()).setCode("not an invite");
+                    require(mc.screen instanceof JoinInviteScreen, "Join did not open its screen");
+                    ((JoinInviteScreen) mc.screen).setCode("not an invite");
                     require(!button(mc, "button.join").active, "Join is active for a text that is no invite");
                 })
                 .action("paste an invite", () -> {
                     var invite = M1Scenarios.randomInvite();
                     invited[0] = dropin.core.crypto.WorldKeys.fromSeed(invite.seed()).worldId();
-                    ((JoinInviteScreen) mc.gui.screen()).setCode("  " + invite.encode() + " ");
+                    ((JoinInviteScreen) mc.screen).setCode("  " + invite.encode() + " ");
                     require(button(mc, "button.join").active, "Join is not active for an invite");
                 })
                 .step("the preview says nobody is online", SHORT_TICKS, () -> {
-                    CoopStatus.Status preview = ((JoinInviteScreen) mc.gui.screen()).preview();
+                    CoopStatus.Status preview = ((JoinInviteScreen) mc.screen).preview();
                     return preview != null && preview.kind() == CoopStatus.Kind.NOBODY && preview.online().isEmpty();
                 })
                 .action("join", () -> {
                     require(CoopWorlds.store().get(invited[0]).isEmpty(), "looking at an invite already saved the world");
-                    button(mc, "button.join").onPress(enter);
+                    button(mc, "button.join").onPress();
                 })
                 .step("back on the list, with both worlds, the owned one first", SHORT_TICKS, () -> {
-                    if (!(mc.gui.screen() instanceof CoopWorldsScreen list) || list.worlds().size() != 2) {
+                    if (!(mc.screen instanceof CoopWorldsScreen list) || list.worlds().size() != 2) {
                         return false;
                     }
                     require(list.worlds().get(0).worldId().equals(world[0].worldId()) && list.worlds().get(1).worldId().equals(invited[0]),

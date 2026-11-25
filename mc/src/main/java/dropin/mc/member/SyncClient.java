@@ -604,7 +604,7 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
     private void chat(Component message) {
         mc.execute(() -> {
             if (mc.player != null) {
-                mc.gui.hud.getChat().addClientSystemMessage(message);
+                mc.gui.getChat().addMessage(message);
             }
         });
     }
@@ -711,7 +711,7 @@ public final class SyncClient implements Runnable, SyncClientSession.Local {
             DropIn.LOGGER.info("World sync of '{}' is waiting for a direct connection", world.name());
             mc.execute(() -> {
                 if (mc.player != null) {
-                    mc.gui.hud.getChat().addClientSystemMessage(Component.translatable(K + "sync.waiting_direct"));
+                    mc.gui.getChat().addMessage(Component.translatable(K + "sync.waiting_direct"));
                     waitingShown = true;
                 }
             });

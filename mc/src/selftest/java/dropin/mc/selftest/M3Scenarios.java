@@ -116,7 +116,7 @@ final class M3Scenarios {
         return mark(runner, mc, MARK_A)
                 .step("the server knows all three marks", SHORT_TICKS,
                         () -> markedOnServer(mc, MARK_A) && markedOnServer(mc, MARK_B) && markedOnServer(mc, MARK_C))
-                .action("A quits", () -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE))
+                .action("A quits", () -> dropin.mc.compat.Compat.disconnectFromWorld(mc, dropin.mc.compat.Compat.DEFAULT_QUIT_MESSAGE))
                 .step("the handoff ran and the world closed", WORLD_TICKS + SHORT_TICKS,
                         () -> mc.getSingleplayerServer() == null && mc.level == null && HostHandoff.state() == HostHandoff.State.IDLE)
                 .action("the world went to B", () -> {
@@ -132,7 +132,7 @@ final class M3Scenarios {
                             + " but the handoff carried " + HostSync.lastFinalRoot());
                     DropIn.LOGGER.info("Self-test: A ended on checkpoint {} with root {} and handed over to {}", last.seq(), last.root(), b);
                     ctx.writeShared("a-root", last.seq() + " " + last.root());
-                    mc.gui.setScreen(new TitleScreen());
+                    mc.setScreen(new TitleScreen());
                 })
                 .step("B hosts", WORLD_TICKS + PEER_TICKS, () -> ctx.sharedExists("b-hosting"))
                 .action("press Play", () -> pressPlay(mc, state))
@@ -216,11 +216,11 @@ final class M3Scenarios {
         // A few hundred records, each held back a quarter of a second: B stays mid-download for minutes.
         return hostA(ctx, state, Map.of("dropin.dev.syncDelayMs", "250", "dropin.dev.noHandoff", "false"), 450)
                 .step("B is mid-download", STARTUP_TICKS + 2 * PEER_TICKS, () -> ctx.sharedExists("b-partial"))
-                .action("A quits", () -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE))
+                .action("A quits", () -> dropin.mc.compat.Compat.disconnectFromWorld(mc, dropin.mc.compat.Compat.DEFAULT_QUIT_MESSAGE))
                 // A checkpoint, then DESIGN 4.9's wait of up to 30 s for B, which cannot finish in time.
                 .step("the confirmation is shown", SHORT_TICKS, () -> HostHandoff.state() == HostHandoff.State.CONFIRMING)
                 .action("it names B, and the world is still running", () -> {
-                    require(mc.gui.screen() instanceof ConfirmScreen, "the screen is " + mc.gui.screen());
+                    require(mc.screen instanceof ConfirmScreen, "the screen is " + mc.screen);
                     HostSync.Standing standing = HostHandoff.lastStanding();
                     require(standing.successorUuid() == null, "a successor was found: " + standing.successorUuid());
                     require(standing.peers() == 1, standing.peers() + " members were counted, expected 1");
@@ -232,7 +232,7 @@ final class M3Scenarios {
                     DropIn.LOGGER.info("Self-test: confirmation shown: nobody has a full copy ({} {}%)", standing.bestName(), standing.bestPercent());
                 })
                 .action("cancel", () -> HostHandoff.answer(false))
-                .step("back in the game, still hosting, B still in", SHORT_TICKS, () -> mc.gui.screen() == null && hosting(ctx)
+                .step("back in the game, still hosting, B still in", SHORT_TICKS, () -> mc.screen == null && hosting(ctx)
                         && HostHandoff.state() == HostHandoff.State.IDLE && players(mc) == 2)
                 .action("tell B", () -> ctx.writeShared("a-cancelled", "ok"))
                 .step("B kept playing and downloading", PEER_TICKS, () -> ctx.sharedExists("b-still-in"))
@@ -281,7 +281,7 @@ final class M3Scenarios {
                     return ++stayed[0] > 100 && (live.phase() == Phase.LIVE || SyncClient.appliedRecords(state.world.worldId()) > applied[0]);
                 })
                 .action("tell A", () -> ctx.writeShared("b-still-in", "ok"))
-                .action("leave", () -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE))
+                .action("leave", () -> dropin.mc.compat.Compat.disconnectFromWorld(mc, dropin.mc.compat.Compat.DEFAULT_QUIT_MESSAGE))
                 .step("left", SHORT_TICKS, () -> mc.level == null)
                 .action("tell A", () -> ctx.writeShared("b-left", "ok"));
     }

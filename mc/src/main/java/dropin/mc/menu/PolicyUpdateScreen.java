@@ -1,6 +1,6 @@
 package dropin.mc.menu;
 
-import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
@@ -84,9 +84,9 @@ public class PolicyUpdateScreen extends Screen {
     }
 
     @Override
-    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
-        super.extractRenderState(graphics, mouseX, mouseY, a);
-        graphics.centeredText(this.font, this.title, this.width / 2, 14, -1);
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
+        super.render(graphics, mouseX, mouseY, a);
+        graphics.drawCenteredString(this.font, this.title, this.width / 2, 14, -1);
         List<Component> lines = new ArrayList<>();
         if (!added.isEmpty()) {
             lines.add(Component.translatable(K + "policy.update.added", shortList(added)));
@@ -108,7 +108,7 @@ public class PolicyUpdateScreen extends Screen {
         int y = 40;
         for (Component line : lines) {
             for (FormattedCharSequence part : this.font.split(line, Math.min(340, this.width - 20))) {
-                graphics.centeredText(this.font, part, this.width / 2, y, -1);
+                graphics.drawCenteredString(this.font, part, this.width / 2, y, -1);
                 y += 11;
             }
             y += 3;

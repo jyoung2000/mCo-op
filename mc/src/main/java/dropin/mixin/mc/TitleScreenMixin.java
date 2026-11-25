@@ -10,7 +10,7 @@ import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * DESIGN 4.4: a "Co-op Worlds" button beside Singleplayer, laid out relative to the vanilla button
@@ -25,7 +25,7 @@ public abstract class TitleScreenMixin extends Screen {
     }
 
     @Inject(method = "createNormalMenuOptions", at = @At("HEAD"))
-    private void dropin$coopWorldsButton(int topPos, int spacing, CallbackInfoReturnable<Integer> cir) {
+    private void dropin$coopWorldsButton(int topPos, int spacing, CallbackInfo ci) {
         if (!CoopWorlds.titleButton()) {
             return;
         }
@@ -33,7 +33,7 @@ public abstract class TitleScreenMixin extends Screen {
         int room = this.width - x - 4;
         int wanted = this.font.width(CoopWorldsScreen.TITLE) + 12;
         Button.Builder builder = Button.builder(room >= wanted ? CoopWorldsScreen.TITLE : Component.literal("Co"),
-                button -> this.minecraft.gui.setScreen(new CoopWorldsScreen(this)));
+                button -> this.minecraft.setScreen(new CoopWorldsScreen(this)));
         if (room >= wanted) {
             builder.bounds(x, topPos, Math.min(room, Math.max(wanted, 98)), 20);
         } else {

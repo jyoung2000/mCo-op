@@ -51,7 +51,7 @@ public class E4mcClient {
                                 return false;
                             }
                             if (src.getServer().isDedicatedServer()) {
-                                return Commands.hasPermission(Commands.LEVEL_OWNERS).test(src);
+                                return src.hasPermission(Commands.LEVEL_OWNERS);
                             } else {
                                 try {
                                     return Mirror.isSingleplayerOwner(src.getServer(), src.getPlayerOrException());

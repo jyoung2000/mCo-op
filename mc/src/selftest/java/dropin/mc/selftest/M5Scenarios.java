@@ -102,7 +102,7 @@ final class M5Scenarios {
     /** Hosting; a stale-copy warning on the way (the other side's last session is newer) is answered "Play anyway". */
     private static StepRunner.Step hostingAnyway(Context ctx) {
         return () -> {
-            if (CoopLauncher.staleWarning() != null && ctx.mc().gui.screen() instanceof ConfirmScreen) {
+            if (CoopLauncher.staleWarning() != null && ctx.mc().screen instanceof ConfirmScreen) {
                 CoopLauncher.answerStale(true);
                 return false;
             }
@@ -259,10 +259,10 @@ final class M5Scenarios {
         BlockPos pos = mode == Mode.CONFLICT ? B_NEAR : B_FAR;
         StepRunner copied = joinB(ctx, state, Map.of())
                 .step("copy complete", 2 * PEER_TICKS, copyComplete(mc, state))
-                .action("leave", () -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE))
+                .action("leave", () -> dropin.mc.compat.Compat.disconnectFromWorld(mc, dropin.mc.compat.Compat.DEFAULT_QUIT_MESSAGE))
                 .step("left", SHORT_TICKS, () -> mc.level == null)
                 .action("tell A", () -> {
-                    mc.gui.setScreen(new TitleScreen());
+                    mc.setScreen(new TitleScreen());
                     ctx.writeShared("b-left", "ok");
                 })
                 .step("A played a session without B and quit", 3 * WORLD_TICKS, () -> ctx.sharedExists("a-done"))
@@ -270,7 +270,7 @@ final class M5Scenarios {
                     SyncClient.stopAndWait(state.world.worldId(), 15_000);
                     pressPlay(mc, state);
                 })
-                .step("the warning is shown", SHORT_TICKS, () -> CoopLauncher.staleWarning() != null && mc.gui.screen() instanceof ConfirmScreen)
+                .step("the warning is shown", SHORT_TICKS, () -> CoopLauncher.staleWarning() != null && mc.screen instanceof ConfirmScreen)
                 .action("Play anyway", () -> CoopLauncher.answerStale(true))
                 .step("B hosts its older copy", WORLD_TICKS, () -> hosting(ctx))
                 .action("B's edit", () -> {
@@ -333,9 +333,9 @@ final class M5Scenarios {
                     }
                     ctx.writeShared("b-split", split);
                 })
-                .step("A quit", 2 * PEER_TICKS, () -> mc.gui.screen() instanceof DisconnectedScreen
-                        || (mc.level == null && mc.gui.screen() instanceof TitleScreen))
-                .action("title screen", () -> mc.gui.setScreen(new TitleScreen()))
+                .step("A quit", 2 * PEER_TICKS, () -> mc.screen instanceof DisconnectedScreen
+                        || (mc.level == null && mc.screen instanceof TitleScreen))
+                .action("title screen", () -> mc.setScreen(new TitleScreen()))
                 .step("A opened the world again", 4 * WORLD_TICKS, () -> ctx.sharedExists("a-merged"))
                 .action("press Play", () -> pressPlay(mc, state))
                 .step("landed in A's session again", PEER_TICKS, () -> joinedRemote(mc))

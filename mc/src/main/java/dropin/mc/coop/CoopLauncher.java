@@ -47,7 +47,7 @@ public final class CoopLauncher {
         if (world.isEmpty()) {
             return false;
         }
-        mc.gui.setScreen(new GenericMessageScreen(Component.translatable("text.dropin_coop.looking")));
+        mc.setScreen(new GenericMessageScreen(Component.translatable("text.dropin_coop.looking")));
         Thread thread = new Thread(() -> launch(mc, flows, world.get(), levelId, onCancel, false), "dropin-coop-launch");
         thread.setDaemon(true);
         thread.start();
@@ -125,7 +125,7 @@ public final class CoopLauncher {
             } else {
                 int percent = SyncClient.savedState(folder).percent();
                 DropIn.LOGGER.info("Co-op world '{}': nobody is online and the copy is {}% downloaded", world.name(), percent);
-                mc.execute(() -> mc.gui.setScreen(new AlertScreen(onCancel, Component.translatable("menu.dropin_coop.title"),
+                mc.execute(() -> mc.setScreen(new AlertScreen(onCancel, Component.translatable("menu.dropin_coop.title"),
                         Component.translatable("text.dropin_coop.sync.incomplete_nobody", percent))));
             }
             return;
@@ -151,14 +151,14 @@ public final class CoopLauncher {
                         return;
                     }
                     DropIn.LOGGER.info("Co-op world '{}': playing on the older copy; the changes are merged later", world.name());
-                    mc.gui.setScreen(new GenericMessageScreen(Component.translatable("text.dropin_coop.looking")));
+                    mc.setScreen(new GenericMessageScreen(Component.translatable("text.dropin_coop.looking")));
                     Thread thread = new Thread(() -> launch(mc, flows, world, levelId, onCancel, true), "dropin-coop-launch");
                     thread.setDaemon(true);
                     thread.start();
                 };
                 staleWarning = newer;
                 staleAnswer = answer;
-                mc.gui.setScreen(new net.minecraft.client.gui.screens.ConfirmScreen(answer, Component.translatable("menu.dropin_coop.title"),
+                mc.setScreen(new net.minecraft.client.gui.screens.ConfirmScreen(answer, Component.translatable("menu.dropin_coop.title"),
                         Component.translatable("text.dropin_coop.stale.message", newer.name(), ago(newer.ts())),
                         Component.translatable("text.dropin_coop.stale.play_anyway"), net.minecraft.network.chat.CommonComponents.GUI_CANCEL));
             });
@@ -196,7 +196,7 @@ public final class CoopLauncher {
                         DropIn.LOGGER.warn("Could not withdraw the host announcement of '{}': {}", world.name(), e.toString());
                     }
                 }
-                mc.execute(() -> mc.gui.setScreen(problem));
+                mc.execute(() -> mc.setScreen(problem));
                 return;
             }
             // The copy is about to be opened by the game: a sync from an earlier session must have let go of it.
@@ -233,12 +233,12 @@ public final class CoopLauncher {
     public static boolean hostAfterHandoff(Minecraft mc, CoopWorld world, java.nio.file.Path folder) {
         String uuid = mc.getUser().getProfileId().toString();
         String name = mc.getUser().getName();
-        Runnable onCancel = () -> mc.gui.setScreen(new TitleScreen());
+        Runnable onCancel = () -> mc.setScreen(new TitleScreen());
         remember(world, uuid, name);
         net.minecraft.client.gui.screens.Screen problem = dropin.mc.policy.HostGate.memberProblem(mc, world, folder, onCancel);
         if (problem != null) {
             DropIn.LOGGER.info("Co-op world '{}': this PC may not take over as host ({})", world.name(), problem.getClass().getSimpleName());
-            mc.execute(() -> mc.gui.setScreen(problem));
+            mc.execute(() -> mc.setScreen(problem));
             return false;
         }
         openAsHost(mc, world, folder, new Env().newSession(), onCancel);
@@ -284,11 +284,11 @@ public final class CoopLauncher {
     public static Takeover hostAfterCrash(Minecraft mc, CoopWorld world, java.nio.file.Path folder) throws InterruptedException {
         String uuid = mc.getUser().getProfileId().toString();
         String name = mc.getUser().getName();
-        Runnable onCancel = () -> mc.gui.setScreen(new TitleScreen());
+        Runnable onCancel = () -> mc.setScreen(new TitleScreen());
         net.minecraft.client.gui.screens.Screen problem = dropin.mc.policy.HostGate.memberProblem(mc, world, folder, onCancel);
         if (problem != null) {
             DropIn.LOGGER.info("Co-op world '{}': this PC may not take over as host ({})", world.name(), problem.getClass().getSimpleName());
-            mc.execute(() -> mc.gui.setScreen(problem));
+            mc.execute(() -> mc.setScreen(problem));
             return Takeover.REFUSED;
         }
         Env env = new Env();
@@ -319,7 +319,7 @@ public final class CoopLauncher {
         if (SyncClient.stopAndWait(world.worldId(), 60_000)) {
             return true;
         }
-        mc.execute(() -> mc.gui.setScreen(new AlertScreen(onCancel, Component.translatable("menu.dropin_coop.title"),
+        mc.execute(() -> mc.setScreen(new AlertScreen(onCancel, Component.translatable("menu.dropin_coop.title"),
                 Component.translatable("text.dropin_coop.sync_busy"))));
         return false;
     }

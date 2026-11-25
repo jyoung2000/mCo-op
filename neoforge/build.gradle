@@ -63,3 +63,11 @@ sourceSets.configureEach {
         }
     }
 }
+
+// NeoForge's mixin config: the shared dropin.mixins.json under its own name, so that the merged jar can carry a
+// relocated copy of it next to Fabric's (see root build.gradle). In development it points at the plain classes.
+processResources {
+    from(project(':mc').file('src/main/resources/dropin.mixins.json')) {
+        rename { 'dropin.neoforge.mixins.json' }
+    }
+}

@@ -45,7 +45,7 @@ public final class ChunkBytes {
 
     private static void payload(Tag tag, DataOutput out) throws IOException {
         if (tag instanceof CompoundTag compound) {
-            List<String> keys = new ArrayList<>(compound.keySet());
+            List<String> keys = new ArrayList<>(compound.getAllKeys());
             Collections.sort(keys);
             for (String key : keys) {
                 named(key, compound.get(key), out);

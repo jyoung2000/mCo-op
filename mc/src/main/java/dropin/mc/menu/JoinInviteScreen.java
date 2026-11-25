@@ -2,14 +2,12 @@ package dropin.mc.menu;
 
 import dropin.core.world.CoopWorld;
 import dropin.mc.coop.StatusPing;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.components.PlayerFaceExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
-import net.minecraft.world.item.component.ResolvableProfile;
 
 import java.util.List;
 import java.util.UUID;
@@ -113,7 +111,7 @@ public class JoinInviteScreen extends Screen {
             return;
         }
         boolean hosted = preview != null && preview.kind() == CoopStatus.Kind.PLAYING;
-        this.minecraft.gui.setScreen(parent);
+        this.minecraft.setScreen(parent);
         if (hosted && parent instanceof CoopWorldsScreen list) {
             list.select(outcome.world().worldId());
             list.play();
@@ -122,50 +120,50 @@ public class JoinInviteScreen extends Screen {
 
     @Override
     public void onClose() {
-        this.minecraft.gui.setScreen(parent);
+        this.minecraft.setScreen(parent);
     }
 
     @Override
-    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
-        super.extractRenderState(graphics, mouseX, mouseY, a);
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
+        super.render(graphics, mouseX, mouseY, a);
         int middle = this.width / 2;
-        graphics.centeredText(this.font, this.title, middle, 20, -1);
-        graphics.centeredText(this.font, Component.translatable(K + "join.label"), middle, 37, GRAY);
-        graphics.centeredText(this.font, notice, middle, 76, -9216);
+        graphics.drawCenteredString(this.font, this.title, middle, 20, -1);
+        graphics.drawCenteredString(this.font, Component.translatable(K + "join.label"), middle, 37, GRAY);
+        graphics.drawCenteredString(this.font, notice, middle, 76, -9216);
         if (candidate == null) {
             return;
         }
         if (preview == null) {
-            graphics.centeredText(this.font, Component.translatable(K + "status.looking"), middle, 80, GRAY);
+            graphics.drawCenteredString(this.font, Component.translatable(K + "status.looking"), middle, 80, GRAY);
             return;
         }
         switch (preview.kind()) {
             case PLAYING -> players(graphics, middle);
-            case UNREACHABLE -> graphics.centeredText(this.font, Component.translatable(K + "join.unreachable"), middle, 80, GRAY);
-            default -> graphics.centeredText(this.font, Component.translatable(K + "join.nobody"), middle, 80, GRAY);
+            case UNREACHABLE -> graphics.drawCenteredString(this.font, Component.translatable(K + "join.unreachable"), middle, 80, GRAY);
+            default -> graphics.drawCenteredString(this.font, Component.translatable(K + "join.nobody"), middle, 80, GRAY);
         }
     }
 
     /** The players the host named, one per line: head with the green "online" ring, then the name. */
-    private void players(GuiGraphicsExtractor graphics, int middle) {
+    private void players(GuiGraphics graphics, int middle) {
         List<StatusPing.Player> online = preview.online();
-        graphics.centeredText(this.font, Component.translatable(K + (online.isEmpty() ? "join.playing_hidden" : "join.playing"),
+        graphics.drawCenteredString(this.font, Component.translatable(K + (online.isEmpty() ? "join.playing_hidden" : "join.playing"),
                 preview.hostName()), middle, 80, -1);
         int y = 96;
         for (int i = 0; i < online.size(); i++) {
             if (y + 16 > this.height - 58) {
-                graphics.text(this.font, Component.translatable(K + "more", online.size() - i), middle - 60, y, GRAY);
+                graphics.drawString(this.font, Component.translatable(K + "more", online.size() - i), middle - 60, y, GRAY);
                 return;
             }
             StatusPing.Player player = online.get(i);
             int x = middle - 60;
             graphics.fill(x - 1, y - 1, x + 13, y + 13, 0xFF55FF55);
             try {
-                PlayerFaceExtractor.extractRenderState(graphics, ResolvableProfile.createUnresolved(UUID.fromString(player.uuid())), x, y, 12);
+                Faces.draw(graphics, UUID.fromString(player.uuid()), x, y, 12);
             } catch (IllegalArgumentException e) {
                 graphics.fill(x, y, x + 12, y + 12, 0xFF555555);
             }
-            graphics.text(this.font, player.name(), x + 18, y + 2, -1);
+            graphics.drawString(this.font, player.name(), x + 18, y + 2, -1);
             y += 16;
         }
     }

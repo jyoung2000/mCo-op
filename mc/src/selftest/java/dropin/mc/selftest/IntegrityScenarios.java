@@ -31,12 +31,12 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.MobSpawnType;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
-import net.minecraft.world.entity.npc.villager.Villager;
+import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.trading.ItemCost;
@@ -132,13 +132,13 @@ final class IntegrityScenarios {
     }
 
     private static <T extends Mob> T spawn(ServerLevel level, EntityType<T> type, UUID id, double x, double z, float health) {
-        Entity old = level.getEntityInAnyDimension(id);
+        Entity old = dropin.mc.compat.Compat.entityInAnyDimension(level, id);
         if (old != null) {
             old.discard();
         }
-        T mob = type.create(level, EntitySpawnReason.COMMAND);
+        T mob = type.create(level);
         mob.setUUID(id);
-        mob.snapTo(x, -60.0, z, 0.0f, 0.0f);
+        mob.moveTo(x, -60.0, z, 0.0f, 0.0f);
         mob.setNoAi(true);
         mob.setPersistenceRequired();
         mob.setHealth(health);
@@ -156,15 +156,15 @@ final class IntegrityScenarios {
         run(server, "fill 24 100 20 27 103 23 minecraft:iron_ore");
         run(server, "setblock 20 101 21 minecraft:chest{Items:[{Slot:0b,id:\"minecraft:raw_gold\",count:17},"
                 + "{Slot:5b,id:\"minecraft:redstone\",count:40}]}");
-        Villager villager = spawn(level, EntityTypes.VILLAGER, VILLAGER, 20.5, 24.5, 13.0f);
+        Villager villager = spawn(level, EntityType.VILLAGER, VILLAGER, 20.5, 24.5, 13.0f);
         villager.getInventory().addItem(new ItemStack(Items.BREAD, 5));
         villager.getInventory().addItem(new ItemStack(Items.WHEAT_SEEDS, 12));
         MerchantOffers offers = new MerchantOffers();
         offers.add(new MerchantOffer(new ItemCost(Items.EMERALD, 3), Optional.empty(), new ItemStack(Items.DIAMOND, 1), 2, 7, 4, 0.05f));
         offers.add(new MerchantOffer(new ItemCost(Items.WHEAT, 20), Optional.empty(), new ItemStack(Items.EMERALD, 1), 0, 16, 2, 0.05f));
         villager.setOffers(offers);
-        spawn(level, EntityTypes.COW, COW, 24.5, 24.5, 4.0f);
-        spawn(level, EntityTypes.IRON_GOLEM, GOLEM, 28.5, 28.5, 37.0f);
+        spawn(level, EntityType.COW, COW, 24.5, 24.5, 4.0f);
+        spawn(level, EntityType.IRON_GOLEM, GOLEM, 28.5, 28.5, 37.0f);
         run(server, "effect give DevA minecraft:speed infinite 1");
         run(server, "give DevA minecraft:netherite_ingot 2");
         run(server, "attribute DevB minecraft:max_health base set 14");
@@ -178,8 +178,8 @@ final class IntegrityScenarios {
         ServerLevel level = server.overworld();
         run(server, "setblock 23 100 20 minecraft:emerald_block");
         run(server, "setblock 21 100 20 minecraft:air");
-        ((LivingEntity) level.getEntityInAnyDimension(COW)).setHealth(3.0f);
-        ((Villager) level.getEntityInAnyDimension(VILLAGER)).getInventory().addItem(new ItemStack(Items.CARROT, 9));
+        ((LivingEntity) dropin.mc.compat.Compat.entityInAnyDimension(level, COW)).setHealth(3.0f);
+        ((Villager) dropin.mc.compat.Compat.entityInAnyDimension(level, VILLAGER)).getInventory().addItem(new ItemStack(Items.CARROT, 9));
         run(server, "give DevA minecraft:amethyst_shard 6");
         run(server, "xp set DevC 9 levels");
     }
@@ -229,7 +229,7 @@ final class IntegrityScenarios {
         if (round == 2 && !level.getBlockState(new BlockPos(23, ORE_Y, 20)).is(Blocks.EMERALD_BLOCK)) {
             return "the new host's block is not in the world";
         }
-        if (!(level.getEntityInAnyDimension(VILLAGER) instanceof Villager villager)) {
+        if (!(dropin.mc.compat.Compat.entityInAnyDimension(level, VILLAGER) instanceof Villager villager)) {
             return "the villager is not in the world";
         }
         if (Math.abs(villager.getX() - 20.5) > 0.01 || Math.abs(villager.getZ() - 24.5) > 0.01 || villager.getHealth() != 13.0f) {
@@ -244,10 +244,10 @@ final class IntegrityScenarios {
                 || offers.get(0).getMaxUses() != 7 || !offers.get(1).getResult().is(Items.EMERALD)) {
             return "the villager has " + offers.size() + " offers, or not the ones that were set";
         }
-        if (!(level.getEntityInAnyDimension(COW) instanceof LivingEntity cow) || cow.getHealth() != (round == 1 ? 4.0f : 3.0f)) {
+        if (!(dropin.mc.compat.Compat.entityInAnyDimension(level, COW) instanceof LivingEntity cow) || cow.getHealth() != (round == 1 ? 4.0f : 3.0f)) {
             return "the cow is gone or has the wrong health";
         }
-        if (!(level.getEntityInAnyDimension(GOLEM) instanceof LivingEntity golem) || golem.getHealth() != 37.0f) {
+        if (!(dropin.mc.compat.Compat.entityInAnyDimension(level, GOLEM) instanceof LivingEntity golem) || golem.getHealth() != 37.0f) {
             return "the iron golem is gone or has the wrong health";
         }
         ServerPlayer a = server.getPlayerList().getPlayerByName("DevA");
@@ -324,9 +324,9 @@ final class IntegrityScenarios {
             }
         }
         counts.forEach((name, count) -> out.append("count ").append(name).append(" = ").append(count).append('\n'));
-        for (CompoundTag blockEntity : chunk.getListOrEmpty("block_entities").compoundStream().toList()) {
-            out.append("chest ").append(blockEntity.getIntOr("x", 0)).append(' ').append(blockEntity.getIntOr("y", 0)).append(' ')
-                    .append(blockEntity.getIntOr("z", 0)).append(" = ").append(items(blockEntity.getListOrEmpty("Items"))).append('\n');
+        for (CompoundTag blockEntity : dropin.mc.compat.Nbt.compounds(dropin.mc.compat.Nbt.listOrEmpty(chunk, "block_entities")).toList()) {
+            out.append("chest ").append(dropin.mc.compat.Nbt.intOr(blockEntity, "x", 0)).append(' ').append(dropin.mc.compat.Nbt.intOr(blockEntity, "y", 0)).append(' ')
+                    .append(dropin.mc.compat.Nbt.intOr(blockEntity, "z", 0)).append(" = ").append(items(dropin.mc.compat.Nbt.listOrEmpty(blockEntity, "Items"))).append('\n');
         }
 
         CompoundTag entityChunk = ChunkBytes.parse(entities);
@@ -343,11 +343,11 @@ final class IntegrityScenarios {
             out.append("record ").append(key).append(" = ").append(Manifest.hash(file)).append('\n');
             CompoundTag player = NbtIo.readCompressed(new ByteArrayInputStream(file), NbtAccounter.unlimitedHeap());
             String p = "player " + who + ' ';
-            out.append(p).append("health = ").append(player.getFloatOr("Health", -1f)).append('\n');
-            out.append(p).append("pos = ").append(pos(player.getListOrEmpty("Pos"))).append('\n');
-            out.append(p).append("xp level = ").append(player.getIntOr("XpLevel", 0)).append('\n');
-            out.append(p).append("effects = ").append(effects(player.getListOrEmpty("active_effects"))).append('\n');
-            out.append(p).append("inventory = ").append(items(player.getListOrEmpty("Inventory"))).append('\n');
+            out.append(p).append("health = ").append(dropin.mc.compat.Nbt.floatOr(player, "Health", -1f)).append('\n');
+            out.append(p).append("pos = ").append(pos(dropin.mc.compat.Nbt.listOrEmpty(player, "Pos"))).append('\n');
+            out.append(p).append("xp level = ").append(dropin.mc.compat.Nbt.intOr(player, "XpLevel", 0)).append('\n');
+            out.append(p).append("effects = ").append(effects(dropin.mc.compat.Nbt.listOrEmpty(player, "active_effects"))).append('\n');
+            out.append(p).append("inventory = ").append(items(dropin.mc.compat.Nbt.listOrEmpty(player, "Inventory"))).append('\n');
             out.append(p).append("whole = ").append(Manifest.hash(ChunkBytes.canonical(player))).append('\n');
         }
         return out.toString();
@@ -357,8 +357,8 @@ final class IntegrityScenarios {
         int[] wanted = {(int) (id.getMostSignificantBits() >> 32), (int) id.getMostSignificantBits(),
                 (int) (id.getLeastSignificantBits() >> 32), (int) id.getLeastSignificantBits()};
         CompoundTag found = null;
-        for (CompoundTag entity : entityChunk.getListOrEmpty("Entities").compoundStream().toList()) {
-            if (Arrays.equals(entity.getIntArray("UUID").orElse(null), wanted)) {
+        for (CompoundTag entity : dropin.mc.compat.Nbt.compounds(dropin.mc.compat.Nbt.listOrEmpty(entityChunk, "Entities")).toList()) {
+            if (Arrays.equals(entity.getIntArray("UUID"), wanted)) {
                 found = entity;
             }
         }
@@ -366,16 +366,16 @@ final class IntegrityScenarios {
             out.append(name).append(" missing\n");
             return;
         }
-        out.append(name).append(" pos = ").append(pos(found.getListOrEmpty("Pos"))).append('\n');
-        out.append(name).append(" health = ").append(found.getFloatOr("Health", -1f)).append('\n');
+        out.append(name).append(" pos = ").append(pos(dropin.mc.compat.Nbt.listOrEmpty(found, "Pos"))).append('\n');
+        out.append(name).append(" health = ").append(dropin.mc.compat.Nbt.floatOr(found, "Health", -1f)).append('\n');
         if (found.contains("Inventory")) {
-            out.append(name).append(" inventory = ").append(items(found.getListOrEmpty("Inventory"))).append('\n');
+            out.append(name).append(" inventory = ").append(items(dropin.mc.compat.Nbt.listOrEmpty(found, "Inventory"))).append('\n');
         }
         if (found.contains("Offers")) {
             List<String> offers = new ArrayList<>();
-            for (CompoundTag offer : found.getCompoundOrEmpty("Offers").getListOrEmpty("Recipes").compoundStream().toList()) {
-                offers.add(item(offer.getCompoundOrEmpty("buy")) + " -> " + item(offer.getCompoundOrEmpty("sell")) + " uses "
-                        + offer.getIntOr("uses", 0) + "/" + offer.getIntOr("maxUses", 0) + " xp " + offer.getIntOr("xp", 0));
+            for (CompoundTag offer : dropin.mc.compat.Nbt.compounds(dropin.mc.compat.Nbt.listOrEmpty(found.getCompound("Offers"), "Recipes")).toList()) {
+                offers.add(item(offer.getCompound("buy")) + " -> " + item(offer.getCompound("sell")) + " uses "
+                        + dropin.mc.compat.Nbt.intOr(offer, "uses", 0) + "/" + dropin.mc.compat.Nbt.intOr(offer, "maxUses", 0) + " xp " + dropin.mc.compat.Nbt.intOr(offer, "xp", 0));
             }
             out.append(name).append(" offers = ").append(String.join("; ", offers)).append('\n');
         }
@@ -384,39 +384,39 @@ final class IntegrityScenarios {
     }
 
     private static String item(CompoundTag stack) {
-        return stack.getStringOr("id", "?") + " x" + stack.getIntOr("count", 1);
+        return dropin.mc.compat.Nbt.stringOr(stack, "id", "?") + " x" + dropin.mc.compat.Nbt.intOr(stack, "count", 1);
     }
 
     private static String items(ListTag list) {
         List<String> parts = new ArrayList<>();
-        for (CompoundTag stack : list.compoundStream().toList()) {
-            parts.add(item(stack) + (stack.contains("Slot") ? " @" + stack.getByteOr("Slot", (byte) 0) : ""));
+        for (CompoundTag stack : dropin.mc.compat.Nbt.compounds(list).toList()) {
+            parts.add(item(stack) + (stack.contains("Slot") ? " @" + dropin.mc.compat.Nbt.byteOr(stack, "Slot", (byte) 0) : ""));
         }
         return String.join(", ", parts);
     }
 
     private static String effects(ListTag list) {
         List<String> parts = new ArrayList<>();
-        for (CompoundTag effect : list.compoundStream().toList()) {
-            parts.add(effect.getStringOr("id", "?") + " amp " + effect.getByteOr("amplifier", (byte) 0) + " duration "
-                    + effect.getIntOr("duration", 0));
+        for (CompoundTag effect : dropin.mc.compat.Nbt.compounds(list).toList()) {
+            parts.add(dropin.mc.compat.Nbt.stringOr(effect, "id", "?") + " amp " + dropin.mc.compat.Nbt.byteOr(effect, "amplifier", (byte) 0) + " duration "
+                    + dropin.mc.compat.Nbt.intOr(effect, "duration", 0));
         }
         return String.join(", ", parts);
     }
 
     private static String pos(ListTag pos) {
-        return String.format(Locale.ROOT, "%.2f %.2f %.2f", pos.getDoubleOr(0, 0), pos.getDoubleOr(1, 0), pos.getDoubleOr(2, 0));
+        return String.format(Locale.ROOT, "%.2f %.2f %.2f", dropin.mc.compat.Nbt.doubleOr(pos, 0, 0), dropin.mc.compat.Nbt.doubleOr(pos, 1, 0), dropin.mc.compat.Nbt.doubleOr(pos, 2, 0));
     }
 
     /** The block at a world position, decoded from a chunk's saved sections (palette and packed indices). */
     private static String blockAt(CompoundTag chunk, int x, int y, int z) {
-        for (CompoundTag section : chunk.getListOrEmpty("sections").compoundStream().toList()) {
-            if (section.getByteOr("Y", (byte) 99) != (byte) (y >> 4)) {
+        for (CompoundTag section : dropin.mc.compat.Nbt.compounds(dropin.mc.compat.Nbt.listOrEmpty(chunk, "sections")).toList()) {
+            if (dropin.mc.compat.Nbt.byteOr(section, "Y", (byte) 99) != (byte) (y >> 4)) {
                 continue;
             }
-            CompoundTag states = section.getCompoundOrEmpty("block_states");
-            ListTag palette = states.getListOrEmpty("palette");
-            long[] data = states.getLongArray("data").orElse(null);
+            CompoundTag states = section.getCompound("block_states");
+            ListTag palette = dropin.mc.compat.Nbt.listOrEmpty(states, "palette");
+            long[] data = (states.contains("data") ? states.getLongArray("data") : null);
             int id = 0;
             if (data != null && palette.size() > 1) {
                 int bits = Math.max(4, 32 - Integer.numberOfLeadingZeros(palette.size() - 1));
@@ -428,8 +428,8 @@ final class IntegrityScenarios {
                 return "?";
             }
             // 26.3 BlockState.CODEC: a block's default state is saved as its id alone, any other as {id, properties}.
-            String plain = palette.getStringOr(id, "");
-            return plain.isEmpty() ? palette.getCompoundOrEmpty(id).getStringOr("id", "?") : plain;
+            String plain = dropin.mc.compat.Nbt.stringOr(palette, id, "");
+            return plain.isEmpty() ? dropin.mc.compat.Nbt.stringOr(palette.getCompound(id), "id", "?") : plain;
         }
         return "minecraft:air";
     }
@@ -581,12 +581,12 @@ final class IntegrityScenarios {
                     if (seq == seen[0]) {
                         return false;
                     }
-                    mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE);
+                    dropin.mc.compat.Compat.disconnectFromWorld(mc, dropin.mc.compat.Compat.DEFAULT_QUIT_MESSAGE);
                     return true;
                 })
                 .step("left", SHORT_TICKS, () -> mc.level == null)
                 .action("the closed copy, read back in full", () -> {
-                    mc.gui.setScreen(new TitleScreen());
+                    mc.setScreen(new TitleScreen());
                     Path folder = folder(mc, state);
                     SyncClient.stopAndWait(state.world.worldId(), 15_000);
                     require(SyncClient.status(state.world.worldId()) == null, "the sync did not let go of the copy");
@@ -652,8 +652,8 @@ final class IntegrityScenarios {
             }
             CompoundTag was = ChunkBytes.parse(before);
             CompoundTag is = ChunkBytes.parse(after);
-            TreeSet<String> names = new TreeSet<>(was.keySet());
-            names.addAll(is.keySet());
+            TreeSet<String> names = new TreeSet<>(was.getAllKeys());
+            names.addAll(is.getAllKeys());
             StringBuilder out = new StringBuilder();
             for (String name : names) {
                 Tag a = was.get(name);
@@ -698,7 +698,7 @@ final class IntegrityScenarios {
         runner = publish(runner, ctx, 1, from, "b", "c")
                 .action("A quits", () -> {
                     sampleBefore[0] = HostSync.current().read(SAMPLE);
-                    mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE);
+                    dropin.mc.compat.Compat.disconnectFromWorld(mc, dropin.mc.compat.Compat.DEFAULT_QUIT_MESSAGE);
                 })
                 .step("the handoff ran and the world closed", WORLD_TICKS + SHORT_TICKS,
                         () -> mc.getSingleplayerServer() == null && mc.level == null && HostHandoff.state() == HostHandoff.State.IDLE)
@@ -710,7 +710,7 @@ final class IntegrityScenarios {
                     require(last != null && last.root().equals(HostSync.lastFinalRoot()), "the ledger does not end on the handed-over root");
                     ctx.writeShared("a-root", last.seq() + " " + last.root());
                     logLeftover(world, "A", SAMPLE, sampleBefore[0]);
-                    mc.gui.setScreen(new TitleScreen());
+                    mc.setScreen(new TitleScreen());
                 })
                 .step("B hosts", WORLD_TICKS + PEER_TICKS, () -> ctx.sharedExists("b-hosting"))
                 .action("press Play", () -> pressPlay(mc, state))
@@ -768,10 +768,10 @@ final class IntegrityScenarios {
                 .action("tell A and C", () -> ctx.writeShared("b-done", "ok"))
                 .step("A and C left with their copies checked", 2 * PEER_TICKS,
                         () -> players(mc) == 1 && ctx.sharedExists("a-final") && ctx.sharedExists("c-final"))
-                .action("B quits", () -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE))
+                .action("B quits", () -> dropin.mc.compat.Compat.disconnectFromWorld(mc, dropin.mc.compat.Compat.DEFAULT_QUIT_MESSAGE))
                 .step("the world closed", WORLD_TICKS, () -> mc.getSingleplayerServer() == null && mc.level == null)
                 .action("A's and C's copies are checkpoints of B's ledger", () -> {
-                    mc.gui.setScreen(new TitleScreen());
+                    mc.setScreen(new TitleScreen());
                     Path world = folder(mc, state);
                     Ledger ledger = Ledger.load(state.world.keys().auth(), world.resolve(CoopWorldStore.MARKER_DIR).resolve("ledger.jsonl"));
                     for (String who : new String[]{"a", "c"}) {

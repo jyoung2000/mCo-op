@@ -30,11 +30,34 @@ function Count-Under([string]$prefix) {
 Report ($names -contains 'fabric.mod.json') 'fabric-metadata' 'fabric.mod.json'
 Report ($names -contains 'META-INF/neoforge.mods.toml') 'neoforge-metadata' 'META-INF/neoforge.mods.toml'
 
+# Obfuscated Minecraft versions (this port): Fabric runs intermediary names and NeoForge Mojang names, so each
+# loader has its own copy of the Minecraft-facing classes and exactly one mixin config of its own (DESIGN 5 asks
+# for one config on 26.x, where both loaders share the classes). Checked: each loader's metadata names exactly
+# one config, that config is in the jar, and the jar holds no other mixin config.
+function Read-Entry([string]$entry) {
+    $z = [System.IO.Compression.ZipFile]::OpenRead($jars[0].FullName)
+    try {
+        $e = $z.GetEntry($entry)
+        if ($null -eq $e) { return '' }
+        $r = New-Object System.IO.StreamReader($e.Open())
+        try { return $r.ReadToEnd() } finally { $r.Dispose() }
+    } finally { $z.Dispose() }
+}
+$fabricMeta = Read-Entry 'fabric.mod.json'
+$neoMeta = Read-Entry 'META-INF/neoforge.mods.toml'
+$fabricConfigs = @([regex]::Matches($fabricMeta, '"([^"]+\.mixins\.json)"') | ForEach-Object { $_.Groups[1].Value })
+$neoConfigs = @([regex]::Matches($neoMeta, 'config\s*=\s*"([^"]+)"') | ForEach-Object { $_.Groups[1].Value })
 $mixinConfigs = @($names | Where-Object { $_ -like '*.mixins.json' })
-Report ($mixinConfigs.Count -eq 1) 'one-mixin-config' ($mixinConfigs -join ', ')
+Report ($fabricConfigs.Count -eq 1 -and ($names -contains $fabricConfigs[0])) 'one-mixin-config fabric' ($fabricConfigs -join ', ')
+Report ($neoConfigs.Count -eq 1 -and ($names -contains $neoConfigs[0])) 'one-mixin-config neoforge' ($neoConfigs -join ', ')
+$expected = @($fabricConfigs + $neoConfigs | Sort-Object -Unique)
+$extra = @($mixinConfigs | Where-Object { $expected -notcontains $_ })
+Report ($extra.Count -eq 0) 'no-other-mixin-config' ('in jar: ' + ($mixinConfigs -join ', '))
 
-$selftest = Count-Under 'dropin/mc/selftest/'
-Report ($selftest -eq 0) 'no-selftest-classes' ("$selftest entries under dropin/mc/selftest/")
+foreach ($prefix in @('dropin/mc/selftest/', 'dropin/nf/mc/selftest/')) {
+    $selftest = Count-Under $prefix
+    Report ($selftest -eq 0) 'no-selftest-classes' ("$selftest entries under $prefix")
+}
 
 # Bundled libraries that must be relocated: original package -> relocated package (DESIGN 5).
 $bundled = [ordered]@{

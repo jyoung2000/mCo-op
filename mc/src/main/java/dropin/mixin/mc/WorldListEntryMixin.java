@@ -15,13 +15,18 @@ import org.spongepowered.asm.mixin.injection.At;
  */
 @Mixin(targets = "net.minecraft.client.gui.screens.worldselection.WorldSelectionList$WorldListEntry")
 public class WorldListEntryMixin {
-    @WrapOperation(method = "<init>", at = @At(value = "INVOKE",
+    /** The shown name, worked out once: 1.21.1 reads the name on every frame in render (26.x: in the constructor). */
+    @org.spongepowered.asm.mixin.Unique
+    private String dropin$shownName;
+
+    @WrapOperation(method = "render", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/world/level/storage/LevelSummary;getLevelName()Ljava/lang/String;"))
     private String dropin$coopBadge(LevelSummary summary, Operation<String> original) {
-        String name = original.call(summary);
-        if (CoopActions.isCoopLevel(Minecraft.getInstance(), summary.getLevelId())) {
-            return name + " " + Component.translatable("text.dropin_coop.badge").getString();
+        if (dropin$shownName == null) {
+            String name = original.call(summary);
+            dropin$shownName = CoopActions.isCoopLevel(Minecraft.getInstance(), summary.getLevelId())
+                    ? name + " " + Component.translatable("text.dropin_coop.badge").getString() : name;
         }
-        return name;
+        return dropin$shownName;
     }
 }

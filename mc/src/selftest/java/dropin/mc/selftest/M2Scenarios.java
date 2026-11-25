@@ -26,7 +26,6 @@ import net.minecraft.client.multiplayer.ServerStatusPinger;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.network.chat.Component;
-import net.minecraft.server.network.EventLoopGroupHolder;
 import net.minecraft.world.level.block.Blocks;
 
 import java.nio.charset.StandardCharsets;
@@ -202,9 +201,9 @@ final class M2Scenarios {
         Minecraft mc = ctx.mc();
         return runner
                 .action("tell A", () -> ctx.writeShared("b-complete", "ok"))
-                .step("A quit", PEER_TICKS, () -> mc.gui.screen() instanceof DisconnectedScreen
-                        || (mc.level == null && mc.gui.screen() instanceof TitleScreen))
-                .action("title screen", () -> mc.gui.setScreen(new TitleScreen()))
+                .step("A quit", PEER_TICKS, () -> mc.screen instanceof DisconnectedScreen
+                        || (mc.level == null && mc.screen instanceof TitleScreen))
+                .action("title screen", () -> mc.setScreen(new TitleScreen()))
                 .step("A reported its root", WORLD_TICKS, () -> ctx.sharedExists("a-root"))
                 .action("the copy on disk has A's root", () -> {
                     String[] reported = ctx.readShared("a-root").split(" ");
@@ -248,7 +247,7 @@ final class M2Scenarios {
         ServerStatusPinger pinger = new ServerStatusPinger();
         return base(ctx)
                 .step("A is hosting", STARTUP_TICKS + WORLD_TICKS + PEER_TICKS, () -> ctx.sharedExists(A_HOSTING))
-                .action("send status ping", () -> pinger.pingServer(data, () -> {}, () -> {}, EventLoopGroupHolder.remote(false)))
+                .action("send status ping", () -> pinger.pingServer(data, () -> {}, () -> {}))
                 .step("status response", SHORT_TICKS, () -> {
                     pinger.tick();
                     return data.players != null;

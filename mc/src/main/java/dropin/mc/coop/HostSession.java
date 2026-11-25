@@ -251,8 +251,8 @@ public final class HostSession implements Runnable {
                     // DESIGN 4.4 "Game modes": a published integrated server forces every player without game-master
                     // rights into the host copy's default game type (level.dat), so members flipped to creative
                     // whenever a copy's default said creative. A co-op world keeps each player's own saved mode.
-                    server.setForceGameMode(false);
-                    if (!server.publishServer(MinecraftServer.MultiplayerScope.LAN, commands, wanted)) {
+                    ((dropin.mc.compat.ForceGameModeAccess) server).dropin$setForceGameMode(false);
+                    if (!server.publishServer(null, commands, wanted)) {
                         port.complete(-1);
                         return;
                     }
@@ -360,8 +360,8 @@ public final class HostSession implements Runnable {
         server.execute(() -> {
             java.util.List<String> now = new java.util.ArrayList<>();
             for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-                CoopLauncher.remember(world, player.getGameProfile().id().toString(), player.getGameProfile().name());
-                now.add(player.getGameProfile().id().toString());
+                CoopLauncher.remember(world, player.getGameProfile().getId().toString(), player.getGameProfile().getName());
+                now.add(player.getGameProfile().getId().toString());
             }
             java.util.Collections.sort(now);
             connected = java.util.List.copyOf(now);

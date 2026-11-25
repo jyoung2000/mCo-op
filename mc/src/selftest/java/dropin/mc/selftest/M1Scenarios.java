@@ -24,7 +24,6 @@ import net.minecraft.client.gui.screens.DisconnectedScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.worldselection.SelectWorldScreen;
-import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.core.registries.Registries;
@@ -127,12 +126,12 @@ final class M1Scenarios {
         return runner
                 .action("create world", () -> {
                     LevelSettings settings = new LevelSettings(WORLD_ID, GameType.CREATIVE,
-                            new LevelSettings.DifficultySettings(Difficulty.PEACEFUL, false, false), true,
+                            false, Difficulty.PEACEFUL, true, new net.minecraft.world.level.GameRules(),
                             WorldDataConfiguration.DEFAULT);
                     mc.createWorldOpenFlows().createFreshLevel(WORLD_ID, settings, new WorldOptions(Scenarios.SEED, false, false),
                             registries -> registries.lookupOrThrow(Registries.WORLD_PRESET)
                                     .getOrThrow(WorldPresets.FLAT).value().createWorldDimensions(),
-                            mc.gui.screen());
+                            mc.screen);
                 })
                 .step("world loaded", WORLD_TICKS, () -> inWorld(mc) && mc.getSingleplayerServer() != null);
     }
@@ -140,9 +139,9 @@ final class M1Scenarios {
     static StepRunner quitToTitle(StepRunner runner, Context ctx) {
         Minecraft mc = ctx.mc();
         return runner
-                .action("save and quit", () -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE))
+                .action("save and quit", () -> dropin.mc.compat.Compat.disconnectFromWorld(mc, dropin.mc.compat.Compat.DEFAULT_QUIT_MESSAGE))
                 .step("world closed", WORLD_TICKS, () -> mc.getSingleplayerServer() == null && mc.level == null)
-                .action("title screen", () -> mc.gui.setScreen(new TitleScreen()))
+                .action("title screen", () -> mc.setScreen(new TitleScreen()))
                 .step("back at the main menu", SHORT_TICKS, () -> atMainMenu(mc));
     }
 
@@ -158,7 +157,7 @@ final class M1Scenarios {
     /** Opens the Co-op Worlds screen, selects the world and presses Play: the real launch flow. */
     static void pressPlay(Minecraft mc, State state) {
         CoopWorldsScreen screen = new CoopWorldsScreen(new TitleScreen());
-        mc.gui.setScreen(screen);
+        mc.setScreen(screen);
         require(screen.worlds().stream().anyMatch(world -> world.worldId().equals(state.world.worldId())),
                 "the Co-op Worlds screen does not list the world");
         screen.select(state.world.worldId());
@@ -193,21 +192,21 @@ final class M1Scenarios {
                     require(outcome.ok(), "could not register a world: " + outcome.message().getString());
                     state.world = outcome.world();
                 })
-                .action("fresh title screen", () -> mc.gui.setScreen(new TitleScreen()))
+                .action("fresh title screen", () -> mc.setScreen(new TitleScreen()))
                 .step("title screen has the button", SHORT_TICKS, () -> titleButton(mc) != null)
                 .action("button overlaps nothing", () -> {
                     Button ours = titleButton(mc);
-                    require(ours.getX() >= 0 && ours.getX() + ours.getWidth() <= mc.gui.screen().width, "button is off screen");
-                    for (GuiEventListener child : mc.gui.screen().children()) {
+                    require(ours.getX() >= 0 && ours.getX() + ours.getWidth() <= mc.screen.width, "button is off screen");
+                    for (GuiEventListener child : mc.screen.children()) {
                         if (child instanceof AbstractWidget other && other != ours && other.visible && overlaps(ours, other)) {
                             throw new IllegalStateException("Co-op Worlds button overlaps '" + other.getMessage().getString() + "'");
                         }
                     }
                 })
-                .action("press it", () -> titleButton(mc).onPress(new KeyEvent(257, 0, 0)))
-                .step("Co-op Worlds screen opened", SHORT_TICKS, () -> mc.gui.screen() instanceof CoopWorldsScreen)
+                .action("press it", () -> titleButton(mc).onPress())
+                .step("Co-op Worlds screen opened", SHORT_TICKS, () -> mc.screen instanceof CoopWorldsScreen)
                 .action("screen lists the world", () -> {
-                    CoopWorldsScreen screen = (CoopWorldsScreen) mc.gui.screen();
+                    CoopWorldsScreen screen = (CoopWorldsScreen) mc.screen;
                     require(screen.worlds().stream().anyMatch(world -> world.worldId().equals(state.world.worldId())),
                             "the known co-op world is not listed");
                     require(buttonContaining(screen, state.world.name()) != null, "no row shows the world's name");
@@ -227,14 +226,13 @@ final class M1Scenarios {
                 })
                 // A picture of the screen for the person reading the results; nothing is asserted on it.
                 .step("the screen was drawn", SHORT_TICKS, () -> System.currentTimeMillis() - menuShownAt > 2500)
-                .action("save a picture", () -> net.minecraft.client.Screenshot.grab(mc.gameDirectory, "dropin-coop-menu.png",
-                        mc.gameRenderer.mainRenderTarget(), 1, message -> { }))
+                .action("save a picture", () -> net.minecraft.client.Screenshot.grab(mc.gameDirectory, "dropin-coop-menu.png", mc.getMainRenderTarget(), message -> { }))
                 .step("picture saved", SHORT_TICKS, () -> java.nio.file.Files.isRegularFile(
                         mc.gameDirectory.toPath().resolve("screenshots").resolve("dropin-coop-menu.png")));
     }
 
     private static Button titleButton(Minecraft mc) {
-        return mc.gui.screen() instanceof TitleScreen screen ? buttonContaining(screen, CoopWorldsScreen.TITLE.getString()) : null;
+        return mc.screen instanceof TitleScreen screen ? buttonContaining(screen, CoopWorldsScreen.TITLE.getString()) : null;
     }
 
     static Button buttonContaining(Screen screen, String text) {
@@ -274,7 +272,7 @@ final class M1Scenarios {
                 })
                 .action("co-op screen lists it", () -> {
                     CoopWorldsScreen screen = new CoopWorldsScreen(new TitleScreen());
-                    mc.gui.setScreen(screen);
+                    mc.setScreen(screen);
                     require(buttonContaining(screen, state.world.name()) != null, "the imported world is not on the screen");
                     // The importer is the owner: the row has the wrench too, and the owner's head with the owner role.
                     long plain = screen.children().stream().filter(child -> child instanceof Button).count();
@@ -287,17 +285,16 @@ final class M1Scenarios {
                 })
                 // A picture of the owner's row for the person reading the results; nothing is asserted on it.
                 .step("the screen was drawn", SHORT_TICKS, () -> System.currentTimeMillis() - importShownAt > 2500)
-                .action("save a picture", () -> net.minecraft.client.Screenshot.grab(mc.gameDirectory, "dropin-coop-menu-owner.png",
-                        mc.gameRenderer.mainRenderTarget(), 1, message -> { }))
+                .action("save a picture", () -> net.minecraft.client.Screenshot.grab(mc.gameDirectory, "dropin-coop-menu-owner.png", mc.getMainRenderTarget(), message -> { }))
                 .step("picture saved", SHORT_TICKS, () -> java.nio.file.Files.isRegularFile(
                         mc.gameDirectory.toPath().resolve("screenshots").resolve("dropin-coop-menu-owner.png")))
                 .action("still listed", () -> {
                 })
-                .action("singleplayer list", () -> mc.gui.setScreen(new SelectWorldScreen(new TitleScreen())))
+                .action("singleplayer list", () -> mc.setScreen(new SelectWorldScreen(new TitleScreen())))
                 // long enough for the list to load its entries, which is where the badge is added
                 .step("singleplayer list still works and has the Co-op Worlds button", SHORT_TICKS, () -> ++waited[0] >= 100
-                        && mc.gui.screen() instanceof SelectWorldScreen && CoopActions.isCoopLevel(mc, WORLD_ID)
-                        && buttonContaining(mc.gui.screen(), CoopWorldsScreen.TITLE.getString()) != null);
+                        && mc.screen instanceof SelectWorldScreen && CoopActions.isCoopLevel(mc, WORLD_ID)
+                        && buttonContaining(mc.screen, CoopWorldsScreen.TITLE.getString()) != null);
     }
 
     private static StepRunner importZip(Context ctx) {
@@ -305,11 +302,11 @@ final class M1Scenarios {
         Path zip = ctx.sharedDir().resolve("zipped-world.zip");
         return quitToTitle(createWorld(base(ctx), ctx), ctx)
                 .action("zip the world", () -> zipTree(mc.getLevelSource().getLevelPath(WORLD_ID), zip))
-                .action("open the Co-op Worlds screen", () -> mc.gui.setScreen(new CoopWorldsScreen(new TitleScreen())))
-                .action("drop the zip on it", () -> mc.gui.screen().onFilesDrop(List.of(zip)))
-                .step("invite is shown", SHORT_TICKS, () -> mc.gui.screen() instanceof InviteScreen)
+                .action("open the Co-op Worlds screen", () -> mc.setScreen(new CoopWorldsScreen(new TitleScreen())))
+                .action("drop the zip on it", () -> mc.screen.onFilesDrop(List.of(zip)))
+                .step("invite is shown", SHORT_TICKS, () -> mc.screen instanceof InviteScreen)
                 .action("extracted and imported", () -> {
-                    CoopWorld world = ((InviteScreen) mc.gui.screen()).world();
+                    CoopWorld world = ((InviteScreen) mc.screen).world();
                     Path folder = mc.getLevelSource().getBaseDir().resolve("zipped-world");
                     require(Files.isRegularFile(folder.resolve("level.dat")), "the zip was not extracted into saves/zipped-world");
                     require(CoopWorldStore.readMarker(folder).orElse("").equals(world.worldId()), "the extracted world is not marked");
@@ -494,8 +491,8 @@ final class M1Scenarios {
                     String me = mc.getUser().getName();
                     String other = null;
                     for (Player player : mc.level.players()) {
-                        if (!player.getGameProfile().name().equals(me)) {
-                            other = player.getGameProfile().name();
+                        if (!player.getGameProfile().getName().equals(me)) {
+                            other = player.getGameProfile().getName();
                         }
                     }
                     if (other == null) {
@@ -539,9 +536,9 @@ final class M1Scenarios {
                 })
                 .step("A has its item at its place", SHORT_TICKS, () -> has(mc, Items.DIAMOND) && near(mc, 100, 100))
                 .step("B has its item at its place", SHORT_TICKS, () -> ctx.sharedExists("b-marked"))
-                .action("A quits", () -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE))
+                .action("A quits", () -> dropin.mc.compat.Compat.disconnectFromWorld(mc, dropin.mc.compat.Compat.DEFAULT_QUIT_MESSAGE))
                 .step("world closed", WORLD_TICKS, () -> mc.getSingleplayerServer() == null && mc.level == null)
-                .action("title screen", () -> mc.gui.setScreen(new TitleScreen()))
+                .action("title screen", () -> mc.setScreen(new TitleScreen()))
                 .action("copy the world folder to B", () -> {
                     copyTree(mc.getLevelSource().getLevelPath(WORLD_ID), ctx.sharedDir().resolve("world-copy-2"));
                     ctx.writeShared("swap-ready", "ok");
@@ -573,8 +570,8 @@ final class M1Scenarios {
                     return has(mc, Items.EMERALD) && near(mc, -100, -100);
                 })
                 .action("tell A", () -> ctx.writeShared("b-marked", "ok"))
-                .step("A quit", PEER_TICKS, () -> mc.gui.screen() instanceof DisconnectedScreen || (mc.level == null && mc.gui.screen() instanceof TitleScreen))
-                .action("title screen", () -> mc.gui.setScreen(new TitleScreen()))
+                .step("A quit", PEER_TICKS, () -> mc.screen instanceof DisconnectedScreen || (mc.level == null && mc.screen instanceof TitleScreen))
+                .action("title screen", () -> mc.setScreen(new TitleScreen()))
                 .step("A copied the world folder", WORLD_TICKS, () -> ctx.sharedExists("swap-ready"))
                 .action("replace the local copy", () -> {
                     Path local = mc.getLevelSource().getLevelPath(CoopActions.folders(mc).get(state.world.worldId()));

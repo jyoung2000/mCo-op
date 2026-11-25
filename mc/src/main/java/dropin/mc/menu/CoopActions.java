@@ -121,8 +121,8 @@ public final class CoopActions {
         }
         boolean open = summary.isLocked() || isOpenHere(mc, folder);
         ImportCheck.Result check = ImportCheck.check(open, marker.isPresent(), keyKnown,
-                summary.levelVersion().minecraftVersion().version(),
-                SharedConstants.getCurrentVersion().dataVersion().version());
+                summary.levelVersion().minecraftVersion().getVersion(),
+                SharedConstants.getCurrentVersion().getDataVersion().getVersion());
         switch (check) {
             case OPEN:
                 return Outcome.fail("import.open", summary.getLevelName());

@@ -1,7 +1,7 @@
 package dropin.mc.menu;
 
 import dropin.core.world.CoopWorld;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
@@ -62,17 +62,17 @@ public class InviteScreen extends Screen {
 
     @Override
     public void onClose() {
-        this.minecraft.gui.setScreen(parent);
+        this.minecraft.setScreen(parent);
     }
 
     @Override
-    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
-        super.extractRenderState(graphics, mouseX, mouseY, a);
-        graphics.centeredText(this.font, this.title, this.width / 2, 20, -1);
-        graphics.centeredText(this.font, Component.translatable(K + "invite.explain"), this.width / 2, this.height / 2 - 40, -6250336);
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
+        super.render(graphics, mouseX, mouseY, a);
+        graphics.drawCenteredString(this.font, this.title, this.width / 2, 20, -1);
+        graphics.drawCenteredString(this.font, Component.translatable(K + "invite.explain"), this.width / 2, this.height / 2 - 40, -6250336);
         int y = this.height / 2 - 20;
         for (String line : lines()) {
-            graphics.centeredText(this.font, line, this.width / 2, y, -1);
+            graphics.drawCenteredString(this.font, line, this.width / 2, y, -1);
             y += 11;
         }
     }

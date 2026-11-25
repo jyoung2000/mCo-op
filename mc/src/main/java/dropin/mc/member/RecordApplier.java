@@ -6,7 +6,7 @@ import dropin.core.world.CoopWorldStore;
 import dropin.mc.host.ChunkBytes;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
@@ -52,7 +52,7 @@ public final class RecordApplier implements AutoCloseable {
         if (RecordKey.isChunk(key)) {
             RecordKey.Chunk chunk = RecordKey.parseChunk(key);
             CompoundTag tag = ChunkBytes.parse(bytes);
-            storage(chunk.dim(), chunk.kind()).write(new ChunkPos(chunk.cx(), chunk.cz()), tag);
+            ((dropin.mixin.mc.RegionFileStorageAccess) (Object) storage(chunk.dim(), chunk.kind())).dropin$write(new ChunkPos(chunk.cx(), chunk.cz()), tag);
         } else {
             Path file = filePath(key);
             Files.createDirectories(file.getParent());
@@ -70,7 +70,7 @@ public final class RecordApplier implements AutoCloseable {
         ensureOpen();
         if (RecordKey.isChunk(key)) {
             RecordKey.Chunk chunk = RecordKey.parseChunk(key);
-            storage(chunk.dim(), chunk.kind()).write(new ChunkPos(chunk.cx(), chunk.cz()), null);
+            ((dropin.mixin.mc.RegionFileStorageAccess) (Object) storage(chunk.dim(), chunk.kind())).dropin$write(new ChunkPos(chunk.cx(), chunk.cz()), null);
         } else {
             Files.deleteIfExists(filePath(key));
         }
@@ -142,13 +142,13 @@ public final class RecordApplier implements AutoCloseable {
         String id = dim + "|" + kind;
         RegionFileStorage storage = storages.get(id);
         if (storage == null) {
-            ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION, Identifier.parse(dim));
+            ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION, ResourceLocation.parse(dim));
             Path folder = DimensionType.getStorageFolder(dimension, root).resolve(kind).normalize();
             if (!folder.startsWith(root)) {
                 throw new IOException("Refused dimension " + dim);
             }
             Files.createDirectories(folder);
-            storage = new RegionFileStorage(new RegionStorageInfo(levelId, dimension, kind), folder, false);
+            storage = dropin.mixin.mc.RegionFileStorageAccess.dropin$create(new RegionStorageInfo(levelId, dimension, kind), folder, false);
             storages.put(id, storage);
         }
         return storage;
@@ -211,7 +211,7 @@ public final class RecordApplier implements AutoCloseable {
                     ChunkPos pos = new ChunkPos(rx * 32 + (index & 31), rz * 32 + (index >> 5));
                     CompoundTag tag = storage.read(pos);
                     if (tag != null) {
-                        manifest.put(RecordKey.chunk(dim, kind, pos.x(), pos.z()), Manifest.hash(ChunkBytes.canonical(tag)));
+                        manifest.put(RecordKey.chunk(dim, kind, pos.x, pos.z), Manifest.hash(ChunkBytes.canonical(tag)));
                     }
                 }
             }

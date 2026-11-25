@@ -4,7 +4,7 @@ import dropin.core.world.CoopWorld;
 import dropin.mc.coop.CoopWorlds;
 import dropin.mc.coop.HostSession;
 import dropin.tunnel.Config;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
@@ -36,9 +36,9 @@ public class WorldInfoScreen extends Screen {
         int x = this.width / 2 - 100;
         int y = 58;
         if (world != null) {
-            button(K + "button.players", x, y, () -> this.minecraft.gui.setScreen(new PlayersScreen(this, worldId)));
-            button(K + "button.mods", x, y + 24, () -> this.minecraft.gui.setScreen(new ModsScreen(this, worldId)));
-            button(K + "button.invite", x, y + 48, () -> this.minecraft.gui.setScreen(new InviteScreen(this, world)));
+            button(K + "button.players", x, y, () -> this.minecraft.setScreen(new PlayersScreen(this, worldId)));
+            button(K + "button.mods", x, y + 24, () -> this.minecraft.setScreen(new ModsScreen(this, worldId)));
+            button(K + "button.invite", x, y + 48, () -> this.minecraft.setScreen(new InviteScreen(this, world)));
             button(K + "info.remove", x, y + 72, this::confirmRemove);
         }
         this.addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, button -> onClose())
@@ -50,39 +50,39 @@ public class WorldInfoScreen extends Screen {
     }
 
     private void confirmRemove() {
-        this.minecraft.gui.setScreen(new ConfirmScreen(yes -> {
+        this.minecraft.setScreen(new ConfirmScreen(yes -> {
             if (yes) {
                 CoopActions.Outcome outcome = CoopActions.remove(this.minecraft, world);
                 if (outcome.ok()) {
-                    this.minecraft.gui.setScreen(parent);
+                    this.minecraft.setScreen(parent);
                     return;
                 }
                 notice = outcome.message();
             }
-            this.minecraft.gui.setScreen(this);
+            this.minecraft.setScreen(this);
         }, Component.translatable(K + "remove.title", world.name()), Component.translatable(K + "remove.question")));
     }
 
     @Override
     public void onClose() {
-        this.minecraft.gui.setScreen(parent);
+        this.minecraft.setScreen(parent);
     }
 
     @Override
-    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
-        super.extractRenderState(graphics, mouseX, mouseY, a);
-        graphics.centeredText(this.font, world == null ? this.title : Component.literal(world.name()), this.width / 2, 14, -1);
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
+        super.render(graphics, mouseX, mouseY, a);
+        graphics.drawCenteredString(this.font, world == null ? this.title : Component.literal(world.name()), this.width / 2, 14, -1);
         if (world != null) {
             String folder = CoopActions.folders(this.minecraft).get(worldId);
-            graphics.centeredText(this.font, CoopWorldsScreen.statusLine(this.minecraft, world, folder), this.width / 2, 28, 0xFFA0A0A0);
+            graphics.drawCenteredString(this.font, CoopWorldsScreen.statusLine(this.minecraft, world, folder), this.width / 2, 28, 0xFFA0A0A0);
             // The relay address is shown here instead of in chat, and only while this PC hosts the world.
             HostSession session = HostSession.current();
             if (session != null && session.world().worldId().equals(worldId) && !session.announcedAddr().isEmpty()
                     && !Config.INSTANCE.hideDomainInChat.value()) {
-                graphics.centeredText(this.font, Component.translatable(K + "info.address", session.announcedAddr()),
+                graphics.drawCenteredString(this.font, Component.translatable(K + "info.address", session.announcedAddr()),
                         this.width / 2, 40, 0xFF55FF55);
             }
         }
-        graphics.centeredText(this.font, notice, this.width / 2, this.height - 40, -9216);
+        graphics.drawCenteredString(this.font, notice, this.width / 2, this.height - 40, -9216);
     }
 }

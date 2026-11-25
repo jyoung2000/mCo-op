@@ -13,11 +13,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.Supplier;
 
 /**
  * DESIGN 4.5 dirty tracking: region, entities and POI each write through one {@code IOWorker}, and
- * {@code store(ChunkPos, CompoundTag)} calls the Supplier overload, so this is the one choke point.
+ * {@code store(ChunkPos, CompoundTag)} is its only write method in 1.21.1, so this is the one choke point.
  */
 @Mixin(IOWorker.class)
 public abstract class IOWorkerMixin {
@@ -27,9 +26,9 @@ public abstract class IOWorkerMixin {
     }
 
     // After the write was queued, so a checkpoint that reads the chunk back always sees it.
-    @Inject(method = "store(Lnet/minecraft/world/level/ChunkPos;Ljava/util/function/Supplier;)Ljava/util/concurrent/CompletableFuture;",
+    @Inject(method = "store(Lnet/minecraft/world/level/ChunkPos;Lnet/minecraft/nbt/CompoundTag;)Ljava/util/concurrent/CompletableFuture;",
             at = @At("RETURN"))
-    private void dropin$stored(ChunkPos pos, Supplier<CompoundTag> supplier, CallbackInfoReturnable<CompletableFuture<Void>> cir) {
+    private void dropin$stored(ChunkPos pos, CompoundTag tag, CallbackInfoReturnable<CompletableFuture<Void>> cir) {
         ChunkStores.stored((IOWorker) (Object) this, pos);
     }
 

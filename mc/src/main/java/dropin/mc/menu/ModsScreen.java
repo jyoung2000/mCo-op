@@ -7,7 +7,7 @@ import dropin.mc.coop.CoopWorlds;
 import dropin.mc.policy.PolicyActions;
 import dropin.mc.policy.WorldPolicy;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
@@ -125,7 +125,7 @@ public class ModsScreen extends Screen {
 
     @Override
     public void onClose() {
-        this.minecraft.gui.setScreen(parent);
+        this.minecraft.setScreen(parent);
     }
 
     private static Component line(Row row) {
@@ -142,20 +142,20 @@ public class ModsScreen extends Screen {
     }
 
     @Override
-    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
-        super.extractRenderState(graphics, mouseX, mouseY, a);
-        graphics.centeredText(this.font, this.title, this.width / 2, 14, -1);
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
+        super.render(graphics, mouseX, mouseY, a);
+        graphics.drawCenteredString(this.font, this.title, this.width / 2, 14, -1);
         int left = Math.max(10, this.width / 2 - 170);
         if (!known) {
-            graphics.centeredText(this.font, Component.translatable(K + "mods.unknown"), this.width / 2, TOP, -6250336);
+            graphics.drawCenteredString(this.font, Component.translatable(K + "mods.unknown"), this.width / 2, TOP, -6250336);
         } else if (rows.isEmpty()) {
-            graphics.centeredText(this.font, Component.translatable(K + "mods.none"), this.width / 2, TOP, -6250336);
+            graphics.drawCenteredString(this.font, Component.translatable(K + "mods.none"), this.width / 2, TOP, -6250336);
         }
         int perPage = perPage();
         for (int i = 0; i < perPage && page * perPage + i < rows.size(); i++) {
             Row row = rows.get(page * perPage + i);
             int color = row.mark() == Mark.MISSING ? -43691 : row.mark() == Mark.EXTRA ? -9216 : -1;
-            graphics.text(this.font, line(row), left, TOP + i * ROW_HEIGHT, color);
+            graphics.drawString(this.font, line(row), left, TOP + i * ROW_HEIGHT, color);
         }
     }
 }

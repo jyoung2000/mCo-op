@@ -18,8 +18,8 @@ configurations {
 }
 
 dependencies {
-    bundled "io.netty.incubator:netty-incubator-codec-classes-quic:${quic_version}"
-    bundled "folk.sisby:kaleido-config:${kaleido_version}"
-    bundled "link.e4mc:iroh-java:${iroh_java_version}"
-    bundled "dev.dirs:directories:${dirs_version}"
+    bundled("io.netty.incubator:netty-incubator-codec-classes-quic:${quic_version}") { transitive = false }
+    bundled("folk.sisby:kaleido-config:${kaleido_version}") { transitive = false }
+    bundled("link.e4mc:iroh-java:${iroh_java_version}") { transitive = false }
+    bundled("dev.dirs:directories:${dirs_version}") { transitive = false }
 }

@@ -6,7 +6,7 @@ import dropin.mc.DropIn;
 import dropin.mc.mods.ModInstall;
 import dropin.mc.policy.WorldPolicy;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -69,9 +69,9 @@ public class ModConsentScreen extends Screen {
             }
             DropIn.LOGGER.info("The mods of '{}' changed (policy version {}); leaving the session", world.name(), held.version());
             if (mc.level != null) {
-                mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE);
+                dropin.mc.compat.Compat.disconnectFromWorld(mc, dropin.mc.compat.Compat.DEFAULT_QUIT_MESSAGE);
             }
-            mc.gui.setScreen(new ModConsentScreen(() -> mc.gui.setScreen(new CoopWorldsScreen(new net.minecraft.client.gui.screens.TitleScreen())),
+            mc.setScreen(new ModConsentScreen(() -> mc.setScreen(new CoopWorldsScreen(new net.minecraft.client.gui.screens.TitleScreen())),
                     world, held, diff, null, true));
         });
     }
@@ -107,7 +107,7 @@ public class ModConsentScreen extends Screen {
         int third = (width - 8) / 3;
         int y = this.height - 30;
         listButton = this.addRenderableWidget(Button.builder(Component.translatable(K + "mods.consent.show"),
-                button -> this.minecraft.gui.setScreen(new ModsScreen(this, world.worldId()))).bounds(left, y, third, 20).build());
+                button -> this.minecraft.setScreen(new ModsScreen(this, world.worldId()))).bounds(left, y, third, 20).build());
         downloadButton = this.addRenderableWidget(Button.builder(Component.translatable(K + "mods.consent.download"),
                 button -> approve()).bounds(left + third + 4, y, third, 20).build());
         this.addRenderableWidget(Button.builder(CommonComponents.GUI_CANCEL, button -> cancel())
@@ -202,21 +202,21 @@ public class ModConsentScreen extends Screen {
     }
 
     @Override
-    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
-        super.extractRenderState(graphics, mouseX, mouseY, a);
-        graphics.centeredText(this.font, this.title, this.width / 2, 14, -1);
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
+        super.render(graphics, mouseX, mouseY, a);
+        graphics.drawCenteredString(this.font, this.title, this.width / 2, 14, -1);
         int y = 40;
         int wrap = Math.min(340, this.width - 20);
         for (Component line : lines()) {
             for (FormattedCharSequence part : this.font.split(line, wrap)) {
-                graphics.centeredText(this.font, part, this.width / 2, y, -1);
+                graphics.drawCenteredString(this.font, part, this.width / 2, y, -1);
                 y += 11;
             }
             y += 3;
         }
         Component status = state == State.FAILED ? error : progress;
         for (FormattedCharSequence part : this.font.split(status, wrap)) {
-            graphics.centeredText(this.font, part, this.width / 2, y + 6, state == State.FAILED ? -43691 : -9216);
+            graphics.drawCenteredString(this.font, part, this.width / 2, y + 6, state == State.FAILED ? -43691 : -9216);
             y += 11;
         }
     }

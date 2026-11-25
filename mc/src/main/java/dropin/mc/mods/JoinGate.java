@@ -42,7 +42,7 @@ public final class JoinGate {
     }
 
     private static void check(Minecraft mc, CoopWorld world, String address, Screen back) {
-        Runnable onCancel = () -> mc.gui.setScreen(back);
+        Runnable onCancel = () -> mc.setScreen(back);
         WorldPolicy.Held held = WorldPolicy.load(world, PolicyActions.folder(mc, world));
         try (PolicyLink link = PolicyLink.open(mc, world, address)) {
             if (link.await(POLICY_TIMEOUT_MS)) {
@@ -74,7 +74,7 @@ public final class JoinGate {
                     DropIn.LOGGER.info("Co-op world '{}' needs other mods (policy version {}): {} to download, {} to remove",
                             world.name(), held.version(), diff.toDownload().size(), diff.toRemove().size());
                     WorldPolicy.Held shown = held;
-                    mc.execute(() -> mc.gui.setScreen(new ModConsentScreen(onCancel, world, shown, diff, address, false)));
+                    mc.execute(() -> mc.setScreen(new ModConsentScreen(onCancel, world, shown, diff, address, false)));
                     return;
                 }
             } catch (IOException | RuntimeException e) {
@@ -92,6 +92,6 @@ public final class JoinGate {
     }
 
     private static void show(Minecraft mc, Screen screen) {
-        mc.execute(() -> mc.gui.setScreen(screen));
+        mc.execute(() -> mc.setScreen(screen));
     }
 }

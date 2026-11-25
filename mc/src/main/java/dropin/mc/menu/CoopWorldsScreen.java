@@ -9,22 +9,17 @@ import dropin.mc.coop.CoopWorlds;
 import dropin.mc.policy.PolicyActions;
 import dropin.mc.policy.WorldPolicy;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.PlayerFaceExtractor;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.AlertScreen;
 import net.minecraft.client.gui.screens.FaviconTexture;
 import net.minecraft.client.gui.screens.GenericMessageScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.worldselection.CreateWorldScreen;
-import net.minecraft.client.input.InputWithModifiers;
-import net.minecraft.client.input.MouseButtonEvent;
-import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.Identifier;
-import net.minecraft.world.item.component.ResolvableProfile;
+import net.minecraft.resources.ResourceLocation;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -53,8 +48,8 @@ public class CoopWorldsScreen extends Screen {
     private static final int AQUA = 0xFF55FFFF;
     private static final int GREEN = 0xFF55FF55;
     private static final int GRAY = 0xFFA0A0A0;
-    private static final Identifier JOIN_SPRITE = Identifier.withDefaultNamespace("world_list/join");
-    private static final Identifier JOIN_HIGHLIGHTED_SPRITE = Identifier.withDefaultNamespace("world_list/join_highlighted");
+    private static final ResourceLocation JOIN_SPRITE = ResourceLocation.withDefaultNamespace("world_list/join");
+    private static final ResourceLocation JOIN_HIGHLIGHTED_SPRITE = ResourceLocation.withDefaultNamespace("world_list/join_highlighted");
     /** The Discord logo in pixels: '#' Discord blurple, 'o' white. */
     private static final String[] DISCORD_ICON = {
             "...#....#...",
@@ -181,8 +176,8 @@ public class CoopWorldsScreen extends Screen {
         int third = (listWidth - 2 * gap) / 3;
         // Create is the game's own Create World screen, so every option and mod of the player applies.
         top(K + "button.create", left, third, this::createNew);
-        top(K + "button.join", left + third + gap, third, () -> this.minecraft.gui.setScreen(new JoinInviteScreen(this)));
-        top(K + "button.import", left + 2 * (third + gap), third, () -> this.minecraft.gui.setScreen(new ImportScreen(this)));
+        top(K + "button.join", left + third + gap, third, () -> this.minecraft.setScreen(new JoinInviteScreen(this)));
+        top(K + "button.import", left + 2 * (third + gap), third, () -> this.minecraft.setScreen(new ImportScreen(this)));
 
         int perPage = Math.max(1, (this.height - LIST_TOP - 44) / ROW_PITCH);
         int pages = Math.max(1, (worlds.size() + perPage - 1) / perPage);
@@ -195,11 +190,11 @@ public class CoopWorldsScreen extends Screen {
             this.addRenderableWidget(new WorldRow(left, y, listWidth - (owner ? 48 : 24), world));
             int infoX = left + listWidth - (owner ? 44 : 20);
             glyph(infoX, y + 13, K + "tooltip.info", INFO_ICON,
-                    () -> this.minecraft.gui.setScreen(new WorldInfoScreen(this, world.worldId())));
+                    () -> this.minecraft.setScreen(new WorldInfoScreen(this, world.worldId())));
             if (owner) {
                 // DESIGN 4.13, 4.16: admins, save points and the world's folders are the owner's.
                 glyph(left + listWidth - 20, y + 13, K + "tooltip.settings", WRENCH_ICON,
-                        () -> this.minecraft.gui.setScreen(new WorldSettingsScreen(this, world, folderOf(world.worldId()))));
+                        () -> this.minecraft.setScreen(new WorldSettingsScreen(this, world, folderOf(world.worldId()))));
             }
         }
         this.addRenderableWidget(Button.builder(CommonComponents.GUI_BACK, button -> onClose())
@@ -297,7 +292,7 @@ public class CoopWorldsScreen extends Screen {
 
     private void closeIcons() {
         icons.values().forEach(icon -> {
-            if (!icon.isClosed()) {
+            {
                 icon.close();
             }
         });
@@ -351,11 +346,11 @@ public class CoopWorldsScreen extends Screen {
         }
         String folder = folders.get(world.worldId());
         if (folder != null) {
-            this.minecraft.createWorldOpenFlows().openWorld(folder, () -> this.minecraft.gui.setScreen(this));
+            this.minecraft.createWorldOpenFlows().openWorld(folder, () -> this.minecraft.setScreen(this));
             return;
         }
         // First join (DESIGN 4.4): there is nothing to open yet, so it needs a live host.
-        this.minecraft.gui.setScreen(new GenericMessageScreen(Component.translatable(K + "looking")));
+        this.minecraft.setScreen(new GenericMessageScreen(Component.translatable(K + "looking")));
         Thread thread = new Thread(() -> {
             CoopStatus.Status status = CoopStatus.lookup(world);
             this.minecraft.execute(() -> {
@@ -364,7 +359,7 @@ public class CoopWorldsScreen extends Screen {
                     CoopLauncher.remember(world, this.minecraft.getUser().getProfileId().toString(), this.minecraft.getUser().getName());
                     dropin.mc.mods.JoinGate.join(this.minecraft, world, status.address(), this);
                 } else {
-                    this.minecraft.gui.setScreen(new AlertScreen(() -> this.minecraft.gui.setScreen(this), TITLE,
+                    this.minecraft.setScreen(new AlertScreen(() -> this.minecraft.setScreen(this), TITLE,
                             Component.translatable(K + "first_join_needs_host")));
                 }
             });
@@ -375,7 +370,7 @@ public class CoopWorldsScreen extends Screen {
 
     private void createNew() {
         CoopActions.pendingNew = true;
-        CreateWorldScreen.openFresh(this.minecraft, () -> this.minecraft.gui.setScreen(this));
+        CreateWorldScreen.openFresh(this.minecraft, this);
     }
 
     @Override
@@ -383,7 +378,7 @@ public class CoopWorldsScreen extends Screen {
         CoopActions.Outcome outcome = CoopActions.importDropped(this.minecraft, files);
         notice = outcome.message();
         if (outcome.ok()) {
-            this.minecraft.gui.setScreen(new InviteScreen(this, outcome.world()));
+            this.minecraft.setScreen(new InviteScreen(this, outcome.world()));
         } else {
             this.rebuildWidgets();
         }
@@ -397,24 +392,24 @@ public class CoopWorldsScreen extends Screen {
 
     @Override
     public void onClose() {
-        this.minecraft.gui.setScreen(parent);
+        this.minecraft.setScreen(parent);
     }
 
     // ---- drawing ------------------------------------------------------------------------------
 
     @Override
-    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
-        super.extractRenderState(graphics, mouseX, mouseY, a);
-        graphics.centeredText(this.font, this.title, this.width / 2, 9, -1);
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
+        super.render(graphics, mouseX, mouseY, a);
+        graphics.drawCenteredString(this.font, this.title, this.width / 2, 9, -1);
         if (worlds.isEmpty()) {
-            graphics.centeredText(this.font, Component.translatable(K + "empty"), this.width / 2, LIST_TOP + 20, GRAY);
-            graphics.centeredText(this.font, Component.translatable(K + "drop_hint"), this.width / 2, LIST_TOP + 34, GRAY);
+            graphics.drawCenteredString(this.font, Component.translatable(K + "empty"), this.width / 2, LIST_TOP + 20, GRAY);
+            graphics.drawCenteredString(this.font, Component.translatable(K + "drop_hint"), this.width / 2, LIST_TOP + 34, GRAY);
         }
         for (Glyph glyph : glyphs) {
             pixels(graphics, glyph.pixels(), glyph.button().getX() + 5, glyph.button().getY() + 5,
                     glyph.button().isHoveredOrFocused() ? 0xFFFFFFA0 : 0xFFE0E0E0);
         }
-        graphics.centeredText(this.font, notice, this.width / 2, this.height - 38, -9216);
+        graphics.drawCenteredString(this.font, notice, this.width / 2, this.height - 38, -9216);
         credit(graphics);
     }
 
@@ -422,7 +417,7 @@ public class CoopWorldsScreen extends Screen {
      * "made by yessirski" with the Discord logo, in the bottom-left corner; at the top-left when the page arrows
      * would be in the way.
      */
-    private void credit(GuiGraphicsExtractor graphics) {
+    private void credit(GuiGraphics graphics) {
         int iconWidth = DISCORD_ICON[0].length();
         int width = iconWidth + 3 + this.font.width(CREDIT);
         int x = 4;
@@ -438,10 +433,10 @@ public class CoopWorldsScreen extends Screen {
                 }
             }
         }
-        graphics.text(this.font, CREDIT, x + iconWidth + 3, y + 1, GRAY);
+        graphics.drawString(this.font, CREDIT, x + iconWidth + 3, y + 1, GRAY);
     }
 
-    private static void pixels(GuiGraphicsExtractor graphics, String[] rows, int x, int y, int color) {
+    private static void pixels(GuiGraphics graphics, String[] rows, int x, int y, int color) {
         for (int row = 0; row < rows.length; row++) {
             for (int column = 0; column < rows[row].length(); column++) {
                 if (rows[row].charAt(column) == '#') {
@@ -467,7 +462,7 @@ public class CoopWorldsScreen extends Screen {
 
         /** Keyboard: the first press selects, the next one plays. */
         @Override
-        public void onPress(InputWithModifiers input) {
+        public void onPress() {
             if (world.worldId().equals(selected)) {
                 play();
             } else {
@@ -476,55 +471,60 @@ public class CoopWorldsScreen extends Screen {
         }
 
         /** Mouse: a click selects; a click on the preview or a double click plays, as in the game's world list. */
+        private long lastClick;
+
         @Override
-        public void onClick(MouseButtonEvent event, boolean doubleClick) {
+        public void onClick(double mouseX, double mouseY) {
+            long now = net.minecraft.Util.getMillis();
+            boolean doubleClick = now - lastClick < 250L;
+            lastClick = now;
             select(world.worldId());
-            if (doubleClick || event.x() < this.getX() + 4 + ICON) {
+            if (doubleClick || mouseX < this.getX() + 4 + ICON) {
                 play();
             }
         }
 
         @Override
-        protected void extractContents(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
+        protected void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float a) {
             int x = this.getX();
             int y = this.getY();
             boolean chosen = world.worldId().equals(selected);
             if (chosen || this.isHoveredOrFocused()) {
                 graphics.fill(x, y, x + this.width, y + this.height, chosen ? 0xA0000000 : 0x60000000);
-                graphics.outline(x, y, this.width, this.height, chosen ? 0xFFFFFFFF : 0xFF808080);
+                graphics.renderOutline(x, y, this.width, this.height, chosen ? 0xFFFFFFFF : 0xFF808080);
             }
             FaviconTexture icon = icons.get(world.worldId());
-            if (icon != null && !icon.isClosed()) {
-                graphics.blit(RenderPipelines.GUI_TEXTURED, icon.textureLocation(), x + 4, y + 7, 0.0F, 0.0F, ICON, ICON, ICON, ICON);
+            if (icon != null) {
+                graphics.blit(icon.textureLocation(), x + 4, y + 7, 0.0F, 0.0F, ICON, ICON, ICON, ICON);
             }
             if (this.isHovered()) {
                 boolean onIcon = mouseX < x + 4 + ICON;
                 graphics.fill(x + 4, y + 7, x + 4 + ICON, y + 7 + ICON, -1601138544);
-                graphics.blitSprite(RenderPipelines.GUI_TEXTURED, onIcon ? JOIN_HIGHLIGHTED_SPRITE : JOIN_SPRITE, x + 4, y + 7, ICON, ICON);
+                graphics.blitSprite(onIcon ? JOIN_HIGHLIGHTED_SPRITE : JOIN_SPRITE, x + 4, y + 7, ICON, ICON);
             }
             int textX = x + 4 + ICON + 5;
             int right = x + this.width - 4;
             graphics.enableScissor(textX, y, right, y + this.height);
-            graphics.text(font, world.name(), textX, y + 4, -1);
-            graphics.text(font, statusLine(world), textX, y + 15, GRAY);
+            graphics.drawString(font, world.name(), textX, y + 4, -1);
+            graphics.drawString(font, statusLine(world), textX, y + 15, GRAY);
             graphics.disableScissor();
             Role mine = roleOf(world.worldId());
             if (mine != Role.PLAYER) {
                 Component tag = roleName(mine);
                 int tagX = right - font.width(tag);
                 graphics.fill(tagX - 3, y + 3, right + 1, y + 13, 0xC0000000);
-                graphics.text(font, tag, tagX, y + 4, mine == Role.OWNER ? GOLD : AQUA);
+                graphics.drawString(font, tag, tagX, y + 4, mine == Role.OWNER ? GOLD : AQUA);
             }
             heads(graphics, textX + 2, y + 29, right, mouseX, mouseY);
         }
 
         /** Green ring: online. Outer gold ring: the owner; outer aqua ring: an admin. Offline heads are dimmed. */
-        private void heads(GuiGraphicsExtractor graphics, int x, int y, int right, int mouseX, int mouseY) {
+        private void heads(GuiGraphics graphics, int x, int y, int right, int mouseX, int mouseY) {
             List<Head> list = CoopWorldsScreen.this.heads(world.worldId());
             for (int i = 0; i < list.size(); i++) {
                 Head head = list.get(i);
                 if (x + HEAD + 2 > right - (i < list.size() - 1 ? 22 : 0)) {
-                    graphics.text(font, Component.translatable(K + "more", list.size() - i), x, y + 2, GRAY);
+                    graphics.drawString(font, Component.translatable(K + "more", list.size() - i), x, y + 2, GRAY);
                     return;
                 }
                 if (head.role() != Role.PLAYER) {
@@ -536,7 +536,7 @@ public class CoopWorldsScreen extends Screen {
                     graphics.fill(x - 1, y - 1, x + HEAD + 1, y + HEAD + 1, 0xFF000000);
                 }
                 try {
-                    PlayerFaceExtractor.extractRenderState(graphics, ResolvableProfile.createUnresolved(UUID.fromString(head.uuid())), x, y, HEAD);
+                    Faces.draw(graphics, UUID.fromString(head.uuid()), x, y, HEAD);
                 } catch (IllegalArgumentException e) {
                     graphics.fill(x, y, x + HEAD, y + HEAD, 0xFF555555);
                 }
@@ -544,8 +544,8 @@ public class CoopWorldsScreen extends Screen {
                     graphics.fill(x, y, x + HEAD, y + HEAD, 0x70000000);
                 }
                 if (mouseX >= x - 2 && mouseX < x + HEAD + 2 && mouseY >= y - 2 && mouseY < y + HEAD + 2) {
-                    graphics.setTooltipForNextFrame(font, Component.literal(head.name()).append(" — ").append(roleName(head.role()))
-                            .append(", ").append(Component.translatable(K + (head.online() ? "head.online" : "head.offline"))), mouseX, mouseY);
+                    CoopWorldsScreen.this.setTooltipForNextRenderPass(Component.literal(head.name()).append(" — ").append(roleName(head.role()))
+                            .append(", ").append(Component.translatable(K + (head.online() ? "head.online" : "head.offline"))));
                 }
                 x += HEAD + 6;
             }

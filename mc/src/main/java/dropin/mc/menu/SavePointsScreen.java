@@ -4,7 +4,7 @@ import dropin.core.savepoint.SavePoints;
 import dropin.core.savepoint.SavePoints.Point;
 import dropin.core.world.CoopWorld;
 import dropin.mc.savepoint.SavePointActions;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.ConfirmScreen;
@@ -133,8 +133,8 @@ public class SavePointsScreen extends Screen {
     }
 
     private void confirm(String key, java.util.function.Consumer<Point> action) {
-        selectedPoint().ifPresent(point -> this.minecraft.gui.setScreen(new ConfirmScreen(yes -> {
-            this.minecraft.gui.setScreen(this);
+        selectedPoint().ifPresent(point -> this.minecraft.setScreen(new ConfirmScreen(yes -> {
+            this.minecraft.setScreen(this);
             if (yes) {
                 action.accept(point);
             }
@@ -204,16 +204,16 @@ public class SavePointsScreen extends Screen {
 
     @Override
     public void onClose() {
-        this.minecraft.gui.setScreen(parent);
+        this.minecraft.setScreen(parent);
     }
 
     @Override
-    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
-        super.extractRenderState(graphics, mouseX, mouseY, a);
-        graphics.centeredText(this.font, this.title, this.width / 2, 14, -1);
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
+        super.render(graphics, mouseX, mouseY, a);
+        graphics.drawCenteredString(this.font, this.title, this.width / 2, 14, -1);
         if (points.isEmpty()) {
-            graphics.centeredText(this.font, Component.translatable(K + "empty"), this.width / 2, LIST_TOP + 20, -6250336);
+            graphics.drawCenteredString(this.font, Component.translatable(K + "empty"), this.width / 2, LIST_TOP + 20, -6250336);
         }
-        graphics.centeredText(this.font, notice, this.width / 2, this.height - 88, -9216);
+        graphics.drawCenteredString(this.font, notice, this.width / 2, this.height - 88, -9216);
     }
 }

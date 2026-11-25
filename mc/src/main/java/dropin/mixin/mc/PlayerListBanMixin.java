@@ -1,9 +1,9 @@
 package dropin.mixin.mc;
 
 import dropin.mc.host.HostSync;
+import com.mojang.authlib.GameProfile;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.players.NameAndId;
 import net.minecraft.server.players.PlayerList;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -22,8 +22,8 @@ public class PlayerListBanMixin {
     private MinecraftServer server;
 
     @Inject(method = "canPlayerLogin", at = @At("HEAD"), cancellable = true)
-    private void dropin$policyBan(SocketAddress address, NameAndId nameAndId, CallbackInfoReturnable<Component> cir) {
-        Component refusal = HostSync.banMessage(this.server, nameAndId.id());
+    private void dropin$policyBan(SocketAddress address, GameProfile profile, CallbackInfoReturnable<Component> cir) {
+        Component refusal = HostSync.banMessage(this.server, profile.getId());
         if (refusal != null) {
             cir.setReturnValue(refusal);
         }

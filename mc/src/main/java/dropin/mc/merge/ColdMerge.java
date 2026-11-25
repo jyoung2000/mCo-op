@@ -106,7 +106,7 @@ public final class ColdMerge {
                 mc.execute(() -> {
                     if (mc.player != null) {
                         for (Report report : done) {
-                            mc.gui.hud.getChat().addClientSystemMessage(report.message());
+                            mc.gui.getChat().addMessage(report.message());
                             shown++;
                         }
                     }
@@ -328,7 +328,7 @@ public final class ColdMerge {
         if (Files.isRegularFile(level)) {
             try {
                 CompoundTag root = NbtIo.readCompressed(level, NbtAccounter.unlimitedHeap());
-                root.getCompoundOrEmpty("Data").putString("LevelName", display);
+                root.getCompound("Data").putString("LevelName", display);
                 NbtIo.writeCompressed(root, level);
             } catch (IOException | RuntimeException e) {
                 DropIn.LOGGER.warn("Could not name the separate world '{}'; it keeps the name of '{}'", folderName, world.name(), e);
