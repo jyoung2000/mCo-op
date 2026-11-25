@@ -24,7 +24,7 @@ public class ServerLoginAuthenticatorMixin {
     @Shadow(remap = false) @Final
     NetHandlerLoginServer this$0;
 
-    @Redirect(method = "run", at = @At(value = "INVOKE", target = "Lnet/minecraft/util/CryptManager;getServerIdHash(Ljava/lang/String;Ljava/security/PublicKey;Ljavax/crypto/SecretKey;)[B"), remap = false)
+    @Redirect(method = "run", at = @At(value = "INVOKE", target = "Lnet/minecraft/util/CryptManager;getServerIdHash(Ljava/lang/String;Ljava/security/PublicKey;Ljavax/crypto/SecretKey;)[B", remap = true), remap = false)
     private byte[] digestData(String string, PublicKey publicKey, SecretKey secretKey) {
         if (this$0.networkManager.getRemoteAddress() instanceof DialtoneAddress) {
             return ((DialtoneConnectionExtensions) this$0.networkManager).e4mc$exportKeyingMaterial("EXPERIMENTAL mojang authentication".getBytes(StandardCharsets.UTF_8), new byte[0], 20);

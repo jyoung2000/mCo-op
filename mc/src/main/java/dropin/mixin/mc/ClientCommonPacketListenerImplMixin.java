@@ -24,17 +24,16 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  */
 @Mixin(NetHandlerPlayClient.class)
 public abstract class ClientCommonPacketListenerImplMixin {
-    @Shadow
-    private Minecraft client;
 
     @Unique
     private String dropin$address;
 
     @Inject(method = "onDisconnect", at = @At("HEAD"))
     private void dropin$remember(ITextComponent reason, CallbackInfo ci) {
-        ServerData data = this.client.getCurrentServerData();
+        Minecraft client = Minecraft.getMinecraft();
+        ServerData data = client.getCurrentServerData();
         // A connection to this game's own integrated server is never a lost co-op host.
-        this.dropin$address = this.client.getIntegratedServer() != null || data == null ? null : data.serverIP;
+        this.dropin$address = client.getIntegratedServer() != null || data == null ? null : data.serverIP;
     }
 
     @Inject(method = "onDisconnect", at = @At("RETURN"))
@@ -44,9 +43,10 @@ public abstract class ClientCommonPacketListenerImplMixin {
         if (address == null) {
             return;
         }
-        GuiScreen replaced = CrashFailover.lost(this.client, address, this.client.currentScreen);
+        Minecraft client = Minecraft.getMinecraft();
+        GuiScreen replaced = CrashFailover.lost(client, address, client.currentScreen);
         if (replaced != null) {
-            this.client.displayGuiScreen(replaced);
+            client.displayGuiScreen(replaced);
         }
     }
 }

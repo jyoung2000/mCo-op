@@ -51,6 +51,62 @@ Report ($extra.Count -eq 0) 'no-other-mixin-config' ('in jar: ' + ($mixinConfigs
 $config = if ($declared.Count -eq 1) { Read-Entry $declared[0] } else { '' }
 $refmap = [regex]::Match($config, '"refmap"\s*:\s*"([^"]+)"').Groups[1].Value
 Report ($refmap -ne '' -and ($names -contains $refmap)) 'refmap' ("refmap '$refmap' named by the config and in the jar")
+# Mixins must survive reobfuscation. CleanroomGradle's reobfJar renames only through the class hierarchy and passes the
+# mixin processor no SRG output, and Cleanroom's run-time remapper chain (CleanMixService) only maps notch -> SRG, so a
+# remapped @Shadow/@Overwrite member, or a mixin calling one of its own members by an MCP name, keeps a name that the
+# SRG-named game does not have. Members of the target are reached by casting to it (renamed by reobfJar) or through
+# @Accessor/@Invoker (refmap). This fails on any remapped @Shadow/@Overwrite and on any MCP name a mixin class
+# references on itself.
+$mcp2srg = Join-Path $root 'cleanroom\build\cleanroom_gradle\userdev\mcp2srg.tsrg'
+$javap = if ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME 'bin\javap.exe'))) { Join-Path $env:JAVA_HOME 'bin\javap.exe' } else { 'javap' }
+if (-not (Test-Path $mcp2srg)) {
+    Report $false 'mixin-reobf' "missing $mcp2srg (run the build first)"
+} else {
+    $mcpNames = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($line in [System.IO.File]::ReadLines($mcp2srg)) {
+        if (-not $line.StartsWith("`t")) { continue }
+        $p = $line.Trim() -split '\s+'
+        if ($p.Count -eq 3 -and $p[0] -ne $p[2]) { [void]$mcpNames.Add($p[0]) }
+        elseif ($p.Count -eq 2 -and $p[0] -ne $p[1]) { [void]$mcpNames.Add($p[0]) }
+    }
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('dropin-jarcheck-' + [guid]::NewGuid())
+    $mixinClasses = @($names | Where-Object { $_.StartsWith('dropin/mixin/') -and $_.EndsWith('.class') })
+    $z = [System.IO.Compression.ZipFile]::OpenRead($jars[0].FullName)
+    try {
+        foreach ($entry in $mixinClasses) {
+            $target = Join-Path $tmp $entry
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($z.GetEntry($entry), $target)
+        }
+    } finally { $z.Dispose() }
+    $problems = @()
+    try {
+        foreach ($entry in $mixinClasses) {
+            $internal = $entry.Substring(0, $entry.Length - 6)
+            $lines = @(& $javap -v -p -c -cp $tmp ($internal.Replace('/', '.')))
+            $member = ''
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+                $l = $lines[$i]
+                if ($l -match '^  \S.*[;)]$' -or $l -match '^  \S.*\) throws .*;$') { $member = $l.Trim() }
+                if ($l -match '^\s+org\.spongepowered\.asm\.mixin\.(Shadow|Overwrite)(\(|$)') {
+                    $kind = $Matches[1]
+                    $annotationArgs = ''
+                    for ($j = $i + 1; $j -lt $lines.Count -and $lines[$j] -notmatch '^\s+\d+: #' -and $lines[$j] -notmatch '^\s*$' -and $lines[$j] -notmatch '^  \S'; $j++) { $annotationArgs += $lines[$j] }
+                    if ($annotationArgs -notmatch 'remap=false') { $problems += "$internal @$kind $member" }
+                }
+                foreach ($m in [regex]::Matches($l, '// (?:Field|Method|InterfaceMethod) (?:([\w$/]+)\.)?([\w$]+):')) {
+                    $owner = $m.Groups[1].Value
+                    if (($owner -eq '' -or $owner -eq $internal) -and $mcpNames.Contains($m.Groups[2].Value)) {
+                        $problems += "$internal references its own MCP-named member $($m.Groups[2].Value)"
+                    }
+                }
+            }
+        }
+    } finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    $problems = @($problems | Select-Object -Unique)
+    Report ($problems.Count -eq 0) 'mixin-reobf' ("{0} mixin classes; {1}" -f $mixinClasses.Count, $(if ($problems.Count -eq 0) { 'no remapped @Shadow/@Overwrite, no MCP self-references' } else { $problems -join '; ' }))
+}
+
 Report ($names -contains 'assets/dropin_coop/lang/en_us.lang' -and $names -contains 'assets/dropin/lang/en_us.lang') 'legacy-lang' 'assets/*/lang/en_us.lang'
 
 foreach ($prefix in @('dropin/mc/selftest/')) {

@@ -63,6 +63,8 @@ public final class StepRunner {
         try {
             done = current.step.tick();
         } catch (Throwable t) {
+            // The whole trace goes to the game log (stderr); result.json keeps the one-line reason.
+            t.printStackTrace();
             return fail(current, "step '" + current.name + "' threw " + t);
         }
         if (done) {

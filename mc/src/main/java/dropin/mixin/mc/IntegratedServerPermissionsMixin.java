@@ -23,14 +23,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  */
 @Mixin(EntityPlayerMP.class)
 public abstract class IntegratedServerPermissionsMixin {
-    @Shadow
-    @Final
-    public MinecraftServer server;
 
     @Inject(method = "canUseCommand", cancellable = true, at = @At(value = "INVOKE",
             target = "Lnet/minecraft/server/management/PlayerList;canSendCommands(Lcom/mojang/authlib/GameProfile;)Z"))
     private void dropin$policyPermissions(int level, String command, CallbackInfoReturnable<Boolean> cir) {
-        Integer set = HostSync.permissions(this.server, ((EntityPlayerMP) (Object) this).getUniqueID());
+        Integer set = HostSync.permissions(((EntityPlayerMP) (Object) this).server, ((EntityPlayerMP) (Object) this).getUniqueID());
         if (set != null) {
             cir.setReturnValue(set >= level);
         }

@@ -29,23 +29,26 @@ The design is in `docs/DESIGN.md`. It is the source of truth. If the code and th
 
 ## Commands
 
+1.12.2 port (branch port/1.12.2): one loader, Cleanroom 0.7.16-alpha via CleanroomGradle 0.22.0.
+
 ```
-./gradlew build                 # full build + unit tests, one jar: build/libs/MCo-op-<version>.jar
+./gradlew build                 # full build + unit tests, one jar: build/libs/MCo-op-<version>+mc1.12.2.jar
 ./gradlew :core:test            # core unit tests, no game needed (add --tests "dropin.core.<pkg>.*" for one package)
-./gradlew :mc:test              # unit tests of the self-test step runner
-./gradlew :fabric:runClient     # dev client (Fabric), game folder fabric/runs/client
-./gradlew :neoforge:runClient   # dev client (NeoForge), game folder neoforge/runs/client
+./gradlew :cleanroom:test       # unit tests of the self-test step runner
+./gradlew :cleanroom:runClient  # dev client, game folder cleanroom/run/client
 powershell -ExecutionPolicy Bypass -File scripts/selftest.ps1 -Suite m0          # multi-client self-test for one milestone
 powershell -ExecutionPolicy Bypass -File scripts/selftest.ps1 -Suite all         # every suite up to the current milestone
-powershell -ExecutionPolicy Bypass -File scripts/selftest.ps1 -Suite m0 -Online  # opt-in online smoke (real e4mc relay)
 powershell -ExecutionPolicy Bypass -File scripts/jarcheck.ps1                    # gate jar check on build/libs (after a build)
 ```
 
-Gradle must run on JDK 25 (`JAVA_HOME`); `scripts/selftest.ps1` finds one by itself. Self-test logs: `build/selftest-logs/`.
-Suites: `m0`, `m1`, `m2`, `m2b`, `m3` (`handoff-3` starts three clients: slots a, b, c), `m3b` (save points), `m4` (crash failover: the script kills game processes; stale-copy warning; `second-host`: a second host appears, the first closes its world), `m5` (divergence and merge: `merge-clean`, `merge-conflict`, `merge-too-old`), `ui` (admins, who is online, pvp, realtime, `join-code`: `/coop code` and `/coop code share`, `motion`: minecart and mob movement on three screens), `integrity` (every copy equals the host's, three clients; `sync-extras`: mod folders of the world root, direct rate cap, fastest player takes over); `perf` is a measurement, not part of `all`. `-Suite integrity -Online` and `-Suite m2 -Online -Only first-download-root-match.pack` run with 15 real Fabric mods downloaded from Modrinth into `build/testmods/pack/` (`DROPIN_PACK_SKIP=name,name` leaves mods out). The m2b scenarios use test mods built by `:<loader>:testmodJars` (`build/testmods/`); `-Suite m2b -Online`
-downloads one small real mod from Modrinth into `build/testmods/online/`. Add `-Only <scenario id>` to run a single scenario.
-Modules: `core` (pure Java), `tunnel` (upstream e4mc), `mc` (Minecraft-facing, plus the dev-only `selftest` source set),
-`fabric` and `neoforge` (entry points and run tasks). The loader modules compile the sources of the other three;
-the root `modJar` task merges them into the one jar.
+Gradle must run on JDK 25 (`JAVA_HOME`); Cleanroom itself runs on Java 25. `scripts/selftest.ps1` finds a JDK by itself.
+Self-test logs: `build/selftest-logs/`; game folders `run/a`, `run/b`, `run/c` (`:cleanroom:runClientA/B/C`).
+Suites are those of the 26.x/1.21.1 ports (m0 ... m5, m3b, ui, integrity, perf); every role runs on Cleanroom, and the
+variants that differed only by loader (`lan-join.fabric-neoforge` ...) run once, named `...cleanroom-cleanroom`.
+m2b test mods: `:cleanroom:testmodJars` writes `build/testmods/cleanroom/`. The `-Online` suites still name Fabric mods
+of later versions and cannot run on 1.12.2 until a 1.12.2 Forge mod list replaces them.
+Modules: `core` (pure Java), and `cleanroom`, which compiles the sources of `tunnel/` (upstream e4mc) and `mc/`
+(Minecraft-facing, plus the dev-only `selftest` source set). The root `modJar` task shades the reobfuscated cleanroom
+jar, core and the bundled libraries into the one jar; netty-quic is nested (dropin/libs/netty-quic.jar).
 
 Keep this section current.

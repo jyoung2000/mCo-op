@@ -24,13 +24,10 @@ import java.net.SocketAddress;
  */
 @Mixin(PlayerList.class)
 public class PlayerListBanMixin {
-    @Shadow
-    @Final
-    private MinecraftServer server;
 
     @Inject(method = "allowUserToConnect", at = @At("HEAD"), cancellable = true)
     private void dropin$policyBan(SocketAddress address, GameProfile profile, CallbackInfoReturnable<String> cir) {
-        ITextComponent refusal = HostSync.banMessage(this.server, profile.getId());
+        ITextComponent refusal = HostSync.banMessage(((PlayerList) (Object) this).getServerInstance(), profile.getId());
         if (refusal != null) {
             cir.setReturnValue(refusal instanceof TextComponentTranslation translation && translation.getFormatArgs().length == 0
                     ? translation.getKey() : refusal.getUnformattedText());

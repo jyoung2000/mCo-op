@@ -7,8 +7,10 @@
   "mixins": [
     "mc.AnvilChunkLoaderAccess",
     "mc.AnvilChunkLoaderMixin",
+    "mc.LoginSuccessOrderMixin",
     "mc.MinecraftServerStopMixin",
     "mc.NetworkSystemAccess",
+    "mc.PlayerListAccess",
     "mc.PlayerListBanMixin",
     "mc.PlayerListOwnDataMixin",
     "mc.RegionFileAccess",
@@ -18,7 +20,9 @@
     "tunnel.ServerboundKeyPacketMixin",
     "tunnel.ServerConnectionListenerMixin",
     "tunnel.ServerLoginAuthenticatorMixin",
-    "tunnel.ServerLoginPacketListenerImplMixin"
+    "tunnel.ServerLoginPacketListenerImplMixin",
+    "tunnel.UserListEntryAccess",
+    "tunnel.UserListAccess"
   ],
   "injectors": {
     "defaultRequire": 1
@@ -37,6 +41,7 @@
     "mc.dev.IntegratedServerOfflineLanMixin",
     "mc.dev.MinecraftTickMixin",
     "tunnel.ClientHandshakePacketListenerImplMixin",
+    "tunnel.NetHandlerLoginClientAccess",
     "tunnel.PlayerListMixin"
   ],
   "plugin": "dropin.mc.DropInMixinPlugin"

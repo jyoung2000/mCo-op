@@ -19,20 +19,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  */
 @Mixin(PlayerList.class)
 public abstract class PlayerListPermissionsMixin {
-    @Shadow
-    @Final
-    private MinecraftServer server;
 
-    @Shadow
-    private void sendPlayerPermissionLevel(EntityPlayerMP player, int level) {
-        throw new AssertionError();
-    }
 
     @Inject(method = "updatePermissionLevel", at = @At("HEAD"), cancellable = true)
     private void dropin$policyLevel(EntityPlayerMP player, CallbackInfo ci) {
-        Integer set = HostSync.permissions(this.server, player.getUniqueID());
+        Integer set = HostSync.permissions(((PlayerList) (Object) this).getServerInstance(), player.getUniqueID());
         if (set != null) {
-            sendPlayerPermissionLevel(player, set);
+            ((PlayerListAccess) this).dropin$sendPlayerPermissionLevel(player, set);
             ci.cancel();
         }
     }

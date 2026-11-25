@@ -33,12 +33,12 @@ import java.net.InetAddress;
 @Mixin(NetworkManager.class)
 public abstract class ConnectionMixin implements DialtoneConnectionExtensions {
 
-    @Shadow private Channel channel;
     @Unique
     private static DialtoneAddress e4mc$smuggledDialtoneAddress = null;
 
     @Override
     public byte[] e4mc$exportKeyingMaterial(byte[] label, byte[] context, int length) {
+        Channel channel = ((NetworkManager) (Object) this).channel();
         if (channel instanceof DialtoneChannel dialtoneChannel) {
             return dialtoneChannel.exportKeyingMaterial(label, context, length);
         }
@@ -47,6 +47,7 @@ public abstract class ConnectionMixin implements DialtoneConnectionExtensions {
 
     @Override
     public String e4mc$connInfo() {
+        Channel channel = ((NetworkManager) (Object) this).channel();
         if (channel instanceof DialtoneChannel dialtoneChannel) {
             return dialtoneChannel.debugInfo();
         }
@@ -90,6 +91,7 @@ public abstract class ConnectionMixin implements DialtoneConnectionExtensions {
 
     @Inject(method = "enableEncryption", at = @At("HEAD"), cancellable = true)
     private void killDoubleEncryption(SecretKey key, CallbackInfo ci) {
+        Channel channel = ((NetworkManager) (Object) this).channel();
         if (channel instanceof DialtoneChannel) {
             ci.cancel();
         }

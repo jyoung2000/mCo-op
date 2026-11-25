@@ -188,6 +188,14 @@ def selftestProps = { ->
 }
 def selftestOutput = sourceSets.selftest.output
 
+// Dev runs only: the mod's classes are on the JVM class path there, and Foundation's LaunchClassLoader delegates to its
+// parent first, so they would load in the JDK's app class loader, apart from Minecraft and Forge (FML's side "not yet
+// set", the mixin plugin not an IMixinConfigPlugin). Cleanroom's own template sets this for every run task
+// ("TODO: fundamental Foundation issue"); LoadsAllClassLoader loads child-first. Production jars are not on the class path.
+tasks.withType(JavaExec).configureEach {
+    systemProperty 'foundation.loadsall', 'true'
+}
+
 cleanroom {
     runs {
         client {

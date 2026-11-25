@@ -4,6 +4,7 @@ import com.mojang.authlib.GameProfile;
 import dropin.tunnel.Config;
 import dropin.tunnel.E4mcClient;
 import dropin.tunnel.Mirror;
+import dropin.tunnel.UserListReload;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.management.PlayerList;
 import net.minecraft.server.management.UserListBans;
@@ -21,21 +22,19 @@ import java.net.SocketAddress;
 /** 1.12.2 port: same behaviour as upstream, with 1.12.2's names. */
 @Mixin(PlayerList.class)
 public abstract class PlayerListMixin {
-    @Shadow public abstract UserListBans getBannedPlayers();
-    @Shadow public abstract UserListWhitelist getWhitelistedPlayers();
-    @Shadow public abstract MinecraftServer getServerInstance();
 
     @Inject(method = "<init>", at = @At("TAIL"))
     void injectListLoads(CallbackInfo ci) {
         if (Config.INSTANCE.restoreDedicatedCommands.value()) {
-            Mirror.setUsingWhitelist(getServerInstance(), (PlayerList) (Object) this, Config.INSTANCE.useWhiteList.value());
+            PlayerList self = (PlayerList) (Object) this;
+            Mirror.setUsingWhitelist(self.getServerInstance(), self, Config.INSTANCE.useWhiteList.value());
             try {
-                this.getBannedPlayers().readSavedFile();
+                UserListReload.readSavedFile(self.getBannedPlayers());
             } catch (IOException e) {
                 E4mcClient.LOGGER.warn("Failed to load user banlist: ", e);
             }
             try {
-                this.getWhitelistedPlayers().readSavedFile();
+                UserListReload.readSavedFile(self.getWhitelistedPlayers());
             } catch (IOException e) {
                 E4mcClient.LOGGER.warn("Failed to load whitelist: ", e);
             }
@@ -44,7 +43,7 @@ public abstract class PlayerListMixin {
 
     @Inject(method = "allowUserToConnect", at = @At("HEAD"), cancellable = true)
     public void allowOwnerLogin(SocketAddress socketAddress, GameProfile gameProfile, CallbackInfoReturnable<String> cir) {
-        if (Mirror.isSingleplayerOwnerObj(getServerInstance(), gameProfile)) {
+        if (Mirror.isSingleplayerOwnerObj(((PlayerList) (Object) this).getServerInstance(), gameProfile)) {
             cir.setReturnValue(null);
         }
     }

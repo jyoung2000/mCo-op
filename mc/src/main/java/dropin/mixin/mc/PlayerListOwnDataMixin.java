@@ -25,14 +25,11 @@ import org.spongepowered.asm.mixin.injection.At;
  */
 @Mixin(PlayerList.class)
 public class PlayerListOwnDataMixin {
-    @Shadow
-    @Final
-    private MinecraftServer server;
 
     // Forge's getPlayerNBT (the dimension a joining player is put in, NetworkDispatcher) makes the same choice.
     @WrapOperation(method = {"readPlayerDataFromFile", "getPlayerNBT"}, at = @At(value = "INVOKE",
             target = "Lnet/minecraft/world/storage/WorldInfo;getPlayerNBTTagCompound()Lnet/minecraft/nbt/NBTTagCompound;"))
     private NBTTagCompound dropin$ownPlayerData(WorldInfo info, Operation<NBTTagCompound> original) {
-        return CoopWorlds.isCoopServer(this.server) ? null : original.call(info);
+        return CoopWorlds.isCoopServer(((PlayerList) (Object) this).getServerInstance()) ? null : original.call(info);
     }
 }

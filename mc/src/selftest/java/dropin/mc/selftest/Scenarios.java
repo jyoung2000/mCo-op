@@ -261,7 +261,12 @@ final class Scenarios {
         return new StepRunner()
                 .step("main menu", STARTUP_TICKS, () -> atMainMenu(mc))
                 .step("host port open", STARTUP_TICKS, new PortProbe(ctx.port())::tick)
-                .action("send status ping", () -> pinger.ping(data))
+                .action("send status ping", () -> {
+                    // As GuiMultiplayer.initGui does before any ping: Forge keeps the "modinfo" of status replies in maps
+                    // that only setupServerList creates (captureAdditionalData throws on a null map otherwise).
+                    net.minecraftforge.fml.client.FMLClientHandler.instance().setupServerList();
+                    pinger.ping(data);
+                })
                 .step("status response", SHORT_TICKS, () -> {
                     pinger.pingPendingNetworks();
                     return onlinePlayers(data) != null;

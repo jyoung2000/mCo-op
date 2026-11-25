@@ -24,12 +24,10 @@ import java.util.Arrays;
  */
 @Mixin(NetHandlerLoginServer.class)
 public class ServerLoginPacketListenerImplMixin {
-    @Shadow @Final
-    public NetworkManager networkManager;
 
     @ModifyArg(method = "processLoginStart", at = @At(value = "INVOKE", target = "Lnet/minecraft/network/login/server/SPacketEncryptionRequest;<init>(Ljava/lang/String;Ljava/security/PublicKey;[B)V"), index = 1)
     private PublicKey killDoubleEncryption(PublicKey publicKey) {
-        if (networkManager.getRemoteAddress() instanceof DialtoneAddress) {
+        if (((NetHandlerLoginServer) (Object) this).networkManager.getRemoteAddress() instanceof DialtoneAddress) {
             return null;
         }
         return publicKey;
@@ -37,7 +35,7 @@ public class ServerLoginPacketListenerImplMixin {
 
     @Redirect(method = "processEncryptionResponse", at = @At(value = "INVOKE", target = "Lnet/minecraft/network/login/client/CPacketEncryptionResponse;getVerifyToken(Ljava/security/PrivateKey;)[B"))
     private byte[] patchGetNonce(CPacketEncryptionResponse instance, PrivateKey privateKey) {
-        if (networkManager.getRemoteAddress() instanceof DialtoneAddress) {
+        if (((NetHandlerLoginServer) (Object) this).networkManager.getRemoteAddress() instanceof DialtoneAddress) {
             return new byte[0];
         }
         return instance.getVerifyToken(privateKey);
@@ -45,7 +43,7 @@ public class ServerLoginPacketListenerImplMixin {
 
     @Redirect(method = "processEncryptionResponse", at = @At(value = "INVOKE", target = "Ljava/util/Arrays;equals([B[B)Z", remap = false))
     private boolean isNonceEqual(byte[] lhs, byte[] rhs) {
-        if (networkManager.getRemoteAddress() instanceof DialtoneAddress) {
+        if (((NetHandlerLoginServer) (Object) this).networkManager.getRemoteAddress() instanceof DialtoneAddress) {
             return true;
         }
         return Arrays.equals(lhs, rhs);
@@ -53,7 +51,7 @@ public class ServerLoginPacketListenerImplMixin {
 
     @Redirect(method = "processEncryptionResponse", at = @At(value = "INVOKE", target = "Lnet/minecraft/network/login/client/CPacketEncryptionResponse;getSecretKey(Ljava/security/PrivateKey;)Ljavax/crypto/SecretKey;"))
     private SecretKey getSecretKey(CPacketEncryptionResponse instance, PrivateKey privateKey) {
-        if (networkManager.getRemoteAddress() instanceof DialtoneAddress) {
+        if (((NetHandlerLoginServer) (Object) this).networkManager.getRemoteAddress() instanceof DialtoneAddress) {
             return null;
         }
         return instance.getSecretKey(privateKey);
