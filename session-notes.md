@@ -771,3 +771,58 @@ ManifestTest: the null list loses "DIM2" and gains DIMx, DIM02, DIM0, DIM+2, DIM
 Core `ChunkContent` (merge content hash): 1.12.2 chunks keep `LastUpdate`/`InhabitedTime` inside the root's `Level`
 compound (pre-1.18 layout), so the strip now also covers that compound. New test
 `contentHashOfA1122ChunkLeavesOutTheFieldsInLevel`; the 1.18+ test is unchanged.
+
+### Signatures checked in the 1.12.2 sources (cleanroom-ref/src-mc, src-forge) beyond the porters' notes
+The porters' quoted signatures are in the shared notes folder (`port-1.12.2-signatures-{host,net,menus1,menus2,logic}.md`).
+These were found while making the self-tests run:
+- `UserList.java:153`: `@SideOnly(Side.SERVER) public void readSavedFile() throws FileNotFoundException, IOException`.
+  FML strips it on the client, so the integrated server threw NoSuchMethodError. `UserListReload` copies the body and
+  reads `gson`, `saveFile`, `values` and `getObjectKey(K)` through `UserListAccess`, plus `UserListEntry.getValue()`
+  (package-private) through `UserListEntryAccess`. A scan of every `@SideOnly(Side.SERVER)` method name against
+  mc/ and tunnel/ found no other call.
+- `NetHandlerLoginServer.java:87` `public void tryAcceptPlayer()` sends `new SPacketLoginSuccess(...)` and then calls
+  `FMLNetworkHandler.fmlServerHandshake(...)`. Forge's `NetworkDispatcher.serverInitiateHandshake()` calls
+  `this.manager.setConnectionState(EnumConnectionState.PLAY)` on the server thread. `NetworkManager.dispatchPacket` (:178),
+  off the event loop, only queues the write with the state it read. Result: SPacketLoginSuccess was encoded in PLAY
+  ("Can't serialize unregistered packet", 4 of 5 LAN joins; a probe on `NettyPacketEncoder.encode` logged
+  `SPacketLoginSuccess state=PLAY`). Fix: `LoginSuccessOrderMixin` writes it on the event loop and waits (up to 5 s).
+- `FMLClientHandler.setupServerList()` creates `extraServerListData`, and `GuiMultiplayer` calls it before any ping;
+  `captureAdditionalData` throws NPE without it, while the status packet is decoded, so every status ping before the
+  server list was opened failed: the self-test pingers and the mod's own `StatusPing` (drop-in saw "nobody is hosting"
+  and both players hosted). StatusPing now calls `setupServerList()` when `extraServerListData` is null
+  (`FMLClientHandlerAccess`, remap = false); the self-test pingers call it as GuiMultiplayer does.
+- `NetworkManager.channel()` (:380, public). `PlayerList.getServerInstance()`, `getBannedPlayers()`,
+  `getWhitelistedPlayers()` are public, and so are `EntityPlayerMP.server` and `NetHandlerLoginServer.networkManager`.
+
+### Reobfuscation of mixins (production only, not covered by the dev self-tests)
+CleanroomGradle 0.22.0 passes the mixin processor only `-AreobfTsrgFile`, `-AoutRefMapFile`, `-AmappingTypes=tsrg` and
+`-AdefaultObfuscationEnv=searge` (UserDevTasks$RefmapArguments), with no SRG output. Its reobfJar renames only through
+the class hierarchy. At run time `CleanMixService` adds only `CleanroomRemapper(FMLDeobfuscatingRemapper.INSTANCE)`
+(notch -> SRG) to the remapper chain. So a remapped `@Shadow` keeps its MCP name in the jar (javap of the reobf jar
+showed `getBannedPlayers`, `saveFile` and `channel` unrenamed), and the SRG-named game has no such member.
+Every `@Shadow` was replaced: public members by casts to the target (reobfJar renames those calls), private ones
+by `@Accessor`/`@Invoker` (refmap). `ServerLoginAuthenticatorMixin`'s redirect had `remap = false` on the whole
+injector, which also kept its `CryptManager.getServerIdHash` target out of the refmap; its `@At` now has `remap = true`.
+jarcheck has a new check, `mixin-reobf`: it fails on any remapped `@Shadow`/`@Overwrite`, and on any MCP name a mixin
+class references on itself. With a shadow put back on purpose it failed:
+`FAIL mixin-reobf ... PlayerListBanMixin @Shadow private ... server; ... references its own MCP-named member server`.
+Not verified: the production jar was never run in a production Cleanroom instance, because no such install exists
+on this machine.
+
+### Dev runs
+`foundation.loadsall=true` on every JavaExec (cleanroom/build.gradle). Without it, Foundation's class loader delegates
+to its parent first, the mod's classes (which are on the JVM class path in dev) load in the app loader, and boot fails
+with "Side not yet set" and with DropInMixinPlugin not being an IMixinConfigPlugin. Cleanroom's own template sets the
+same flag. Gradle must run on JDK 25: `JAVA_HOME="C:\Program Files\Microsoft\jdk-25.0.5.21-hotspot"`.
+
+### m1 fixes (2026-11-27)
+- `CoopLauncher.join` ran `new GuiMainMenu()` on the launch thread; its constructor calls `GLContext.getCapabilities()`
+  (GuiMainMenu.java:128) and threw "No GLCapabilities instance set for the current thread", so B never connected.
+  `JoinGate.join(..., back)` now takes null for "the title screen" and makes it on the client thread.
+- Dev UUIDs: CleanroomGradle's RunMinecraft passes a random `--uuid` per launch unless its `UUID` property is set
+  (`Property<String> getUUID()`). A dev offline server names the player by `UUID.nameUUIDFromBytes("OfflinePlayer:<name>")`,
+  so a dev player had one identity as host and another as member (host-swap-own-inventory: "B hosts without B's item").
+  runClientA/B/C now set the offline UUID of DevA/DevB/DevC, as the Fabric/NeoForge dev launchers do. Dev only.
+- host-swap-own-inventory "replace the local copy": the step deleted B's copy while the member sync still held a region
+  file (Windows refuses). It now calls `SyncClient.stopAndWait(worldId, 15 s)` first, as CoopLauncher does before
+  opening a copy, and fails if the sync does not let go. The assertions are unchanged.

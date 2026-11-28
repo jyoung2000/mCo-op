@@ -113,6 +113,16 @@ public final class SelfTestBootstrap {
                     String where = current == null ? "before the first client tick" : "in step '" + current.currentStepName() + "'";
                     writeResult(false, "watchdog: no result after " + timeoutSec + "s, stuck " + where,
                             current == null ? List.of() : current.log());
+                    // Where every thread was, so a hang can be told from a slow step (the log is all that is left).
+                    StringBuilder dump = new StringBuilder("watchdog thread dump:\n");
+                    Thread.getAllStackTraces().forEach((thread, stack) -> {
+                        dump.append('"').append(thread.getName()).append("\" ").append(thread.getState()).append('\n');
+                        for (StackTraceElement element : stack) {
+                            dump.append("    at ").append(element).append('\n');
+                        }
+                    });
+                    System.err.println(dump);
+                    System.err.flush();
                     Runtime.getRuntime().halt(2);
                 }
             }, "dropin-selftest-watchdog");

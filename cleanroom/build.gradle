@@ -209,6 +209,10 @@ cleanroom {
                 inherit = 'client'
                 configure {
                     username = "Dev${slot.toUpperCase()}".toString()
+                    // The offline-mode UUID of that name, which is what a dev (offline) server gives the player. Without
+                    // it RunMinecraft passes a new random --uuid each launch, so a dev player would have one identity as
+                    // host and another as member (the Fabric and NeoForge dev launchers derive it from the name too).
+                    getUUID().set(java.util.UUID.nameUUIDFromBytes("OfflinePlayer:Dev${slot.toUpperCase()}".getBytes('UTF-8')).toString())
                     workingDir = rootProject.file("run/${slot}")
                     dependsOn 'selftestClasses'
                     classpath selftestOutput

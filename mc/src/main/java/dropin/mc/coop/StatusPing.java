@@ -83,6 +83,11 @@ public final class StatusPing {
         }
 
         static Request send(String address) throws java.io.IOException {
+            // Forge decodes the reply into maps that only the server list screen creates (FMLClientHandlerAccess).
+            net.minecraftforge.fml.client.FMLClientHandler fml = net.minecraftforge.fml.client.FMLClientHandler.instance();
+            if (((dropin.mixin.mc.FMLClientHandlerAccess) (Object) fml).dropin$extraServerListData() == null) {
+                fml.setupServerList();
+            }
             ServerAddress parsed = ServerAddress.fromString(address);
             NetworkManager connection = NetworkManager.createNetworkManagerAndConnect(InetAddress.getByName(parsed.getIP()),
                     parsed.getPort(), Minecraft.getMinecraft().gameSettings.isUsingNativeTransport());

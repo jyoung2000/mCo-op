@@ -29,6 +29,7 @@
   },
   "client": [
     "mc.ClientCommonPacketListenerImplMixin",
+    "mc.FMLClientHandlerAccess",
     "mc.IntegratedServerLanPortMixin",
     "mc.IntegratedServerNewCoopMixin",
     "mc.IntegratedServerPermissionsMixin",

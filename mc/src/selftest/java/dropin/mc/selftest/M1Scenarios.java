@@ -597,6 +597,11 @@ final class M1Scenarios {
                 .action("title screen", () -> mc.displayGuiScreen(new GuiMainMenu()))
                 .step("A copied the world folder", WORLD_TICKS, () -> ctx.sharedExists("swap-ready"))
                 .action("replace the local copy", () -> {
+                    // 1.12.2 port: as CoopLauncher does before it opens a copy, wait until the member sync (which
+                    // writes this folder through its own RegionFile handles) has let go of it; Windows refuses to
+                    // delete an open region file. A sync that never lets go fails the step.
+                    require(dropin.mc.member.SyncClient.stopAndWait(state.world.worldId(), 15_000),
+                            "the member sync still holds the local copy 15 s after the host closed");
                     Path local = CoopActions.levelPath(mc, CoopActions.folders(mc).get(state.world.worldId()));
                     deleteTree(local);
                     copyTree(ctx.sharedDir().resolve("world-copy-2"), local);

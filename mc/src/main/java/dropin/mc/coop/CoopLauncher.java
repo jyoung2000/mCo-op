@@ -387,7 +387,8 @@ public final class CoopLauncher {
      * step meanwhile (DESIGN 4.4, 4.7).
      */
     public static void join(Minecraft mc, CoopWorld world, String address) {
-        dropin.mc.mods.JoinGate.join(mc, world, address, new GuiMainMenu());
+        // Runs on the launch thread: GuiMainMenu needs the GL context, so JoinGate makes it on the client thread (null).
+        dropin.mc.mods.JoinGate.join(mc, world, address, null);
     }
 
     public static void remember(CoopWorld world, String uuid, String name) {

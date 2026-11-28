@@ -33,7 +33,8 @@ public final class JoinGate {
     /**
      * Any thread.
      *
-     * @param back the screen a failed connection or a cancelled consent returns to
+     * @param back the screen a failed connection or a cancelled consent returns to; null for the title screen, which
+     *             is made on the client thread when it is shown (1.12.2: GuiMainMenu needs the GL context)
      */
     public static void join(Minecraft mc, CoopWorld world, String address, GuiScreen back) {
         Thread thread = new Thread(() -> check(mc, world, address, back), "dropin-coop-join-gate");
@@ -47,7 +48,7 @@ public final class JoinGate {
     }
 
     private static void check(Minecraft mc, CoopWorld world, String address, GuiScreen back) {
-        Runnable onCancel = () -> mc.displayGuiScreen(back);
+        Runnable onCancel = () -> mc.displayGuiScreen(back != null ? back : new net.minecraft.client.gui.GuiMainMenu());
         WorldPolicy.Held held = WorldPolicy.load(world, PolicyActions.folder(mc, world));
         try (PolicyLink link = PolicyLink.open(mc, world, address)) {
             if (link.await(POLICY_TIMEOUT_MS)) {
@@ -91,7 +92,8 @@ public final class JoinGate {
         mc.addScheduledTask(() -> {
             // 1.12.2 port: 26.x ConnectScreen.startConnecting. GuiConnecting connects from its constructor
             // (after loadWorld(null)) and returns to `back` if the connection fails.
-            mc.displayGuiScreen(new GuiConnecting(back, mc, new ServerData(world.name(), address, false)));
+            GuiScreen parent = back != null ? back : new net.minecraft.client.gui.GuiMainMenu();
+            mc.displayGuiScreen(new GuiConnecting(parent, mc, new ServerData(world.name(), address, false)));
             SyncClient.start(mc, world, address);
         });
     }
