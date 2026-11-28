@@ -33,6 +33,7 @@
     "mc.IntegratedServerLanPortMixin",
     "mc.IntegratedServerNewCoopMixin",
     "mc.IntegratedServerPermissionsMixin",
+    "mc.IntegratedServerShutdownMixin",
     "mc.PauseScreenMixin",
     "mc.PlayerListPermissionsMixin",
     "mc.SelectWorldScreenMixin",

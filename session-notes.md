@@ -826,3 +826,57 @@ same flag. Gradle must run on JDK 25: `JAVA_HOME="C:\Program Files\Microsoft\jdk
 - host-swap-own-inventory "replace the local copy": the step deleted B's copy while the member sync still held a region
   file (Windows refuses). It now calls `SyncClient.stopAndWait(worldId, 15 s)` first, as CoopLauncher does before
   opening a copy, and fails if the sync does not let go. The assertions are unchanged.
+
+### ui and integrity fixes (2026-11-27)
+- motion (ui): `EntityTracker.setViewDistance(d)` tracks entities within `(d-1)*16` on 1.12.2 (26.x: d*16), so with the
+  self-test's render distance 2 the cart was outside the host's tracking range. motionA sets render distance 3.
+  Then the cart was 0.306 blocks off at rest on every screen, the host's own too: it was spawned already moving
+  (motionX 0.3), and vanilla 1.12.2 sent a spawn position one tick older than the base of its relative moves; the offset
+  stays until the forced teleport (EntityTrackerEntry, every 400 ticks). The cart is now placed at rest where
+  `ItemMinecart` puts it (y + 0.0625) and pushed on the first server tick of "follow it on the server". No tolerance or
+  assertion changed. Result: at rest 0.0002 blocks from the server on all three screens.
+- integrity: a 1.12.2 flat world does not spawn near 0,0. `WorldServer.createSpawnPosition` (WorldServer.java:758) walks at
+  random until `WorldProvider.canCoordinateBeSpawn` (WorldProvider.java:66) finds grass via `getGroundAboveSeaLevel`, which
+  starts at sea level 63, above flat ground (seen: spawn 1652 4 719). The stand-in for `/forceload add 16 16` now runs
+  loads chunk 1,1 (`provideChunk`), because 1.12.2 `setblock` refuses an unloaded chunk ("Cannot place block outside
+  of the world"). The `isSpawnChunk(1, 1)` check is kept. The spawn itself: see "origin spawn" below.
+- Origin spawn (all scenarios): the same random spawn left every player near 1652 4 720, out of sight of the blocks the
+  scenarios place near 0,0 (crash-failover: "C sees the block" timed out; the block at 0 251 0 was 100 chunks away).
+  `Scenarios.createFlatWorld` now cancels Forge's `WorldEvent.CreateSpawnPosition` (`ForgeEventFactory.onCreateWorldSpawn`,
+  WorldServer.java:764) for the world it creates and sets the spawn to 0 4 0, where the 26.x flat world spawns.
+  Self-test source set only.
+- Peaceful (all scenarios): `createFlatWorld` set `gameSettings.difficulty = PEACEFUL`, but a new 1.12.2 `WorldInfo`
+  starts at `DEFAULT_DIFFICULTY` (normal, WorldInfo.java:220) and the options' difficulty is used only when the world's
+  is null (IntegratedServer.java:109); every scenario world was on normal (level.dat Difficulty 2). With the origin
+  spawn, slimes from slime chunks near 0,0 changed chunks on both sides of an offline session: merge-clean kept
+  c.-3.-2 and c.2.-1 (each held a minecraft:slime). The same CreateSpawnPosition hook now sets the world peaceful, as
+  the 26.x flat preset world is; level.dat Difficulty 0, merge-clean PASS.
+- Quit hang (mod fix, all versions of the quit path): "Save and Quit" sends the disconnect packet, then
+  `Minecraft.loadWorld(null)` calls `IntegratedServer.initiateShutdown`, which queues a task with `addScheduledTask` and
+  blocks on `Futures.getUnchecked` (IntegratedServer.java:323-335). If the server thread has drained its task queue
+  and then handles the disconnect in the same tick ("Stopping singleplayer server as player logged out"), its loop ends
+  and the task never runs: the client waits forever. jstack of three hung games: no "Server thread", the client thread
+  parked at IntegratedServer.initiateShutdown <- Minecraft.loadWorld <- Compat.disconnectFromWorld. Seen in remove,
+  integrity, vanilla-through-sniffer, path-policy, savepoint-files, merge-clean and merge-conflict.
+  `IntegratedServerShutdownMixin` (client list) redirects that `getUnchecked`: it waits for the task while the server
+  has not stopped (`isServerStopped()`), and gives it up once it has (the task logs out the other players; stopping
+  the server saves and removes every player anyway). After it, all seven scenarios passed.
+- sync-extras (owner approved option (a) 2026-11-27): the cap check summed the record bytes to B and C and bounded any one
+  second at 2 x 256 KB. On 1.12.2 B catches up on new checkpoints while C does its first download, both at the cap
+  (DESIGN 5, flow control: "Host-side rate cap per connection"; `HostSync.pace` keeps its debt per session), so the sum
+  reached 554,118 and 528,707 bytes. The check is now per connection with the same bound (each connection <= 2 x cap in
+  any one second), plus a new lower bound: the busiest connection must exceed 0.5 x cap in some second, so a run where
+  nothing is measured cannot pass. The per-connection count comes from `HostSync.devRecordBytesByMember()`, which returns
+  an empty map outside a development environment and is called only by ExtrasScenarios. Result: PASS, peaks 403,065 and
+  403,065 bytes (cap 262,144, bound 524,288). 26.3 and 1.21.1 still use the summed check; they passed it because B was
+  idle during C's download (26.3 peak 276,607). Follow-up, not part of this port.
+
+### State (2026-11-28)
+Done on port/1.12.2: build + unit tests, jarcheck (all PASS, incl. mixin-reobf), `selftest.ps1 -Suite all` 52/52 PASS.
+VERIFICATION.md has the 1.12.2 section. Files touched since 9c395a5: HostSync.java (devRecordBytesByMember),
+IntegratedServerShutdownMixin.java (new) + dropin.mixins.json, Scenarios.java (OriginSpawn: spawn 0,4,0, peaceful),
+MotionScenarios.java, IntegrityScenarios.java, ExtrasScenarios.java, docs/VERIFICATION.md, this file.
+Not run: -Online suites (need a 1.12.2 Forge mod list), perf, two PCs, production Cleanroom install.
+Follow-ups: 26.3 and 1.21.1 sync-extras still sum both connections (passes only while B is idle); the hang watcher
+(`jstack` of a game whose log is silent 120 s) lived in a scratch script, worth a `-HangDump` switch in selftest.ps1;
+the integrity watchdog (1200 s) outlives the orchestrator's kill, so a hang there leaves no dump.

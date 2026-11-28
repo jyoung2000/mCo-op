@@ -52,6 +52,8 @@ final class ExtrasScenarios {
         Minecraft mc = ctx.mc();
         State state = new State();
         List<long[]> sent = new ArrayList<>();
+        List<Long> sentAt = new ArrayList<>();
+        List<Map<String, Long>> perMember = new ArrayList<>();
         // Both members count as "over the internet" here, so the cap applies although they are on this PC.
         return hostA(ctx, state, Map.of("dropin.dev.forcePath", "internet", "dropin.dev.directRateKBps", Integer.toString(CAP_KBPS)), 450)
                 .action("a mod's files appear in the world's root", () -> {
@@ -64,25 +66,45 @@ final class ExtrasScenarios {
                 .step("B and C have the world and the mod's files", 6 * PEER_TICKS, () -> {
                     HostSync sync = HostSync.current();
                     if (sync != null) {
-                        sent.add(new long[]{System.currentTimeMillis(), sync.recordBytes()});
+                        long now = System.currentTimeMillis();
+                        sent.add(new long[]{now, sync.recordBytes()});
+                        sentAt.add(now);
+                        perMember.add(sync.devRecordBytesByMember());
                     }
                     return players(mc) == 3 && ctx.sharedExists("b-ready") && ctx.sharedExists("c-ready");
                 })
                 .action("the downloads stayed under the cap", () -> {
                     long total = sent.get(sent.size() - 1)[1] - sent.get(0)[1];
-                    long peak = 0;
-                    int from = 0;
-                    for (int to = 0; to < sent.size(); to++) {
-                        while (sent.get(to)[0] - sent.get(from)[0] > 1000) {
-                            from++;
-                        }
-                        peak = Math.max(peak, sent.get(to)[1] - sent.get(from)[1]);
-                    }
-                    DropIn.LOGGER.info("Self-test sync-extras: {} bytes of records went to B and C; the most in any one second was {} "
-                            + "bytes, with a cap of {} KB/s per connection", total, peak, CAP_KBPS);
+                    DropIn.LOGGER.info("Self-test sync-extras: {} bytes of records went to B and C", total);
                     require(total >= 768 * 1024, "only " + total + " bytes were sent: too little to see a cap");
-                    // One second may hold a little more than the cap: a record that was already on its way.
-                    require(peak <= 2L * CAP_KBPS * 1024, "in one second " + peak + " bytes were sent, the cap is " + CAP_KBPS + " KB/s");
+                    // 1.12.2 port (owner approved 2026-11-27): the cap is per connection (DESIGN 5, flow control), so each
+                    // connection is checked on its own. The summed check of 26.3/1.21.1 passed there only because B was
+                    // idle while C downloaded; here B catches up on new checkpoints meanwhile, both at the cap.
+                    Map<String, Long> peaks = new java.util.TreeMap<>();
+                    for (String member : perMember.get(perMember.size() - 1).keySet()) {
+                        long peak = 0;
+                        int from = 0;
+                        for (int to = 0; to < perMember.size(); to++) {
+                            while (sentAt.get(to) - sentAt.get(from) > 1000) {
+                                from++;
+                            }
+                            long before = perMember.get(from).getOrDefault(member, 0L);
+                            long after = perMember.get(to).getOrDefault(member, 0L);
+                            peak = Math.max(peak, after - before);
+                        }
+                        peaks.put(member, peak);
+                    }
+                    DropIn.LOGGER.info("Self-test sync-extras: the most in any one second, per connection: {} bytes, with a cap of "
+                            + "{} KB/s per connection", peaks, CAP_KBPS);
+                    require(peaks.size() == 2, "expected the connections of B and C, saw " + peaks.keySet());
+                    for (Map.Entry<String, Long> peak : peaks.entrySet()) {
+                        // One second may hold a little more than the cap: a record that was already on its way.
+                        require(peak.getValue() <= 2L * CAP_KBPS * 1024, "in one second " + peak.getValue() + " bytes were sent to "
+                                + peak.getKey() + ", the cap is " + CAP_KBPS + " KB/s");
+                    }
+                    // A broken measurement (nothing sent per connection) must not pass: the busiest connection came near the cap.
+                    long top = peaks.values().stream().mapToLong(Long::longValue).max().orElse(0);
+                    require(top > CAP_KBPS * 1024 / 2, "no connection got near the cap in any one second (most: " + top + " bytes)");
                 })
                 .step("both upload speeds are measured and both copies are complete", 2 * PEER_TICKS, () -> {
                     HostSync sync = HostSync.current();

@@ -182,6 +182,9 @@ final class IntegrityScenarios {
     private static void play1(MinecraftServer server) {
         WorldServer level = server.getWorld(0);
         // 1.12.2 port: stands in for "/forceload add 16 16": spawn chunks are never unloaded in the overworld.
+        // The scenarios' flat world spawns at 0,4,0 (Scenarios.OriginSpawn), so chunk 1,1 is a spawn chunk.
+        // /forceload also loads the chunk; 1.12.2 setblock refuses an unloaded one ("Cannot place block outside of the world").
+        level.getChunkProvider().provideChunk(1, 1);
         require(level.isSpawnChunk(1, 1), "the watched chunk 1,1 is not a spawn chunk of this world, so 1.12.2 may unload it "
                 + "(there is no /forceload); spawn is at " + level.getSpawnPoint());
         run(server, "setblock 20 100 20 minecraft:diamond_ore");

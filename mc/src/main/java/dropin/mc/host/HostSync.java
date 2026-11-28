@@ -1009,6 +1009,21 @@ public final class HostSync implements SyncServerSession.Host {
         return bytes;
     }
 
+    /**
+     * Development only (the sync-extras self-test checks the per-connection rate cap with it): bytes of world records
+     * sent to each connected member, by player UUID. Empty outside a development environment; nothing in the mod reads it.
+     */
+    public Map<String, Long> devRecordBytesByMember() {
+        if (!DropIn.switches().devEnvironment()) {
+            return Map.of();
+        }
+        Map<String, Long> bytes = new HashMap<>();
+        for (Peer peer : peers) {
+            bytes.merge(peer.session().playerUuid(), peer.session().recordBytes(), Long::sum);
+        }
+        return bytes;
+    }
+
     /** RECORD frames sent to members in this host session. */
     public long recordFrames() {
         long frames = closedRecordFrames.get();

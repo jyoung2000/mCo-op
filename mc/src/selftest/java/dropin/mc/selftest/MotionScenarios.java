@@ -274,6 +274,10 @@ final class MotionScenarios {
                         if (entity == null) {
                             return null;
                         }
+                        if (ticks[0] == 0 && entity instanceof EntityMinecartEmpty cart) {
+                            // The push, one server tick after the cart appeared at rest (see the minecart phase).
+                            cart.motionX = 0.3;
+                        }
                         if (freeze && entity instanceof EntityCow cow) {
                             cow.setNoAI(true);
                             cow.motionX = 0.0;
@@ -337,6 +341,11 @@ final class MotionScenarios {
         StepRunner runner = hostA(ctx, state, Map.of(), 0)
                 .step("B and C dropped in", 2 * PEER_TICKS, () -> players(mc) == 3 && ctx.sharedExists("b-ready") && ctx.sharedExists("c-ready"))
                 .action("everybody stands at the track", () -> {
+                    // 1.12.2 port: EntityTracker.setViewDistance(d) tracks things up to (d - 1) * 16 blocks (26.x and
+                    // 1.21.1: d * 16), and the integrated server takes d from the host's render distance every tick
+                    // (IntegratedServer.tick). The self-tests run at 2, which would track only 16 blocks: the cart ends
+                    // about 29 blocks from A. 3 tracks 32, what 1.21.1 tracked at 2. Not saved to options.txt.
+                    mc.gameSettings.renderDistanceChunks = 3;
                     IntegratedServer server = mc.getIntegratedServer();
                     String b = ctx.readShared("b-ready").trim();
                     String c = ctx.readShared("c-ready").trim();
@@ -370,11 +379,11 @@ final class MotionScenarios {
 
         // 1. A minecart: pushed once, driven by powered rails, braked at the end.
         runner = phase(runner, ctx, CART, 10.0, 0, (server, level, host) -> {
-            // 1.21.1 EntityType.spawn puts it at the middle of the block's floor.
-            EntityMinecartEmpty cart = new EntityMinecartEmpty(level, 1.5, Y, 4.5);
-            cart.motionX = 0.3;
-            cart.motionY = 0.0;
-            cart.motionZ = 0.0;
+            // 1.12.2 port: placed at rest where ItemMinecart puts a cart on a flat rail (y + 0.0625), and pushed by the
+            // first "follow it on the server" tick. Spawned already moving, vanilla 1.12.2 sent every screen a start
+            // that was one tick older than the base of its relative moves: the cart stayed (-0.3, -0.0625, 0) off on
+            // every screen, the host's own too, until a forced teleport (EntityTrackerEntry, every 400 ticks).
+            EntityMinecartEmpty cart = new EntityMinecartEmpty(level, 1.5, Y + 0.0625, 4.5);
             require(level.spawnEntity(cart), "the minecart was not spawned");
             return cart;
         });

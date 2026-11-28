@@ -569,3 +569,56 @@ the game's Java (`m2b`), member packets during the last checkpoint (`m2 resume`)
 
 Not run: `-Online` suites (real e4mc relay, Modrinth mod pack), `perf`; two real PCs; a production jar in a normal 1.21.1
 launcher (only the dev runs and the jar check).
+
+## Port to Minecraft 1.12.2 (Cleanroom, branch `port/1.12.2`): 2026-11-28
+
+Jar: `build/libs/MCo-op-0.1.0+mc1.12.2.jar` (one jar; Cleanroom 0.7.16-alpha, CleanroomGradle 0.22.0, Java 25).
+
+| Check | Result |
+|---|---|
+| `./gradlew build` (JDK 25) | exit 0, BUILD SUCCESSFUL |
+| unit tests (in the build) | core 213 tests, 0 failures, 1 skipped (`RealRelayOnlineTest`, online opt-in); cleanroom 6 tests, 0 failures |
+| `scripts/jarcheck.ps1` | exit 0, every check PASS, including the new `mixin-reobf` (35 mixin classes: no remapped `@Shadow`/`@Overwrite`, no MCP-named self-references) |
+| `selftest.ps1 -Suite all` | 52 of 52 PASS (m0, m1, m2, m2b, m3, m3b, ui, integrity, m4, m5); every role on Cleanroom, the cross-loader variants run once as `...cleanroom-cleanroom` |
+
+1.12.2-only differences, each with its own check:
+- Forge dimension folders: dimension N of a mod lives in `DIM<N>` (`WorldProvider.getSaveFolder()`), so `RecordKey` maps
+  `forge:dim<N>` to and from `DIM<N>` (N other than -1, 0, 1), with `DIM*/forcedchunks.dat` allowed. Owner-approved
+  ManifestTest change on this branch only: the null list loses "DIM2" and gains DIMx, DIM02, DIM0, DIM+2, DIM, dim2 and
+  DIM99999999999; new tests `legacyForgeDimensionFolders` and `contentHashOfA1122ChunkLeavesOutTheFieldsInLevel`. PASS.
+- Looser effect check in `integrity`: 1.12.2 has no infinite effects. The scenario gives each player an effect of
+  1,000,000 seconds, and the fingerprint prints any duration over 1,000,000 ticks as "long" where 26.3/1.21.1 compare
+  `duration -1`. Effect id and amplifier are compared exactly. PASS.
+- `sync-extras` rate cap, per connection (owner-approved 2026-11-27): DESIGN, flow control, caps each connection, and
+  on 1.12.2 B catches up on new checkpoints while C does its first download, so the summed check of 26.3/1.21.1
+  (any one second of B+C <= 2 x cap) failed at 554,118 and 528,707 bytes with both connections at the cap. The check
+  now applies the same bound to each connection, and adds that the busiest connection must exceed 0.5 x cap in some
+  second. Final run: 21,340,139 bytes to B and C; per-connection peaks 270,672 and 265,659 bytes (cap 262,144, bound
+  524,288). The count comes from `HostSync.devRecordBytesByMember()`, empty outside a development environment and
+  used only by the self-test. 26.3 and 1.21.1 still use the summed check; they passed it because B was idle during C's
+  download (26.3 peak 276,607). Follow-up, not part of this port.
+
+Found and fixed by the suites on the way (details in `session-notes.md`):
+- Mod code:
+  - mixins that survive reobfuscation (no `@Shadow` by MCP name; accessors and casts instead);
+  - `UserList.readSavedFile` is server-only (reload over accessors);
+  - SPacketLoginSuccess sent after FML switched to PLAY (now sent on the event loop);
+  - Forge status pings (`setupServerList`);
+  - the title screen built off the GL thread (`JoinGate`);
+  - a vanilla 1.12.2 quit hang. `IntegratedServer.initiateShutdown` waited for a task the stopped server would never
+    run (thread dumps; seen in seven scenarios). It is now waited for only while the server runs:
+    `IntegratedServerShutdownMixin`.
+- Self-test harness:
+  - offline dev UUIDs per slot;
+  - host-swap waits for the member sync to let go;
+  - motion (render distance 3 for the `(d-1)*16` tracking range; the cart placed at rest and then pushed: at rest
+    0.0002 blocks from the server on every screen);
+  - the flat world now spawns at 0,4,0 and is peaceful, as the 26.x flat world. 1.12.2's random spawn walk left it
+    near 1652,4,720, and a new WorldInfo is normal difficulty whatever the options say.
+
+Not run:
+- `-Online` suites: they name Fabric mods of later versions; a 1.12.2 Forge mod list must replace them first;
+- `perf`;
+- two real PCs;
+- the production jar in a real Cleanroom install (none on this machine). Only the dev runs and the jar check, whose
+  `mixin-reobf` check covers the reobfuscation risk statically.

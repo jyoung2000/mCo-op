@@ -332,7 +332,43 @@ final class Scenarios {
     static void createFlatWorld(Minecraft mc) {
         mc.gameSettings.difficulty = EnumDifficulty.PEACEFUL;
         WorldSettings settings = new WorldSettings(SEED, GameType.CREATIVE, false, false, WorldType.FLAT).enableCommands();
+        OriginSpawn.INSTANCE.expect(settings);
         mc.launchIntegratedServer(WORLD_ID, WORLD_ID, settings);
+    }
+
+    /**
+     * 1.12.2 port: the flat world spawns at 0,4,0, where the 26.x flat world spawns and where the scenarios build.
+     * Left alone, 1.12.2's WorldServer.createSpawnPosition walks at random until WorldProvider.canCoordinateBeSpawn
+     * finds grass via getGroundAboveSeaLevel, which starts at sea level 63, above flat ground: the spawn ended up near
+     * 1652 4 720, out of sight of every block the scenarios place near the origin. Forge's CreateSpawnPosition event,
+     * cancelled, skips that walk (WorldServer.java:764). Only the world created with these settings is touched.
+     * The same hook makes the world peaceful, as the 26.x flat preset world is: a new 1.12.2 WorldInfo starts at
+     * DEFAULT_DIFFICULTY (normal, WorldInfo.java:220), and the game options' difficulty set above is used only when
+     * that is null (IntegratedServer.java:109), so the scenarios' worlds were on normal and spawned slimes.
+     */
+    static final class OriginSpawn {
+        static final OriginSpawn INSTANCE = new OriginSpawn();
+        private volatile WorldSettings expected;
+        private boolean registered;
+
+        synchronized void expect(WorldSettings settings) {
+            expected = settings;
+            if (!registered) {
+                net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(this);
+                registered = true;
+            }
+        }
+
+        @net.minecraftforge.fml.common.eventhandler.SubscribeEvent
+        public void onCreateSpawn(net.minecraftforge.event.world.WorldEvent.CreateSpawnPosition event) {
+            if (event.getSettings() != expected || event.getWorld().provider.getDimension() != 0) {
+                return;
+            }
+            event.getWorld().getWorldInfo().setSpawn(new BlockPos(0, 4, 0));
+            event.getWorld().getWorldInfo().setDifficulty(EnumDifficulty.PEACEFUL);
+            event.setCanceled(true);
+            expected = null;
+        }
     }
 
     /**
